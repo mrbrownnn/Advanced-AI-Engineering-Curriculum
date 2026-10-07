@@ -1,0 +1,1 @@
+{"seed": 3, "n": 150, "rate_per_s": 6, "n_in_mean": 1500, "n_in_sd": 1500, "n_out_mean": 100, "n_out_sd": 60, "chunks": [32, 128, 256, 512, 1024, "infinity"]}

@@ -1,0 +1,1 @@
+{"seed": 5, "n": 80, "block_tokens": 16, "pool_blocks": [400, 800, 2000], "modes": ["recompute", "swap"], "victims": ["newest", "largest"], "admission": ["greedy", "reserve"]}

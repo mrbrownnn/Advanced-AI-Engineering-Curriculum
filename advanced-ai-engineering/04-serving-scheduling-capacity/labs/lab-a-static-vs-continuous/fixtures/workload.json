@@ -1,0 +1,1 @@
+{"seed": 41, "n": 240, "batch_sizes": [4, 8, 16, 32], "generation_sd": [10, 100, 500], "slo_ttft_ms": 5000, "slo_tpot_ms": 50}
