@@ -1,0 +1,16 @@
+seed: 0
+warmup: 2
+iterations: 8
+configs:
+  - {vocab: 97, d: 32, m: 48, n_q: 4, n_kv: 4, layers: 2, bias: false, tie_embeddings: false, adapter_rank: 0}
+  - {vocab: 97, d: 32, m: 48, n_q: 4, n_kv: 1, layers: 2, bias: true, tie_embeddings: true, adapter_rank: 4}
+workloads:
+  - {batch: 1, sequence: 8}
+  - {batch: 2, sequence: 32}
+mla_pinned_config:
+  revision: 4461458f186c35188585855f28f77af5661ad489
+  num_hidden_layers: 60
+  kv_lora_rank: 512
+  qk_rope_head_dim: 64
+  num_key_value_heads: 128
+  v_head_dim: 128

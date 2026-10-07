@@ -1,0 +1,13 @@
+seed: 0
+d: 64
+batch_sizes: [1, 4]
+sequence_lengths: [8, 64]
+query_heads: 8
+kv_heads: [8, 4, 1]
+dtype: float32
+warmup: 3
+iterations: 20
+rope:
+  offsets: [1, 17]
+  shifts: [0, 1000, 1000000]
+  dtypes: [float32, float64]

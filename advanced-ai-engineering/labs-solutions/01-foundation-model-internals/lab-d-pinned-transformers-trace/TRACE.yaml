@@ -1,0 +1,13 @@
+repository: https://github.com/huggingface/transformers
+commit: 11c16613d93911300c38ec8c9c2460567be53281
+verification_date: '2026-10-08'
+verified_raw_files:
+  - src/transformers/models/llama/modeling_llama.py
+  - src/transformers/masking_utils.py
+  - src/transformers/modeling_utils.py
+  - src/transformers/generation/utils.py
+  - src/transformers/generation/logits_process.py
+  - src/transformers/generation/configuration_utils.py
+runtime:
+  status: TODO_VERIFY
+  reason: Pinned package not installed or executed; selected backend and effective processors are runtime facts.

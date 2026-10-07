@@ -1,0 +1,53 @@
+repository: https://github.com/huggingface/transformers
+commit: 11c16613d93911300c38ec8c9c2460567be53281
+verification_date: '2026-10-08'
+raw_base: https://raw.githubusercontent.com/huggingface/transformers/11c16613d93911300c38ec8c9c2460567be53281
+files:
+  llama: src/transformers/models/llama/modeling_llama.py
+  masking: src/transformers/masking_utils.py
+  generation: src/transformers/generation/utils.py
+  logits: src/transformers/generation/logits_process.py
+  config: src/transformers/generation/configuration_utils.py
+symbols:
+  - LlamaForCausalLM.forward
+  - LlamaModel.forward
+  - create_causal_mask
+  - LlamaRotaryEmbedding.forward
+  - LlamaDecoderLayer.forward
+  - LlamaAttention.forward
+  - eager_attention_forward
+  - LlamaRMSNorm.forward
+  - GenerationMixin._get_logits_processor
+  - GenerationMixin._sample
+  - GenerationConfig._get_default_generation_params
+  - TemperatureLogitsWarper
+  - TopKLogitsWarper
+  - TopPLogitsWarper
+static_facts:
+  norm_reduction_axis: -1
+  norm_accumulation_dtype: float32
+  mask_diagonal_allowed: true
+  mask_dispatch_field: config._attn_implementation
+  attention_dispatch_field: config._attn_implementation
+  attention_default_if_unspecified: sdpa_when_supported_else_eager
+  cache_update_location: after_rope_before_attention_backend
+  cache_update_args: [key_states, value_states, layer_idx]
+  residual_order: [input_layernorm, self_attn, residual_add, post_attention_layernorm, mlp, residual_add]
+  generation_logit_slice: 'outputs.logits[:, -1]'
+  generation_logit_copy_dtype: float32
+  sampler_order: [temperature, top_h, top_k, top_p, min_p, typical_p, epsilon_cutoff, eta_cutoff]
+  default_do_sample: false
+  default_temperature: 1.0
+  default_top_k: 50
+  default_top_p: 1.0
+  top_k_removal_comparison: scores_strictly_less_than_kth
+  top_p_sort: ascending
+  top_p_removal_comparison: cumulative_less_than_or_equal_to_one_minus_p
+  sample_draw: torch.multinomial
+  greedy_choice: torch.argmax
+execution_status:
+  pinned_transformers_installed: false
+  forward_executed: false
+  backend_observed: false
+  processors_observed: false
+  note: Static raw sources verified. Runtime fields remain TODO_VERIFY until learner installs pinned revision in an isolated environment and runs trace.

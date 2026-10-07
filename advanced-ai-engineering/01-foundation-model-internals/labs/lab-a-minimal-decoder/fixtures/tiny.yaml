@@ -1,0 +1,18 @@
+seed: 0
+config:
+  vocab: 64
+  d: 32
+  n_layers: 2
+  n_q: 4
+  n_kv: 2
+  m: 48
+  eps: 0.000001
+  rope_base: 10000.0
+inputs:
+  batch: 2
+  sequence: 8
+sampling:
+  temperature: 1.5
+  top_k: 12
+  top_p: 0.9
+  max_new_tokens: 8
