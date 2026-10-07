@@ -1,0 +1,26 @@
+# Declared ceiling sets. Every number is a PARAMETER to qualify, not a fact.
+# `path` names the instruction path a compute ceiling belongs to; `boundary`
+# names the memory level a bandwidth ceiling belongs to. roofline.bound()
+# refuses to combine a ceiling with work/bytes counted on a different path/boundary.
+ceiling_sets:
+  exercise:                       # Lesson 2.4 worked example (not a GPU)
+    source: "Module 02 README Lesson 2.4 exercise ceilings"
+    kind: exercise
+    compute: {fp16_tensor: 400.0e+12}
+    bandwidth: {dram: 2.0e+12}
+    sms: 100
+  t4_nameplate:                   # TODO_VERIFY against the current NVIDIA T4 datasheet before use
+    source: "NVIDIA T4 product datasheet (nameplate, boost clock). TODO_VERIFY: values not re-read in this revision."
+    kind: nameplate
+    compute:
+      fp32_cuda: 8.1e+12          # TODO_VERIFY
+      fp16_tensor: 65.0e+12       # TODO_VERIFY (mixed precision, tensor cores)
+    bandwidth:
+      dram: 320.0e+9              # TODO_VERIFY (GDDR6)
+    sms: 40                      # TODO_VERIFY via torch.cuda.get_device_properties(0).multi_processor_count
+  t4_measured:                    # fill from colab.ipynb runs (sustained copy / large-GEMM probes)
+    source: "TODO: measured on Colab; record the result.yaml path here"
+    kind: measured
+    compute: {fp32_cuda: null, fp16_tensor: null}
+    bandwidth: {dram: null}
+    sms: null

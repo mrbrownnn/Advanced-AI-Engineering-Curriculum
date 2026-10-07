@@ -1,0 +1,25 @@
+# Hypothesis matrix: predicted direction of each feature (new vs baseline) if the
+# hypothesis were the cause. up | down | same. Features not listed = no prediction.
+# This is a starting matrix (H, engineering hypotheses), not ground truth: edit it
+# when a falsifier fires, and record why in report.md section 7.
+#
+# features (see starter/diagnose.py: features()):
+#   gap_time            device-idle time between our kernels
+#   kernel_time         summed duration of our kernels
+#   sync_calls          count of host synchronization calls
+#   grid_blocks         mean grid size of our kernels
+#   sectors_per_request mean sectors per memory request (counter)
+#   spill_bytes         mean local-memory spill bytes (counter)
+#   regs_per_thread     mean registers per thread (counter)
+#   branch_efficiency   mean branch efficiency (counter)
+#   sm_clock_mhz        mean SM clock during our kernels
+#   foreign_kernel_time kernel time from other processes on the device
+hypotheses:
+  host_launch_gap:     {gap_time: up, kernel_time: same, sync_calls: same, foreign_kernel_time: same}
+  synchronization:     {gap_time: up, kernel_time: same, sync_calls: up}
+  small_grid:          {grid_blocks: down, sectors_per_request: same, spill_bytes: same, sm_clock_mhz: same}
+  strided_loads:       {kernel_time: up, sectors_per_request: up, spill_bytes: same, regs_per_thread: same, gap_time: same}
+  register_pressure:   {kernel_time: up, regs_per_thread: up, spill_bytes: up, sectors_per_request: same, gap_time: same}
+  divergence:          {kernel_time: up, branch_efficiency: down, sectors_per_request: same, spill_bytes: same}
+  background_activity: {kernel_time: up, foreign_kernel_time: up, sm_clock_mhz: same}
+  clock_throttle:      {kernel_time: up, sm_clock_mhz: down, foreign_kernel_time: same, sectors_per_request: same}

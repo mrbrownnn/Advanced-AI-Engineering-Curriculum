@@ -1,0 +1,16 @@
+# Access patterns for one warp (32 lanes). Same element count for every pattern;
+# only the layout changes. Used by tests and experiments/sweep_patterns.py.
+# kind: strided -> strided_addresses(32, elem_bytes, stride_elems, offset_elems)
+#       aos     -> aos_addresses(32, struct_bytes, field_offset, field_bytes)
+#       soa     -> soa_addresses(32, field_bytes)
+patterns:
+  - {name: fp32_contiguous,     kind: strided, elem_bytes: 4, stride_elems: 1,  offset_elems: 0}
+  - {name: fp32_offset_1,       kind: strided, elem_bytes: 4, stride_elems: 1,  offset_elems: 1}
+  - {name: fp32_stride_2,       kind: strided, elem_bytes: 4, stride_elems: 2,  offset_elems: 0}
+  - {name: fp32_stride_4,       kind: strided, elem_bytes: 4, stride_elems: 4,  offset_elems: 0}
+  - {name: fp32_stride_8,       kind: strided, elem_bytes: 4, stride_elems: 8,  offset_elems: 0}
+  - {name: fp32_stride_32,      kind: strided, elem_bytes: 4, stride_elems: 32, offset_elems: 0}
+  - {name: fp16_contiguous,     kind: strided, elem_bytes: 2, stride_elems: 1,  offset_elems: 0}
+  - {name: fp64_offset_3,       kind: strided, elem_bytes: 8, stride_elems: 1,  offset_elems: 3}
+  - {name: aos_xyzw_read_x,     kind: aos, struct_bytes: 16, field_offset: 0, field_bytes: 4}
+  - {name: soa_read_x,          kind: soa, field_bytes: 4}
