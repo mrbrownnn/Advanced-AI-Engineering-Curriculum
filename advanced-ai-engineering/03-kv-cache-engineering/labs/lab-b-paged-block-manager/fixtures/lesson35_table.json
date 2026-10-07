@@ -1,0 +1,10 @@
+[
+  {"timeline": "T1", "cost": "K1", "policy": "admit", "preemptions": 1, "a_gap": 20.75, "b_gap": 20.81, "c_ttft": 68, "c_done": 1704},
+  {"timeline": "T1", "cost": "K1", "policy": "delay", "preemptions": 0, "a_gap": 20.00, "b_gap": 20.38, "c_ttft": 1348, "c_done": 1968},
+  {"timeline": "T1", "cost": "K2", "policy": "admit", "preemptions": 1, "a_gap": 28.25, "b_gap": 25.31, "c_ttft": 80, "c_done": 2280},
+  {"timeline": "T1", "cost": "K2", "policy": "delay", "preemptions": 0, "a_gap": 26.00, "b_gap": 24.88, "c_ttft": 1738, "c_done": 2544},
+  {"timeline": "T2", "cost": "K1", "policy": "admit", "preemptions": 0, "a_gap": 24.00, "b_gap": 20.38, "c_ttft": 68, "c_done": 688},
+  {"timeline": "T2", "cost": "K1", "policy": "delay", "preemptions": 0, "a_gap": 20.00, "b_gap": 20.38, "c_ttft": 308, "c_done": 928},
+  {"timeline": "T2", "cost": "K2", "policy": "admit", "preemptions": 0, "a_gap": 36.00, "b_gap": 22.44, "c_ttft": 80, "c_done": 952},
+  {"timeline": "T2", "cost": "K2", "policy": "delay", "preemptions": 0, "a_gap": 26.00, "b_gap": 22.44, "c_ttft": 386, "c_done": 1192}
+]
