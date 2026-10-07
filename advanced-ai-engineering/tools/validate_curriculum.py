@@ -124,6 +124,7 @@ def check_module(mod):
     if h2_spine(readme) != h2_spine(baseline):
         errs.append("H2 spine differs from Module 04")
     errs += effort_errors(readme)
+    errs += lab_errors(mod, labs)
     if re.search(r"\*\*Concepts & Definitions:\*\*\s*\n\s*\n\*\*", readme):
         errs.append("empty Concepts & Definitions subsection")
 
@@ -136,6 +137,45 @@ def check_module(mod):
         warnings.append(f"claims not cited in README: {uncited}")
     stats = f"claims={len(ids)} km_entries={len(km_ids)} lessons={len(lessons)} labs={len(labs)}"
     return errs, warnings, stats
+
+
+def lab_errors(mod, labs):
+    """Lab scaffolding contract from LABS.md; only for modules that have a labs/ directory."""
+    lab_root = os.path.join(ROOT, mod, "labs")
+    if not os.path.isdir(lab_root):
+        return []
+    errs = []
+    dirs = {d[4].upper(): d for d in os.listdir(lab_root) if re.match(r"lab-[a-z]-", d)}
+    for lab in sorted(labs):
+        if lab not in dirs:
+            errs.append(f"LAB {lab} has no labs/lab-{lab.lower()}-* directory")
+            continue
+        path = os.path.join(lab_root, dirs[lab])
+        for name in ("README.md", "report.md"):
+            if not os.path.exists(os.path.join(path, name)):
+                errs.append(f"{dirs[lab]} missing {name}")
+        report = os.path.join(path, "report.md")
+        if os.path.exists(report) and "## 1 PREDICTION" not in load(report):
+            errs.append(f"{dirs[lab]}/report.md has no '## 1 PREDICTION' section")
+        starter = os.path.join(path, "starter")
+        if os.path.isdir(starter) and not os.path.exists(os.path.join(path, "tests", "conftest.py")):
+            errs.append(f"{dirs[lab]} has starter/ but no tests/conftest.py")
+        if os.path.isdir(starter) and not os.path.isdir(os.path.join(path, "experiments")):
+            errs.append(f"{dirs[lab]} has starter/ but no experiments/ directory")
+        readme = os.path.join(path, "README.md")
+        tag = re.search(r"\*\*Hardware\*\*:\s*`?(CPU|COLAB|TRACE)", load(readme)) if os.path.exists(readme) else None
+        if os.path.exists(readme) and not tag:
+            errs.append(f"{dirs[lab]}/README.md has no '**Hardware**: CPU|COLAB|TRACE' line")
+        elif tag and tag.group(1) == "COLAB" and not os.path.exists(os.path.join(path, "colab.ipynb")):
+            errs.append(f"{dirs[lab]} is tagged COLAB but has no colab.ipynb")
+        solution = os.path.join(ROOT, "labs-solutions", mod, dirs[lab])
+        if not os.path.isdir(solution):
+            errs.append(f"{dirs[lab]} has no labs-solutions/{mod}/{dirs[lab]}")
+        elif not os.path.exists(os.path.join(solution, "BREAK_KEY.md")):
+            errs.append(f"labs-solutions/{mod}/{dirs[lab]} missing BREAK_KEY.md")
+    for lab in sorted(set(dirs) - set(labs)):
+        errs.append(f"{dirs[lab]} has no matching '### LAB {lab}' in README §06")
+    return errs
 
 
 def check_fixtures():
