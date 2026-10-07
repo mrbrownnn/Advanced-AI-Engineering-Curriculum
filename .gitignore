@@ -7,3 +7,8 @@ config.json
 config.yaml
 data/
 audit-reports/
+.claude/
+# Python test/runtime caches
+**/__pycache__/
+**/.pytest_cache/
+**/.hypothesis/
