@@ -1,0 +1,86 @@
+module: "26-distributed-low-precision-training"
+registry_version: "1.0.0"
+
+required_concepts: [training_memory_ledger, zero_stage_1, zero_stage_2, zero_stage_3, fsdp1, fsdp2, dtensor, communication_volume, activation_checkpointing, selective_recomputation, tensor_parallel_training, sequence_parallelism, pipeline_parallelism, one_f_one_b, interleaving, zero_bubble, context_parallelism_training, expert_parallelism_training, gradient_bucketing, communication_overlap, exposed_tail, fp8, e4m3, e5m2, delayed_scaling, current_scaling, block_scaling, mxfp8, mx_formats, nvfp4, checkpoint_interval, mtbf, young_formula, async_checkpointing]
+prerequisite_concepts: [parameter_accounting, tensor_shapes, gpu_memory_hierarchy, asynchronous_timing, roofline, quantization_contract, single_device_training_states, distributed_collectives, topology]
+first_occurrence_concepts: [zero_stage_1, zero_stage_2, zero_stage_3, fsdp1, fsdp2, dtensor, selective_recomputation, tensor_parallel_training, sequence_parallelism, pipeline_parallelism, one_f_one_b, interleaving, zero_bubble, context_parallelism_training, expert_parallelism_training, gradient_bucketing, exposed_tail, delayed_scaling, current_scaling, block_scaling, mxfp8, mx_formats, nvfp4, checkpoint_interval, mtbf, young_formula, async_checkpointing]
+
+concept_dependencies:
+  - {concept: training_memory_ledger, depends_on: [parameter_accounting, single_device_training_states]}
+  - {concept: zero_stage_1, depends_on: [training_memory_ledger, distributed_collectives]}
+  - {concept: zero_stage_2, depends_on: [zero_stage_1]}
+  - {concept: zero_stage_3, depends_on: [zero_stage_2]}
+  - {concept: fsdp1, depends_on: [zero_stage_3]}
+  - {concept: fsdp2, depends_on: [zero_stage_3, dtensor]}
+  - {concept: dtensor, depends_on: [tensor_shapes, topology]}
+  - {concept: selective_recomputation, depends_on: [activation_checkpointing]}
+  - {concept: tensor_parallel_training, depends_on: [distributed_collectives, tensor_shapes]}
+  - {concept: sequence_parallelism, depends_on: [tensor_parallel_training]}
+  - {concept: pipeline_parallelism, depends_on: [topology]}
+  - {concept: one_f_one_b, depends_on: [pipeline_parallelism]}
+  - {concept: interleaving, depends_on: [one_f_one_b]}
+  - {concept: zero_bubble, depends_on: [one_f_one_b]}
+  - {concept: context_parallelism_training, depends_on: [distributed_collectives, tensor_shapes]}
+  - {concept: expert_parallelism_training, depends_on: [distributed_collectives, topology]}
+  - {concept: gradient_bucketing, depends_on: [distributed_collectives, asynchronous_timing]}
+  - {concept: exposed_tail, depends_on: [gradient_bucketing, asynchronous_timing]}
+  - {concept: fp8, depends_on: [quantization_contract]}
+  - {concept: e4m3, depends_on: [fp8]}
+  - {concept: e5m2, depends_on: [fp8]}
+  - {concept: delayed_scaling, depends_on: [fp8]}
+  - {concept: current_scaling, depends_on: [fp8]}
+  - {concept: block_scaling, depends_on: [fp8]}
+  - {concept: mxfp8, depends_on: [mx_formats, block_scaling]}
+  - {concept: nvfp4, depends_on: [mx_formats, block_scaling]}
+  - {concept: young_formula, depends_on: [checkpoint_interval, mtbf]}
+  - {concept: async_checkpointing, depends_on: [checkpoint_interval]}
+
+mechanisms:
+  - {id: "MECH-01", description: "ZeRO progressively shards optimizer state, gradients, then parameters; FSDP2 realizes full sharding with per-parameter DTensors and module-hook all-gather/reshard/reduce-scatter transitions.", evidence_ids: ["CLM-001", "CLM-002", "CLM-003", "CLM-004", "CLM-005"], derived_from: []}
+  - {id: "MECH-02", description: "Activation checkpointing saves selected boundaries and recomputes omitted tensors during backward; selective recomputation targets memory-heavy, cheap-to-recompute activations instead of replaying every layer operation.", evidence_ids: ["CLM-006", "CLM-007", "CLM-008"], derived_from: ["MECH-01"]}
+  - {id: "MECH-03", description: "Training parallelism composes TP/SP collectives, PP schedules, CP block exchange or K/V gather, and EP all-to-all; every dimension includes backward dependencies and must be mapped to topology.", evidence_ids: ["CLM-009", "CLM-010", "CLM-011", "CLM-013", "CLM-014"], derived_from: []}
+  - {id: "MECH-04", description: "Gradient buckets become ready during backward and launch asynchronous collectives; useful overlap depends on readiness order, bucket granularity, independent compute, and the final exposed tail.", evidence_ids: ["CLM-015", "CLM-016"], derived_from: ["MECH-03"]}
+  - {id: "MECH-05", description: "Low-precision training is a recipe: encoding, scale timing and granularity, rounding, accumulator/output precision, operator coverage, master-state precision, and long-horizon validation act together.", evidence_ids: ["CLM-017", "CLM-018", "CLM-019", "CLM-020", "CLM-021", "CLM-022", "CLM-023", "CLM-024"], derived_from: []}
+  - {id: "MECH-06", description: "Restart economics balances checkpoint stalls, expected lost progress, restart time, and durability; asynchronous staging shrinks exposed stalls only if persistence keeps up and completion is verified.", evidence_ids: ["CLM-025", "CLM-026", "CLM-027", "CLM-028", "CLM-029", "CLM-030"], derived_from: []}
+
+mathematical_models:
+  - {id: "MATH-01", description: "ZeRO Adam state bytes per rank: stage 1 = 4Psi+12Psi/N, stage 2 = 2Psi+14Psi/N, stage 3 = 16Psi/N; add activations, workspaces, allocator reserve, and transient gathers separately.", evidence_ids: ["CLM-001"], derived_from: ["MECH-01"]}
+  - {id: "MATH-02", description: "ZeRO bandwidth model: stages 1/2 communicate 2Psi elements per step; stage 3 communicates 3Psi. Ring physical bytes per rank for one collective over S bytes are approximately 2(n-1)S/n.", evidence_ids: ["CLM-002", "CLM-016"], derived_from: ["MECH-01"]}
+  - {id: "MATH-03", description: "GPT-style activation approximation: sbh(34+5as/h) bytes/layer under cited assumptions; TP+SP divides by t; selective recomputation leaves about 34sbh/t; full layer checkpointing about 2sbh before partitioning.", evidence_ids: ["CLM-007"], derived_from: ["MECH-02"]}
+  - {id: "MATH-04", description: "Ideal-compute-normalized 1F1B bubble beta=(p-1)/m and interleaved beta=(p-1)/(mv); elapsed idle fraction is beta/(1+beta).", evidence_ids: ["CLM-010"], derived_from: ["MECH-03"]}
+  - {id: "MATH-05", description: "Blocking-checkpoint waste W(tau) approximately C/tau + tau/(2M) + R/M; stationary useful-work interval tau=sqrt(2CM) under Young's first-order assumptions.", evidence_ids: ["CLM-026", "CLM-030"], derived_from: ["MECH-06"]}
+
+implementation_mechanisms:
+  - {id: "IMPL-01", description: "Pinned PyTorch fully_shard installs module hooks around per-parameter DTensors; grouped collectives all-gather before compute and reduce-scatter gradients after backward, with HSDP optionally adding an all-reduce.", evidence_ids: ["CLM-004"], derived_from: ["MECH-01"]}
+  - {id: "IMPL-02", description: "Pinned Transformer Engine recipes expose delayed, current, block, MXFP8, and NVFP4 scale policies; runtime support and hardware compatibility are verified separately from configuration presence.", evidence_ids: ["CLM-019"], derived_from: ["MECH-05"]}
+  - {id: "IMPL-03", description: "Pinned PyTorch async_save separates staging completion from upload completion; only successful upload completion is evidence of a persisted checkpoint.", evidence_ids: ["CLM-028"], derived_from: ["MECH-06"]}
+
+failure_modes:
+  - {id: "FAIL-01", description: "False fit: dividing 16Psi by rank count while omitting activations, transient all-gathers, workspace, padding, and allocator reserve causes OOM despite a plausible state ledger.", evidence_ids: ["CLM-001", "CLM-004"], derived_from: ["MECH-01", "MECH-02"]}
+  - {id: "FAIL-02", description: "Communication wall: choosing deeper sharding or wider parallelism from memory fit alone raises latency, bandwidth, collective count, or straggler exposure beyond available compute overlap.", evidence_ids: ["CLM-002", "CLM-009", "CLM-010", "CLM-013", "CLM-014", "CLM-016"], derived_from: ["MECH-01", "MECH-03", "MECH-04"]}
+  - {id: "FAIL-03", description: "Checkpoint overuse: full layer recomputation fits but spends avoidable FLOPs because only attention-score-like activations dominate the ledger.", evidence_ids: ["CLM-006", "CLM-007", "CLM-008"], derived_from: ["MECH-02"]}
+  - {id: "FAIL-04", description: "Pipeline arithmetic lies when stages are imbalanced, communication is exposed, microbatch divisibility fails, or a zero-bubble schedule changes memory or synchronization semantics.", evidence_ids: ["CLM-010", "CLM-011", "CLM-012"], derived_from: ["MECH-03"]}
+  - {id: "FAIL-05", description: "Overlap illusion: profiler sum of collective durations falls while step time does not, or bucket tuning delays readiness and enlarges the final synchronization tail.", evidence_ids: ["CLM-015", "CLM-016"], derived_from: ["MECH-04"]}
+  - {id: "FAIL-06", description: "FP8 overflow, underflow, stale scale, coarse-scale outlier contamination, insufficient accumulation, or over-broad operator coverage can silently degrade or eventually diverge.", evidence_ids: ["CLM-017", "CLM-018", "CLM-019", "CLM-020", "CLM-023"], derived_from: ["MECH-05"]}
+  - {id: "FAIL-07", description: "MX transpose mismatch: axis-dependent block scales mean quantize-then-transpose differs from transpose-then-quantize; reusing one representation corrupts another GEMM path.", evidence_ids: ["CLM-019", "CLM-021"], derived_from: ["MECH-05"]}
+  - {id: "FAIL-08", description: "Checkpoint theater: staging completed but persistence failed or lagged; a crash proves no durable checkpoint exists, and unbounded in-flight writes steal memory and I/O from training.", evidence_ids: ["CLM-027", "CLM-028", "CLM-029"], derived_from: ["MECH-06"]}
+
+production_connections:
+  - {id: "PROD-01", description: "A training plan records rank mesh, parallel degrees, topology, precision recipe, memory terms, collective buckets, schedule, checkpoint durability, and rollback state as one coupled contract.", evidence_ids: ["CLM-004", "CLM-019", "CLM-028"], derived_from: ["MECH-01", "MECH-03", "MECH-05", "MECH-06"]}
+  - {id: "PROD-02", description: "Operational interruption traces establish that restart economics matters at scale, but checkpoint intervals must be fitted to each system's observed failures and checkpoint path rather than copied from another run.", evidence_ids: ["CLM-025", "CLM-026", "CLM-030"], derived_from: ["MECH-06"]}
+
+research_connections:
+  - {id: "RESEARCH-01", description: "Zero-bubble and bounded-inconsistency pipelines explore different schedule/semantics frontiers beyond synchronous 1F1B.", evidence_ids: ["CLM-011", "CLM-012"], derived_from: ["MECH-03"]}
+  - {id: "RESEARCH-02", description: "MXFP8 and NVFP4 extend block-scaled training below conventional tensor-wise FP8, adding scale-rounding, transpose, outlier-transform, and high-precision-island constraints.", evidence_ids: ["CLM-021", "CLM-022", "CLM-024"], derived_from: ["MECH-05"]}
+  - {id: "RESEARCH-03", description: "Long-horizon FP8 instability and 2026 checkpoint systems show why proxy runs and blocking-checkpoint assumptions remain incomplete evidence for frontier runs.", evidence_ids: ["CLM-023", "CLM-025", "CLM-027", "CLM-029"], derived_from: ["MECH-05", "MECH-06"]}
+
+todo_verify:
+  - {id: "TODO-01", description: "Exact Daly higher-order closed-form variant and validity boundary remain TODO_VERIFY because publisher full text was inaccessible; module quotes only Young's first-order expression.", evidence_ids: ["CLM-026"], derived_from: ["MATH-05"]}
+
+candidate_capabilities:
+  - {capability: "Build and reconcile a per-rank training memory and communication ledger for DDP, ZeRO stages, FSDP1, and FSDP2.", mapped_mechanisms: ["MECH-01", "MATH-01", "MATH-02", "IMPL-01", "FAIL-01", "FAIL-02"]}
+  - {capability: "Choose activation saving and recomputation policy from tensor-level evidence.", mapped_mechanisms: ["MECH-02", "MATH-03", "FAIL-03"]}
+  - {capability: "Compose and diagnose TP, SP, PP, CP, and EP for forward and backward training.", mapped_mechanisms: ["MECH-03", "MATH-04", "FAIL-02", "FAIL-04"]}
+  - {capability: "Measure and tune gradient communication overlap using timelines rather than aggregate duration.", mapped_mechanisms: ["MECH-04", "IMPL-01", "FAIL-05"]}
+  - {capability: "Specify, test, and break an FP8/MX/NVFP4 training recipe without conflating encoding with execution policy.", mapped_mechanisms: ["MECH-05", "IMPL-02", "FAIL-06", "FAIL-07", "RESEARCH-02"]}
+  - {capability: "Select checkpoint interval and asynchronous persistence design from observed failure and storage behavior.", mapped_mechanisms: ["MECH-06", "MATH-05", "IMPL-03", "FAIL-08", "PROD-02"]}

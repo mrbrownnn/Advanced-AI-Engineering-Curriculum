@@ -1,0 +1,317 @@
+module: "26-distributed-low-precision-training"
+registry_version: "1.0.0"
+research_cutoff: "2026-09-30"
+change_reason: "Initial evidence-backed module covering sharded training, training parallelism, low-precision recipes, and restart economics. Primary pages and pinned source files were opened on 2026-10-12; claims remain scoped to the 2026-09-30 research cutoff."
+out_of_scope_candidates: ["Inference parallelism (Module 20)", "Scaling laws, muP, and optimizer-instability theory (Module 25)", "Inference quantization (Module 05)"]
+claims:
+  - id: CLM-001
+    claim: "Under ZeRO's mixed-precision Adam layout with Psi parameters and data-parallel degree N, per-rank model-state memory is 4Psi+12Psi/N bytes at stage 1, 2Psi+14Psi/N at stage 2, and 16Psi/N at stage 3; activations, temporary buffers, and fragmentation are separate residual-state terms."
+    provenance: VERIFIED_FACT
+    domain: sharded_training
+    concepts: [zero, model_states, memory_ledger]
+    confidence: high
+    evidence: [{source_type: paper, tier: 1, title: "ZeRO: Memory Optimizations Toward Training Trillion Parameter Models", authors: "Samyam Rajbhandari, Jeff Rasley, Olatunji Ruwase, Yuxiong He", year: "2019", url: "https://arxiv.org/abs/1910.02054", section: "Sections 3.1-3.2 and 5; Figure 1; Table 1", accessed_at: "2026-10-12"}]
+    limitations: ["Assumes the paper's fp16 parameter/gradient plus fp32 master weight and Adam-moment layout (K=12).", "Excludes activations, workspaces, allocator behavior, padding, and transient materialization."]
+    applicability: "Planning per-rank model-state memory before a sharded run."
+    curriculum_usage: {lessons: ["26.1"], labs: ["LAB-A"], assessments: ["Mastery-26"]}
+  - id: CLM-002
+    claim: "ZeRO reports per-rank communication volume equal to baseline data parallelism for stages 1 and 2 (2Psi elements per step in its bandwidth model), while stage 3 communicates 3Psi elements—1.5 times baseline—because parameters are all-gathered for forward and backward and gradients are reduce-scattered."
+    provenance: VERIFIED_FACT
+    domain: sharded_training
+    concepts: [zero, communication_volume, collectives]
+    confidence: high
+    evidence: [{source_type: paper, tier: 1, title: "ZeRO: Memory Optimizations Toward Training Trillion Parameter Models", authors: "Samyam Rajbhandari, Jeff Rasley, Olatunji Ruwase, Yuxiong He", year: "2019", url: "https://arxiv.org/abs/1910.02054", section: "Sections 7.1-7.2", accessed_at: "2026-10-12"}]
+    limitations: ["Element volume omits latency, overlap, bucket boundaries, topology, and implementation-specific prefetching.", "Volume is asymptotic per-process accounting in the paper's model."]
+    applicability: "Comparing ZeRO stages when bandwidth is a constraint."
+    curriculum_usage: {lessons: ["26.1"], labs: ["LAB-A"], assessments: ["Mastery-26"]}
+  - id: CLM-003
+    claim: "PyTorch FSDP was designed as an industry-grade fully sharded implementation and reports comparable performance to DDP while supporting larger models with near-linear TFLOPS scalability in its evaluated configurations."
+    provenance: VERIFIED_FACT
+    domain: fsdp
+    concepts: [fsdp, full_sharding]
+    confidence: high
+    evidence: [{source_type: paper, tier: 1, title: "PyTorch FSDP: Experiences on Scaling Fully Sharded Data Parallel", authors: "Yanli Zhao, Andrew Gu, Rohan Varma, Liang Luo, Chien-Chin Huang, Min Xu, Less Wright, Hamid Shojanazeri, Myle Ott, Sam Shleifer, Alban Desmaison, Can Balioglu, Pritam Damania, Bernard Nguyen, Geeta Chauhan, Yuchen Hao, Ajit Mathews, Shen Li", year: "2023", url: "https://arxiv.org/abs/2304.11277", section: "Abstract; Sections 3-4", accessed_at: "2026-10-12"}]
+    limitations: ["Performance and scaling claims are author-reported for evaluated configurations, not universal."]
+    applicability: "Understanding FSDP design and memory/communication controls."
+    curriculum_usage: {lessons: ["26.1"], labs: ["LAB-A", "LAB-D"], assessments: ["Production-Source-Trace"]}
+  - id: CLM-004
+    claim: "At PyTorch commit 38cca96300da024842405ecefa081e4761254922, fully_shard shards parameters, gradients, and optimizer states; represents sharded parameters as per-parameter DTensors; all-gathers before forward, optionally reshards after forward, all-gathers before backward, and reduce-scatters gradients after backward."
+    provenance: VERIFIED_FACT
+    domain: fsdp_runtime
+    concepts: [fsdp2, dtensor, per_parameter_sharding]
+    confidence: high
+    evidence: [{source_type: source_code, tier: 1, title: "PyTorch composable FSDP2", repository: "https://github.com/pytorch/pytorch", commit: "38cca96300da024842405ecefa081e4761254922", verification_date: "2026-10-12", file: "torch/distributed/fsdp/_fully_shard/_fully_shard.py; torch/distributed/fsdp/_fully_shard/_fsdp_param_group.py; torch/distributed/fsdp/_fully_shard/_fsdp_collectives.py", symbol: "fully_shard; FSDPParamGroup.unshard; FSDPParamGroup.reshard; FSDPParamGroup.pre_forward; FSDPParamGroup.post_forward; FSDPParamGroup.pre_backward; FSDPParamGroup.post_backward; foreach_all_gather; foreach_reduce", entry_point: "torch.distributed.fsdp.fully_shard(module, mesh=...)", execution_path: "fully_shard installs hooks -> pre_forward unshard/all-gather -> post_forward reshard -> pre_backward unshard/prefetch -> post_backward reshard and foreach_reduce -> reduce_scatter_single (plus all-reduce for HSDP)", url: "https://github.com/pytorch/pytorch/blob/38cca96300da024842405ecefa081e4761254922/torch/distributed/fsdp/_fully_shard/_fully_shard.py", accessed_at: "2026-10-12"}]
+    limitations: ["Static inspection at one upstream commit; only a CPU Gloo smoke check of sharded parameter and Adam-state sizes was executed locally.", "Grouping remains first-class even though storage representation is per-parameter DTensor."]
+    applicability: "Pinned FSDP2 source trace."
+    curriculum_usage: {lessons: ["26.1"], labs: ["LAB-A", "LAB-D"], assessments: ["Production-Source-Trace"]}
+  - id: CLM-005
+    claim: "TorchTitan describes FSDP1 as FlatParameter-based and FSDP2 as per-parameter DTensor sharding, reporting better composability plus often 7% lower per-GPU memory and an average 1.5% performance gain for its tested recipes."
+    provenance: VERIFIED_FACT
+    domain: fsdp
+    concepts: [fsdp1, fsdp2, dtensor]
+    confidence: medium
+    evidence: [{source_type: paper, tier: 1, title: "TorchTitan: One-stop PyTorch native solution for production ready LLM pretraining", authors: "Wanchao Liang, Tianyu Liu, Less Wright, Will Constable, Andrew Gu, Chien-Chin Huang, Iris Zhang, Wei Feng, Howard Huang, Junjie Wang, Sanket Purandare, Gokul Nadathur, Stratos Idreos", year: "2025", url: "https://arxiv.org/abs/2410.06511", section: "Section 2.1.2", accessed_at: "2026-10-12"}]
+    limitations: ["Reported percentages are TorchTitan-specific and not treated as general performance expectations."]
+    applicability: "Distinguishing FSDP API/storage generations."
+    curriculum_usage: {lessons: ["26.1"], labs: ["LAB-D"], assessments: ["Mastery-26"]}
+  - id: CLM-006
+    claim: "Activation checkpointing trades saved forward tensors for recomputation; Chen et al. give an O(sqrt(n))-memory schedule for an n-layer network at the cost of one extra forward pass per mini-batch."
+    provenance: VERIFIED_FACT
+    domain: activation_memory
+    concepts: [activation_checkpointing, recomputation]
+    confidence: high
+    evidence: [{source_type: paper, tier: 1, title: "Training Deep Nets with Sublinear Memory Cost", authors: "Tianqi Chen, Bing Xu, Chiyuan Zhang, Carlos Guestrin", year: "2016", url: "https://arxiv.org/abs/1604.06174", section: "Abstract; Sections 2-3", accessed_at: "2026-10-12"}]
+    limitations: ["The generic bound does not predict Transformer-specific bytes or wall-clock overhead."]
+    applicability: "Reasoning about checkpoint placement."
+    curriculum_usage: {lessons: ["26.2"], labs: ["LAB-A"], assessments: ["Mastery-26"]}
+  - id: CLM-007
+    claim: "For the paper's 16-bit GPT-style assumptions, Korthikanti et al. derive per-layer activation storage sbh(34+5as/h) bytes; tensor plus sequence parallelism divides it by tensor-parallel degree t, selective recomputation leaves approximately 34sbh/t bytes, and full layer recomputation stores approximately 2sbh bytes per layer before optional partitioning."
+    provenance: VERIFIED_FACT
+    domain: activation_memory
+    concepts: [activation_ledger, selective_recomputation, sequence_parallelism]
+    confidence: high
+    evidence: [{source_type: paper, tier: 1, title: "Reducing Activation Recomputation in Large Transformer Models", authors: "Vijay Korthikanti, Jared Casper, Sangkug Lym, Lawrence McAfee, Michael Andersch, Mohammad Shoeybi, Bryan Catanzaro", year: "2022", url: "https://arxiv.org/abs/2205.05198", section: "Sections 4-5; Equations 1 and 5; Table 2", accessed_at: "2026-10-12"}]
+    limitations: ["Architecture and dtype assumptions matter; embeddings, pipeline in-flight multiplicity, allocator effects, and implementation workspaces require separate accounting."]
+    applicability: "Transformer activation-memory prediction."
+    curriculum_usage: {lessons: ["26.2"], labs: ["LAB-A"], assessments: ["Mastery-26"]}
+  - id: CLM-008
+    claim: "Korthikanti et al. report that sequence parallelism plus selective activation recomputation reduced activation memory fivefold and reduced recomputation execution-time overhead by over 90% on their evaluated models up to one trillion parameters."
+    provenance: VERIFIED_FACT
+    domain: activation_memory
+    concepts: [selective_recomputation, sequence_parallelism]
+    confidence: high
+    evidence: [{source_type: paper, tier: 1, title: "Reducing Activation Recomputation in Large Transformer Models", authors: "Vijay Korthikanti, Jared Casper, Sangkug Lym, Lawrence McAfee, Michael Andersch, Mohammad Shoeybi, Bryan Catanzaro", year: "2022", url: "https://arxiv.org/abs/2205.05198", section: "Abstract; Section 6", accessed_at: "2026-10-12"}]
+    limitations: ["Author-reported result on NVIDIA configurations; do not transfer the factors to other models or kernels."]
+    applicability: "Evidence that selective policies can dominate full recomputation."
+    curriculum_usage: {lessons: ["26.2"], labs: ["LAB-A"], assessments: ["Mastery-26"]}
+  - id: CLM-009
+    claim: "Megatron's tensor-parallel Transformer pattern performs two all-reduces in forward and two in backward per layer, while the later tensor-plus-sequence-parallel formulation decomposes the same bandwidth volume into all-gathers and reduce-scatters and shards sequence-dimension activations."
+    provenance: VERIFIED_FACT
+    domain: training_parallelism
+    concepts: [tensor_parallelism, sequence_parallelism, backward_communication]
+    confidence: high
+    evidence:
+      - {source_type: paper, tier: 1, title: "Megatron-LM: Training Multi-Billion Parameter Language Models Using Model Parallelism", authors: "Mohammad Shoeybi et al.", year: "2019", url: "https://arxiv.org/abs/1909.08053", section: "Section 3; Figures 3-4", accessed_at: "2026-10-12"}
+      - {source_type: paper, tier: 1, title: "Reducing Activation Recomputation in Large Transformer Models", authors: "Vijay Korthikanti et al.", year: "2022", url: "https://arxiv.org/abs/2205.05198", section: "Section 4.2.1; Figure 5", accessed_at: "2026-10-12"}
+    limitations: ["Counts apply to the cited decomposition; fused/asynchronous variants may change visible operations."]
+    applicability: "Training TP/SP communication ledgers."
+    curriculum_usage: {lessons: ["26.3"], labs: ["LAB-B"], assessments: ["Mastery-26"]}
+  - id: CLM-010
+    claim: "PipeDream-Flush 1F1B has ideal-compute-normalized pipeline bubble (p-1)/m, stores activations for at most p in-flight microbatches rather than GPipe's m, and an interleaved schedule with v model chunks reduces the bubble to (p-1)/(mv) while increasing pipeline communication by v."
+    provenance: VERIFIED_FACT
+    domain: pipeline_parallelism
+    concepts: [pipeline_parallelism, one_f_one_b, interleaving, bubble]
+    confidence: high
+    evidence: [{source_type: paper, tier: 1, title: "Efficient Large-Scale Language Model Training on GPU Clusters Using Megatron-LM", authors: "Deepak Narayanan et al.", year: "2021", url: "https://arxiv.org/abs/2104.04473", section: "Sections 2.2.1-2.2.2", accessed_at: "2026-10-12"}]
+    limitations: ["Formula assumes balanced stage times and uses ideal computation time as denominator; elapsed-time idle fraction is beta/(1+beta).", "Communication and stage imbalance can dominate the simple bubble model."]
+    applicability: "Selecting microbatch count and interleaving."
+    curriculum_usage: {lessons: ["26.3"], labs: ["LAB-B"], assessments: ["Mastery-26"]}
+  - id: CLM-011
+    claim: "Zero Bubble Pipeline Parallelism splits backward into input-gradient (B) and parameter-gradient (W) work; ZB-H1 has the same peak activation memory as 1F1B with a smaller bubble, while ZB-H2 can reach zero idealized bubble with higher activation memory and optimizer-synchronization handling."
+    provenance: VERIFIED_FACT
+    domain: pipeline_parallelism
+    concepts: [zero_bubble, backward_split]
+    confidence: high
+    evidence: [{source_type: paper, tier: 1, title: "Zero Bubble Pipeline Parallelism", authors: "Penghui Qi, Xinyi Wan, Guangxing Huang, Min Lin", year: "2024", url: "https://arxiv.org/abs/2401.10241", section: "Abstract; Sections 2-4; Table 2", accessed_at: "2026-10-12"}]
+    limitations: ["Zero bubble depends on schedule feasibility, memory, measured F/B/W times, communication, and synchronization semantics.", "Reported throughput gains are not used as general claims."]
+    applicability: "Frontier pipeline scheduling."
+    curriculum_usage: {lessons: ["26.3"], labs: ["LAB-B"], assessments: ["Mastery-26"]}
+  - id: CLM-012
+    claim: "PACI is a 2026 preprint proposing bubble-free asynchronous pipeline training with bounded forward/backward weight-version drift through local gradient accumulation, trading exact synchronous semantics for controlled inconsistency."
+    provenance: VERIFIED_FACT
+    domain: pipeline_parallelism
+    concepts: [asynchronous_pipeline, weight_inconsistency]
+    confidence: medium
+    evidence: [{source_type: paper, tier: 1, title: "Breaking the Bubble: Asynchronous Pipeline Parallel Training with Bounded Weight Inconsistency", authors: "Itay Elam, Eliron Rahimi, Avi Mendelson, Chaim Baskin", year: "2026", url: "https://arxiv.org/abs/2606.07881", section: "Abstract (abstract-level inspection)", accessed_at: "2026-10-12"}]
+    limitations: ["FRONTIER preprint; abstract-level inspection; bounded inconsistency is not synchronous semantics and needs independent reproduction."]
+    applicability: "Current research contrast to synchronous zero-bubble work."
+    curriculum_usage: {lessons: ["26.3"], assessments: ["Mastery-26"]}
+  - id: CLM-013
+    claim: "Ring Attention distributes sequence blocks and overlaps key/value block communication with blockwise attention, while Llama 3's training implementation instead used an all-gather of K/V before local-Q attention for mask flexibility and paired distant sequence chunks for load balance."
+    provenance: VERIFIED_FACT
+    domain: context_parallelism
+    concepts: [context_parallelism, ring_attention]
+    confidence: high
+    evidence:
+      - {source_type: paper, tier: 1, title: "Ring Attention with Blockwise Transformers for Near-Infinite Context", authors: "Hao Liu, Matei Zaharia, Pieter Abbeel", year: "2023", url: "https://arxiv.org/abs/2310.01889", section: "Abstract", accessed_at: "2026-10-12"}
+      - {source_type: paper, tier: 1, title: "The Llama 3 Herd of Models", authors: "Llama Team, AI at Meta", year: "2024", url: "https://arxiv.org/abs/2407.21783", section: "Section 3.3.2, Context parallelism for long sequences", accessed_at: "2026-10-12"}
+    limitations: ["Two implementation choices, not evidence of one universal CP algorithm."]
+    applicability: "Training long-context placement and communication choices."
+    curriculum_usage: {lessons: ["26.3"], labs: ["LAB-B"], assessments: ["Mastery-26"]}
+  - id: CLM-014
+    claim: "Expert parallel training dispatches and combines routed token assignments with all-to-all; synchronous layer completion is limited by the most-loaded expert rank, so placement and balancing determine exposed communication and straggler time."
+    provenance: DERIVED
+    domain: expert_parallelism
+    concepts: [expert_parallelism, all_to_all, load_skew]
+    confidence: high
+    assumptions: ["Expert compute time is approximately proportional to assigned token-expert pairs in the modeled range.", "The layer synchronizes after combine."]
+    derivation: "Each routed token must reach the rank hosting its expert and return. Under synchronous combine, the next layer cannot proceed until the slowest rank completes, so a rank receiving q times the uniform assignment count supplies a lower-bound q-times compute-skew factor before overlap and capacity effects."
+    limitations: ["Kernel efficiency, expert capacity, token dropping, redundant experts, and hierarchical all-to-all change the relation.", "Module 28 owns router-collapse and load-balancing-loss dynamics."]
+    applicability: "Training EP communication and straggler planning."
+    curriculum_usage: {lessons: ["26.3"], labs: ["LAB-B"], assessments: ["Mastery-26"]}
+  - id: CLM-015
+    claim: "PyTorch DDP builds gradient buckets, triggers asynchronous all-reduce from autograd hooks when a bucket is ready, and uses bucket size to trade launch overhead against overlap lead time; the cited implementation paper states a 25 MB default and requires empirical tuning."
+    provenance: VERIFIED_FACT
+    domain: communication_overlap
+    concepts: [gradient_all_reduce, bucketing, overlap]
+    confidence: high
+    evidence: [{source_type: paper, tier: 1, title: "PyTorch Distributed: Experiences on Accelerating Data Parallel Training", authors: "Shen Li, Yanli Zhao, Rohan Varma, Omkar Salpekar, Pieter Noordhuis, Teng Li, Adam Paszke, Jeff Smith, Brian Vaughan, Pritam Damania, Soumith Chintala", year: "2020", url: "https://arxiv.org/abs/2006.15704", section: "Sections 3.2.2-3.2.4 and 4.2", accessed_at: "2026-10-12"}]
+    limitations: ["Default is version-dependent; overlap depends on readiness order, backend, topology, and compute duration."]
+    applicability: "Diagnosing exposed data-parallel synchronization."
+    curriculum_usage: {lessons: ["26.4"], labs: ["LAB-B"], assessments: ["Mastery-26"]}
+  - id: CLM-016
+    claim: "A ring all-reduce of S bytes over n ranks moves approximately 2(n-1)S/n bytes per rank; communication hidden under backward compute does not disappear, and the exposed tail is determined by the dependency-critical bucket completion rather than total collective duration alone."
+    provenance: DERIVED
+    domain: communication_overlap
+    concepts: [alpha_beta_model, exposed_tail]
+    confidence: high
+    assumptions: ["Ring algorithm, no congestion, uniform links, and no compression.", "Compute and communication streams can overlap when dependencies permit."]
+    derivation: "Reduce-scatter and all-gather each move (n-1)S/n per rank. Timeline union determines step time: exposed communication is collective work that extends beyond available independent compute or blocks a dependency."
+    limitations: ["Collective algorithm may differ by size and topology; alpha and achieved bandwidth must be measured."]
+    applicability: "First-order bucket and overlap models."
+    curriculum_usage: {lessons: ["26.1", "26.4"], labs: ["LAB-A", "LAB-B"], assessments: ["Mastery-26"]}
+  - id: CLM-017
+    claim: "The FP8 interchange proposal defines E4M3 and E5M2; E4M3 provides more significand precision and maximum finite magnitude 448, while E5M2 provides greater range with maximum normal magnitude 57,344, and the paper recommends E4M3 for weights/activations and E5M2 for gradients in its hybrid recipe."
+    provenance: VERIFIED_FACT
+    domain: low_precision_training
+    concepts: [fp8, e4m3, e5m2]
+    confidence: high
+    evidence: [{source_type: paper, tier: 1, title: "FP8 Formats for Deep Learning", authors: "Paulius Micikevicius et al.", year: "2022", url: "https://arxiv.org/abs/2209.05433", section: "Abstract; Sections 2-3; Table 1", accessed_at: "2026-10-12"}]
+    limitations: ["Encoding does not specify scale granularity, rounding, accumulation, operator coverage, or master-state precision."]
+    applicability: "FP8 format and recipe contracts."
+    curriculum_usage: {lessons: ["26.5"], labs: ["LAB-C"], assessments: ["Mastery-26"]}
+  - id: CLM-018
+    claim: "FP8 training is mixed precision: FP8 inputs ordinarily produce higher-precision outputs/accumulation, scaling maps higher-precision tensors into representable range, and memory-bound operations such as nonlinearities, reductions, and optimizer updates can remain in higher precision."
+    provenance: VERIFIED_FACT
+    domain: low_precision_training
+    concepts: [mixed_precision, scaling, accumulation]
+    confidence: high
+    evidence: [{source_type: paper, tier: 1, title: "FP8 Formats for Deep Learning", authors: "Paulius Micikevicius et al.", year: "2022", url: "https://arxiv.org/abs/2209.05433", section: "Section 2; Section 4", accessed_at: "2026-10-12"}]
+    limitations: ["Exact operator coverage is recipe- and hardware-dependent."]
+    applicability: "Rejecting the mental model that an FP8 run stores and computes everything in FP8."
+    curriculum_usage: {lessons: ["26.5"], labs: ["LAB-C"], assessments: ["Mastery-26"]}
+  - id: CLM-019
+    claim: "At Transformer Engine commit ef2bf753080c088aa3fb3f1adb3d49713272c67a, delayed scaling uses a prior-iteration amax history (default length 1024, default max selection), current scaling computes a per-tensor scale from current data, MXFP8 shares an E8M0 power-of-two scale across 32 values, block scaling supports configurable 1D/2D blocks with 128-by-128 kernel tiles, and NVFP4 uses two-level 16-value scaling plus 2D weight blocks, stochastic gradient rounding, and Hadamard transforms."
+    provenance: VERIFIED_FACT
+    domain: low_precision_runtime
+    concepts: [delayed_scaling, current_scaling, block_scaling, mxfp8, nvfp4]
+    confidence: high
+    evidence: [{source_type: source_code, tier: 1, title: "Transformer Engine recipes", repository: "https://github.com/NVIDIA/TransformerEngine", commit: "ef2bf753080c088aa3fb3f1adb3d49713272c67a", verification_date: "2026-10-12", file: "transformer_engine/common/recipe/__init__.py; transformer_engine/common/recipe/delayed_scaling.cu; transformer_engine/common/recipe/fp8_block_scaling.cu", symbol: "Format; DelayedScaling; Float8CurrentScaling; MXFP8BlockScaling; Float8BlockScaling; NVFP4BlockScaling; amax_and_scale_update_impl::kernel; kTileDim", entry_point: "transformer_engine.common.recipe recipe passed to fp8_autocast", execution_path: "recipe selects quantizers/scales -> delayed_scaling kernel rolls amax history and computes scaled_max/amax -> FP8/MXFP8/NVFP4 quantizers feed low-precision GEMMs", url: "https://github.com/NVIDIA/TransformerEngine/blob/ef2bf753080c088aa3fb3f1adb3d49713272c67a/transformer_engine/common/recipe/__init__.py", accessed_at: "2026-10-12"}]
+    limitations: ["Static inspection only; runtime support and exact kernels depend on installed TE/CUDA/hardware versions."]
+    applicability: "Pinned production source trace for scale recipes."
+    curriculum_usage: {lessons: ["26.5"], labs: ["LAB-C", "LAB-D"], assessments: ["Production-Source-Trace"]}
+  - id: CLM-020
+    claim: "DeepSeek-V3's reported FP8 training recipe executes linear Fprop, Dgrad, and Wgrad GEMMs with FP8 inputs and BF16/FP32 outputs, keeps embeddings, output head, MoE gates, normalization, attention, master weights, weight gradients, and optimizer states at higher precision, uses online 1x128 activation-tile and 128x128 weight-block scales, E4M3 throughout, and periodically promotes partial accumulations to FP32."
+    provenance: VERIFIED_FACT
+    domain: low_precision_training
+    concepts: [fp8_recipe, tile_scaling, high_precision_islands]
+    confidence: high
+    evidence: [{source_type: paper, tier: 1, title: "DeepSeek-V3 Technical Report", authors: "DeepSeek-AI", year: "2024", url: "https://arxiv.org/abs/2412.19437", section: "Sections 3.3.1-3.3.3; Appendix B", accessed_at: "2026-10-12"}]
+    limitations: ["One vendor's H800-oriented recipe; attention and operator support evolve.", "Reported loss comparisons are not generalized here."]
+    applicability: "Concrete current/block-scaled FP8 recipe."
+    curriculum_usage: {lessons: ["26.5"], labs: ["LAB-C"], assessments: ["Mastery-26"]}
+  - id: CLM-021
+    claim: "The MX paper defines microscaling formats as narrow element types plus a shared per-block scale; its concrete MXFP8/MXFP6/MXFP4/MXINT8 formats use block size 32 and E8M0 shared scales, and conversion is axis-dependent so quantization and transpose do not commute."
+    provenance: VERIFIED_FACT
+    domain: microscaling
+    concepts: [mx_formats, shared_scale, block_quantization]
+    confidence: high
+    evidence: [{source_type: paper, tier: 1, title: "Microscaling Data Formats for Deep Learning", authors: "Bita Darvish Rouhani et al.", year: "2023", url: "https://arxiv.org/abs/2310.10537", section: "Sections 3-4; Table 1", accessed_at: "2026-10-12"}]
+    limitations: ["Format definition alone does not establish training parity for every architecture."]
+    applicability: "MX format mechanics."
+    curriculum_usage: {lessons: ["26.5"], labs: ["LAB-C"], assessments: ["Mastery-26"]}
+  - id: CLM-022
+    claim: "A 2025 MXFP8 recipe reports BF16-matched pretraining for models up to 8B parameters and 15T tokens using E4M3 for weights, activations, and activation gradients plus round-up of the shared power-of-two scale; this differs from the OCP v1 suggested scale rounding."
+    provenance: VERIFIED_FACT
+    domain: microscaling
+    concepts: [mxfp8, scale_rounding]
+    confidence: medium
+    evidence: [{source_type: paper, tier: 1, title: "Recipes for Pre-training LLMs with MXFP8", authors: "Asit Mishra, Dusan Stosic, Simon Layton, Paulius Micikevicius", year: "2025", url: "https://arxiv.org/abs/2506.08027", section: "Abstract; Sections 3.1-3.2; Algorithm 1", accessed_at: "2026-10-12"}]
+    limitations: ["Author-reported NVIDIA study; parity is scoped to its evaluated models, data, and recipe."]
+    applicability: "FRONTIER MXFP8 recipe and scale-rounding sensitivity."
+    curriculum_usage: {lessons: ["26.5"], labs: ["LAB-C"], assessments: ["Mastery-26"]}
+  - id: CLM-023
+    claim: "A 2025 ICLR paper reports an FP8 training divergence after 220B tokens caused by prolonged SwiGLU outlier amplification, showing that short proxies may miss low-precision instabilities."
+    provenance: VERIFIED_FACT
+    domain: low_precision_failure
+    concepts: [fp8_instability, outliers, long_horizon]
+    confidence: medium
+    evidence: [{source_type: paper, tier: 1, title: "Scaling FP8 Training to Trillion-Token LLMs", authors: "Maxim Fishman, Brian Chmiel, Ron Banner, Daniel Soudry", year: "2025", url: "https://arxiv.org/abs/2409.12517", section: "Abstract; Section 3", accessed_at: "2026-10-12"}]
+    limitations: ["Specific model/recipe; mechanism must be checked on other architectures."]
+    applicability: "Long-horizon FP8 validation and break tests."
+    curriculum_usage: {lessons: ["26.5"], labs: ["LAB-C"], assessments: ["Incident-26.1"]}
+  - id: CLM-024
+    claim: "A 2026 NVFP4 pretraining report combines 16-value two-level scaling, random Hadamard transforms, 2D 16x16 weight scaling, stochastic gradient rounding, and selected BF16 layers, reporting a 12B model trained for 10T tokens near an FP8 baseline."
+    provenance: VERIFIED_FACT
+    domain: low_precision_frontier
+    concepts: [nvfp4, hadamard_transform, stochastic_rounding]
+    confidence: medium
+    evidence: [{source_type: paper, tier: 1, title: "Pretraining Large Language Models with NVFP4", authors: "NVIDIA", year: "2026", url: "https://arxiv.org/abs/2509.25149", section: "Abstract; Section 4", accessed_at: "2026-10-12"}]
+    limitations: ["FRONTIER technical report; one model and vendor stack; FP4 is not a drop-in replacement for BF16 or FP8."]
+    applicability: "Frontier sub-8-bit training comparison."
+    curriculum_usage: {lessons: ["26.5"], labs: ["LAB-C"], assessments: ["Mastery-26"]}
+  - id: CLM-025
+    claim: "Llama 3 reports 466 interruptions in a 54-day 405B pretraining snapshot, including 419 unexpected interruptions; about 78% of unexpected interruptions were attributed to confirmed or suspected hardware issues, while the operation achieved over 90% effective training time with automation."
+    provenance: VERIFIED_FACT
+    domain: training_reliability
+    concepts: [mtbf, interruption, effective_training_time]
+    confidence: high
+    evidence: [{source_type: paper, tier: 1, title: "The Llama 3 Herd of Models", authors: "Llama Team, AI at Meta", year: "2024", url: "https://arxiv.org/abs/2407.21783", section: "Section 3.3.4; Table 5", accessed_at: "2026-10-12"}]
+    numeric_metadata: {numeric_type: measured_behavior, workload: "54-day snapshot of Llama 3 405B pretraining", hardware: "up to 16K H100 GPUs", model: "Llama 3 405B", configuration: "Production training snapshot", metric_definition: "Interruption counts and useful-training time divided by elapsed time", measurement_method: "Operational logs reported by authors"}
+    limitations: ["One production run; interruption process is not Poisson, counts include correlated and planned events, and quotient 54 days/419 is only an empirical average interval."]
+    applicability: "Failure-aware training economics."
+    curriculum_usage: {lessons: ["26.6"], labs: ["LAB-D"], assessments: ["Mastery-26", "Incident-26.1"]}
+  - id: CLM-026
+    claim: "TODO_VERIFY: Young's first-order checkpoint model is commonly stated as useful-work interval tau approximately sqrt(2CM) for blocking checkpoint time C and exponential-failure MTBF M when C is small relative to M; Daly supplies a higher-order restart-dump estimate, but publisher full text was inaccessible and the exact primary-source statements were not verified in this pass."
+    provenance: TODO_VERIFY
+    domain: checkpoint_economics
+    concepts: [young_formula, daly_formula, checkpoint_interval]
+    confidence: low
+    evidence:
+      - {source_type: paper, tier: 1, title: "A first order approximation to the optimum checkpoint interval", authors: "John W. Young", year: "1974", url: "https://doi.org/10.1145/361147.361115", section: "First-order model", accessed_at: "2026-10-12"}
+      - {source_type: paper, tier: 1, title: "A higher order estimate of the optimum checkpoint interval for restart dumps", authors: "John T. Daly", year: "2006", url: "https://doi.org/10.1016/j.future.2004.11.016", section: "Higher-order restart-dump model", accessed_at: "2026-10-12"}
+    limitations: ["Publisher full text was inaccessible in this environment; metadata and first-order formula were cross-checked, but exact Daly closed-form variants remain TODO_VERIFY before quoting one.", "Correlated failures, asynchronous checkpoints, queue delays, and non-exponential hazards violate assumptions."]
+    applicability: "First-pass checkpoint interval planning."
+    curriculum_usage: {lessons: ["26.6"], labs: ["LAB-D"], assessments: ["Mastery-26"]}
+  - id: CLM-027
+    claim: "CheckFreq splits checkpointing into an in-memory snapshot pipelined with compute and an asynchronous persistence phase, and reports recovery-time reduction from hours to seconds while bounding runtime overhead within 3.5% on its evaluated workloads."
+    provenance: VERIFIED_FACT
+    domain: checkpointing
+    concepts: [async_checkpointing, staging, persistence]
+    confidence: high
+    evidence: [{source_type: paper, tier: 1, title: "CheckFreq: Frequent, Fine-Grained DNN Checkpointing", authors: "Jayashree Mohan, Amar Phanishayee, Vijay Chidambaram", year: "2021", url: "https://www.usenix.org/conference/fast21/presentation/mohan", section: "Abstract; Sections 1 and 4", accessed_at: "2026-10-12"}]
+    limitations: ["Results predate frontier LLM state sizes and are workload/storage-specific.", "Asynchronous persistence needs backpressure and durability validation."]
+    applicability: "Checkpoint stall decomposition."
+    curriculum_usage: {lessons: ["26.6"], labs: ["LAB-D"], assessments: ["Mastery-26"]}
+  - id: CLM-028
+    claim: "At PyTorch commit 38cca96300da024842405ecefa081e4761254922, torch.distributed.checkpoint.async_save first de-stages state to staging storage (CPU memory by default) and invokes save in a separate thread by default; its API returns distinct staging and upload completion futures."
+    provenance: VERIFIED_FACT
+    domain: checkpoint_runtime
+    concepts: [async_save, staging_future, upload_future]
+    confidence: high
+    evidence: [{source_type: source_code, tier: 1, title: "PyTorch Distributed Checkpoint async saver", repository: "https://github.com/pytorch/pytorch", commit: "38cca96300da024842405ecefa081e4761254922", verification_date: "2026-10-12", file: "torch/distributed/checkpoint/state_dict_saver.py", symbol: "AsyncSaveResponse; async_save", entry_point: "torch.distributed.checkpoint.async_save(state_dict, checkpoint_id=...)", execution_path: "async_save -> stage/de-stage to CPU by default -> separate thread/process save -> staging_completion and upload_completion futures", url: "https://github.com/pytorch/pytorch/blob/38cca96300da024842405ecefa081e4761254922/torch/distributed/checkpoint/state_dict_saver.py", accessed_at: "2026-10-12"}]
+    limitations: ["Experimental API at one commit; a returned future is not durability until upload completion succeeds."]
+    applicability: "Pinned asynchronous-checkpoint source trace."
+    curriculum_usage: {lessons: ["26.6"], labs: ["LAB-D"], assessments: ["Production-Source-Trace"]}
+  - id: CLM-029
+    claim: "TorchTitan reports that its use of PyTorch Distributed Checkpoint asynchronous checkpointing reduced checkpoint overhead by 5-15 times versus synchronous checkpointing for its Llama 3.1 8B setup."
+    provenance: VERIFIED_FACT
+    domain: checkpointing
+    concepts: [async_checkpointing, checkpoint_overhead]
+    confidence: medium
+    evidence: [{source_type: paper, tier: 1, title: "TorchTitan: One-stop PyTorch native solution for production ready LLM pretraining", authors: "Wanchao Liang et al.", year: "2025", url: "https://arxiv.org/abs/2410.06511", section: "Section 2.3.1", accessed_at: "2026-10-12"}]
+    limitations: ["Author-reported setup-specific factor; async staging consumes CPU memory and I/O bandwidth."]
+    applicability: "Evidence that asynchronous checkpointing can reduce exposed stalls."
+    curriculum_usage: {lessons: ["26.6"], labs: ["LAB-D"], assessments: ["Mastery-26"]}
+  - id: CLM-030
+    claim: "For blocking checkpoints under Young's assumptions, expected fractional overhead is approximately C/tau + tau/(2M) + R/M, where R is fixed restart time; reducing exposed checkpoint time changes the optimum interval, while reducing restart time lowers waste without changing the first-order sqrt(2CM) stationary point."
+    provenance: DERIVED
+    domain: checkpoint_economics
+    concepts: [checkpoint_waste, restart_cost]
+    confidence: high
+    assumptions: ["Independent exponential failures with MTBF M.", "Failures occur uniformly within an interval in the first-order approximation.", "Checkpoint time C blocks useful work; restart cost R is constant; C and R are small relative to M."]
+    derivation: "Checkpoint overhead per useful interval is C/tau. Mean lost useful work per failure is tau/2, contributing tau/(2M); restart contributes R/M. Differentiating C/tau+tau/(2M) gives -C/tau^2+1/(2M)=0, hence tau=sqrt(2CM)."
+    limitations: ["Does not model checkpoint failure, correlated faults, asynchronous staging interference, queue delays, or minimum interval constraints."]
+    applicability: "Synthetic restart-economics exercises."
+    related_claims: [CLM-026, CLM-027, CLM-029]
+    curriculum_usage: {lessons: ["26.6"], labs: ["LAB-D"], assessments: ["Mastery-26"]}
