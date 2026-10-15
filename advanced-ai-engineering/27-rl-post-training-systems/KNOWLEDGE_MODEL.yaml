@@ -1,0 +1,94 @@
+module: "27-rl-post-training-systems"
+registry_version: "1.0.0"
+
+required_concepts: [importance_ratio, ppo_clip, three_policy_view, gae, value_baseline, group_baseline, advantage_whitening, loss_aggregation, length_bias, clip_higher, entropy_collapse, entropy_covariance, sequence_level_ratio, rlvr, verifier, verifier_false_negative, verifier_false_positive, spurious_reward, pass_at_k, overoptimization, kl_budget, kl_placement, reward_hacking, audit, rollout_trainer_split, colocation, disaggregation, weight_sync, long_tail_rollout, throughput_accounting, async_rl, staleness, decoupled_ppo, logprob_mismatch, truncated_importance_sampling, effective_sample_size]
+prerequisite_concepts: [grpo, grpo_bias, dpo, reward_model, kl_to_base, rlhf, verifier_gaming, pass_at_k_basics, grader_validity, paired_inference, continuous_batching, kv_cache, precision_formats, collectives]
+first_occurrence_concepts: [importance_ratio, ppo_clip, three_policy_view, gae, loss_aggregation, clip_higher, entropy_collapse, entropy_covariance, sequence_level_ratio, rlvr, verifier_false_negative, verifier_false_positive, spurious_reward, overoptimization, kl_budget, kl_placement, rollout_trainer_split, colocation, weight_sync, long_tail_rollout, throughput_accounting, staleness, decoupled_ppo, logprob_mismatch, truncated_importance_sampling, effective_sample_size]
+
+concept_dependencies:
+  - { concept: importance_ratio, depends_on: [grpo] }
+  - { concept: ppo_clip, depends_on: [importance_ratio] }
+  - { concept: three_policy_view, depends_on: [importance_ratio] }
+  - { concept: gae, depends_on: [value_baseline] }
+  - { concept: group_baseline, depends_on: [grpo] }
+  - { concept: advantage_whitening, depends_on: [gae, group_baseline] }
+  - { concept: loss_aggregation, depends_on: [grpo_bias] }
+  - { concept: length_bias, depends_on: [loss_aggregation] }
+  - { concept: clip_higher, depends_on: [ppo_clip] }
+  - { concept: entropy_collapse, depends_on: [ppo_clip] }
+  - { concept: entropy_covariance, depends_on: [entropy_collapse] }
+  - { concept: sequence_level_ratio, depends_on: [importance_ratio] }
+  - { concept: rlvr, depends_on: [reward_model, verifier_gaming] }
+  - { concept: verifier, depends_on: [rlvr, grader_validity] }
+  - { concept: verifier_false_negative, depends_on: [verifier] }
+  - { concept: verifier_false_positive, depends_on: [verifier] }
+  - { concept: spurious_reward, depends_on: [rlvr, ppo_clip] }
+  - { concept: pass_at_k, depends_on: [pass_at_k_basics, rlvr] }
+  - { concept: overoptimization, depends_on: [reward_model, kl_to_base] }
+  - { concept: kl_budget, depends_on: [overoptimization] }
+  - { concept: kl_placement, depends_on: [kl_to_base, gae, group_baseline] }
+  - { concept: reward_hacking, depends_on: [verifier_false_positive, overoptimization] }
+  - { concept: audit, depends_on: [reward_hacking, paired_inference] }
+  - { concept: rollout_trainer_split, depends_on: [continuous_batching] }
+  - { concept: colocation, depends_on: [rollout_trainer_split] }
+  - { concept: disaggregation, depends_on: [rollout_trainer_split, collectives] }
+  - { concept: weight_sync, depends_on: [colocation, disaggregation] }
+  - { concept: long_tail_rollout, depends_on: [continuous_batching, kv_cache] }
+  - { concept: throughput_accounting, depends_on: [long_tail_rollout, weight_sync] }
+  - { concept: async_rl, depends_on: [throughput_accounting] }
+  - { concept: staleness, depends_on: [async_rl, three_policy_view] }
+  - { concept: decoupled_ppo, depends_on: [staleness, ppo_clip] }
+  - { concept: logprob_mismatch, depends_on: [three_policy_view, precision_formats] }
+  - { concept: truncated_importance_sampling, depends_on: [logprob_mismatch, importance_ratio] }
+  - { concept: effective_sample_size, depends_on: [truncated_importance_sampling] }
+
+mechanisms:
+  - { id: "MECH-01", description: "Policy-gradient estimator anatomy: an LLM RL loss is (advantage estimator) x (ratio against a data policy, clipped) aggregated over tokens; GAE uses a learned critic with a gamma/lambda bias-variance knob, group baselines use sibling responses; with one on-policy step per batch the ratio is 1 and the clip never binds.", evidence_ids: ["CLM-001", "CLM-002", "CLM-003", "CLM-004", "CLM-042", "CLM-043", "CLM-044"], derived_from: [] }
+  - { id: "MECH-02", description: "Loss aggregation and clip shape decide which tokens move: sample-mean versus token-sum changes per-token weight with response length; a symmetric upper clip bounds low-probability tokens tightly, and policy-gradient updates whose advantage correlates with probability drive entropy down; sequence-level ratios move the trust region to whole responses.", evidence_ids: ["CLM-005", "CLM-006", "CLM-007", "CLM-008", "CLM-009", "CLM-010", "CLM-011", "CLM-038"], derived_from: ["MECH-01"] }
+  - { id: "MECH-03", description: "RLVR replaces a learned reward model with a programmatic checker; the checker's false-negative rate dilutes signal, its false-positive rate on reachable patterns creates an exploitable gradient, and the base model's priors can make even uninformative rewards look effective under pass@1.", evidence_ids: ["CLM-012", "CLM-013", "CLM-014", "CLM-015", "CLM-016", "CLM-017"], derived_from: ["MECH-01"] }
+  - { id: "MECH-04", description: "Over-optimization: optimizing a proxy reward spends KL from the initial policy; gold reward rises then falls along that KL axis, KL penalties shift where training stops rather than the frontier in Gao et al.'s setting, and hacking must be detected with an independent audit because in-loop signals cannot identify accepted errors; where KL enters (reward vs loss) changes what it penalizes.", evidence_ids: ["CLM-018", "CLM-019", "CLM-020", "CLM-021", "CLM-045", "CLM-046"], derived_from: ["MECH-03"] }
+  - { id: "MECH-05", description: "RL as a distributed system: a rollout engine (inference) and a trainer exchange samples and weights; colocated time-multiplexing reshards one copy, disaggregation decouples resources at the cost of transfer; synchronous steps are gated by the longest response, so rollout often dominates step time and weight sync cost scales with model bytes over link bandwidth.", evidence_ids: ["CLM-022", "CLM-023", "CLM-025", "CLM-026", "CLM-027", "CLM-028", "CLM-047"], derived_from: [] }
+  - { id: "MECH-06", description: "Asynchronous and mismatched RL: overlapping generation and training makes samples stale (version lag) and trajectories can span versions; the sampler and trainer also assign different log-probs to the same tokens; a three-policy view (rollout, proximal/old, current) separates correction (truncated or masked IS from rollout to old) from trust region (clip around old), with ESS as the variance health signal.", evidence_ids: ["CLM-024", "CLM-029", "CLM-030", "CLM-031", "CLM-032", "CLM-033", "CLM-034", "CLM-035", "CLM-036", "CLM-037", "CLM-039"], derived_from: ["MECH-01", "MECH-05"] }
+
+mathematical_models:
+  - { id: "MATH-01", description: "PPO clip L = E[min(rA, clip(r,1-eps_low,1+eps_high)A)], r = exp(log pi_theta - log pi_old); max raise of a positive-advantage token is pi_old(1+eps_high): 0.01->0.012 (0.0128 at 0.28), 0.9->1.08.", evidence_ids: ["CLM-001", "CLM-007"], derived_from: ["MECH-01"] }
+  - { id: "MATH-02", description: "GAE A_t = sum_l (gamma lambda)^l delta_{t+l}, delta_t = r_t + gamma V(s_{t+1}) - V(s_t); GRPO A_i = (r_i - mean)/(std + eps) with sample std in torch, giving +/-0.866 for [1,0,0,1].", evidence_ids: ["CLM-002", "CLM-003", "CLM-044"], derived_from: ["MECH-01"] }
+  - { id: "MATH-03", description: "Entropy change of a tabular softmax under a PG step dH ~= -eta Cov_pi(log pi, pi A).", evidence_ids: ["CLM-008", "CLM-009"], derived_from: ["MECH-02"] }
+  - { id: "MATH-04", description: "Verifier-noised expected reward E[r] = q(1-f_n) + (1-q) f_p; correct-vs-incorrect reward gap (1-f_n-f_p).", evidence_ids: ["CLM-017"], derived_from: ["MECH-03"] }
+  - { id: "MATH-05", description: "Overoptimization forms R_bon(d)=d(alpha-beta d), R_RL(d)=d(alpha-beta log d), d=sqrt(KL); KL_bon = log n - (n-1)/n.", evidence_ids: ["CLM-018"], derived_from: ["MECH-04"] }
+  - { id: "MATH-06", description: "Synchronous step accounting: T_gen = max_i L_i / v, slot utilization sum L_i/(B max L_i), rollout fraction T_gen/(T_gen+T_logprob+T_update+T_sync); weight sync >= bytes/bandwidth.", evidence_ids: ["CLM-026", "CLM-027"], derived_from: ["MECH-05"] }
+  - { id: "MATH-07", description: "Truncated IS w = min(pi_old/pi_rollout, C); sequence log-weight sd ~ sigma sqrt(T); Kish ESS = (sum w)^2 / sum w^2 in [1,B]; AReaL staleness admission floor((N_r-1)/B) <= i + eta.", evidence_ids: ["CLM-024", "CLM-032", "CLM-033", "CLM-034", "CLM-039"], derived_from: ["MECH-06"] }
+
+implementation_mechanisms:
+  - { id: "IMPL-01", description: "verl estimator path: compute_advantage dispatches GAE (reverse recursion + masked_whiten) or GRPO (per-prompt mean/std, eps 1e-6, Dr. GRPO flag); compute_policy_loss_vanilla applies decoupled and dual clip and rollout_is_weights; agg_loss implements five aggregation modes; defaults clip 0.2/0.2/0.2, token-mean, entropy_coeff 0.", evidence_ids: ["CLM-003", "CLM-005", "CLM-045"], derived_from: ["MECH-01", "MECH-02"] }
+  - { id: "IMPL-02", description: "verl system path: RayPPOTrainer.fit generates, sleeps replicas, scores, recomputes old log-probs (decoupled) or reuses rollout log-probs (bypass), applies rollout correction (TIS/IcePop, disabled by default, threshold 2.0), computes advantages, updates actor, then update_weights; the experimental fully-async trainer exposes staleness_threshold, trigger_parameter_sync_step, partial_rollout.", evidence_ids: ["CLM-028", "CLM-029", "CLM-033"], derived_from: ["MECH-05", "MECH-06"] }
+
+failure_modes:
+  - { id: "FAIL-01", description: "Entropy collapse: entropy drops early, groups become identical, zero-variance fraction rises, and accuracy plateaus; symmetric tight upper clip and probability-aligned advantages are candidate causes.", evidence_ids: ["CLM-007", "CLM-008", "CLM-009"], derived_from: ["MECH-02"] }
+  - { id: "FAIL-02", description: "Length pathology from aggregation: per-sample length normalization under-weights tokens in long responses, letting overlong gibberish grow or biasing length by correctness.", evidence_ids: ["CLM-006", "CLM-011", "CLM-047"], derived_from: ["MECH-02"] }
+  - { id: "FAIL-03", description: "Verifier failure: false negatives starve learning as the policy improves; false positives on reachable patterns are exploited; spurious-reward gains on one model family are mistaken for capability.", evidence_ids: ["CLM-014", "CLM-015", "CLM-016", "CLM-017"], derived_from: ["MECH-03"] }
+  - { id: "FAIL-04", description: "Reward hacking / over-optimization: proxy reward rises while independently audited correctness falls; monitors trained on the policy's own outputs erode.", evidence_ids: ["CLM-012", "CLM-018", "CLM-019", "CLM-020", "CLM-021"], derived_from: ["MECH-04"] }
+  - { id: "FAIL-05", description: "Long-tail stall: a few very long responses hold the synchronous step, leaving trainer and most rollout slots idle; truncation fixes time but adds reward noise.", evidence_ids: ["CLM-023", "CLM-025", "CLM-026", "CLM-047"], derived_from: ["MECH-05"] }
+  - { id: "FAIL-06", description: "Stale-data degradation: unbounded or poorly corrected staleness degrades learning even with a decoupled objective; heavy-tailed IS weights collapse ESS.", evidence_ids: ["CLM-024", "CLM-030", "CLM-034", "CLM-036"], derived_from: ["MECH-06"] }
+  - { id: "FAIL-07", description: "Train/inference logprob mismatch: sampler and trainer disagree on the same tokens, so the update is off-policy even at zero staleness; uncorrected it can destabilize training, and correction leaves a deployment gap.", evidence_ids: ["CLM-032", "CLM-033", "CLM-035", "CLM-040"], derived_from: ["MECH-06"] }
+
+production_connections:
+  - { id: "PROD-01", description: "Per-step dashboards: stage timings (gen, old_log_prob, ref, adv, update, sync), response-length quantiles, entropy, clip fractions, zero-variance fraction, KL to init, mismatch KL, IS weight max/ESS, staleness histogram, and an independent audit pass rate.", evidence_ids: ["CLM-005", "CLM-026", "CLM-028", "CLM-033", "CLM-034"], derived_from: ["MECH-05", "MECH-06"] }
+  - { id: "PROD-02", description: "Placement decisions: colocate when one cluster type and moderate scale suffice; disaggregate when generation and training want different hardware or quantities; go asynchronous only with bounded staleness, a decoupled objective, and correction metrics.", evidence_ids: ["CLM-022", "CLM-023", "CLM-024", "CLM-027", "CLM-041"], derived_from: ["MECH-05", "MECH-06"] }
+
+research_connections:
+  - { id: "RESEARCH-01", description: "Estimator variants (DAPO, GSPO, Clip-Cov/KL-Cov, ScaleRL) mostly change compute efficiency and stability; claims are author-reported and model-family dependent.", evidence_ids: ["CLM-007", "CLM-008", "CLM-010", "CLM-038"], derived_from: ["MECH-02"] }
+  - { id: "RESEARCH-02", description: "Verifier reliability and reward hacking under RLVR are open problems (rule vs model verifiers, spurious rewards, audit-based correction, hacking testbeds).", evidence_ids: ["CLM-014", "CLM-015", "CLM-019", "CLM-020"], derived_from: ["MECH-03", "MECH-04"] }
+  - { id: "RESEARCH-03", description: "Async RL and mismatch correction (AReaL, VCPO, ENTR, PACE, calibrated IS, FP16) is a fast-moving 2025-2026 frontier; prefer mechanisms and diagnostics over speedup numbers.", evidence_ids: ["CLM-024", "CLM-032", "CLM-034", "CLM-035", "CLM-036", "CLM-037"], derived_from: ["MECH-06"] }
+
+todo_verify:
+  - { id: "TODO-01", description: "Open the original token-level TIS write-up (Yao et al., fengyao.notion.site/off-policy-rl) and the 'When Speed Kills Stability' blog before citing their numbers.", evidence_ids: ["CLM-048"], derived_from: ["MECH-06"] }
+  - { id: "TODO-02", description: "Trace verl experimental one_step_off_policy and separation trainers before teaching them.", evidence_ids: ["CLM-049"], derived_from: ["MECH-06"] }
+
+candidate_capabilities:
+  - { capability: "Derive and compute advantages, ratios, and clip behavior for GAE and group baselines, and predict when clipping binds.", mapped_mechanisms: ["MECH-01", "MATH-01", "MATH-02", "IMPL-01"] }
+  - { capability: "Choose loss aggregation, clip bounds, and ratio granularity, and diagnose entropy collapse and length pathologies.", mapped_mechanisms: ["MECH-02", "MATH-03", "FAIL-01", "FAIL-02"] }
+  - { capability: "Design and validate an RLVR verifier with measured false-negative and false-positive rates and reward-ablation controls.", mapped_mechanisms: ["MECH-03", "MATH-04", "FAIL-03"] }
+  - { capability: "Detect and bound reward hacking and over-optimization with KL budgets, KL placement, and independent audits.", mapped_mechanisms: ["MECH-04", "MATH-05", "FAIL-04"] }
+  - { capability: "Account RL step time across rollout, scoring, update, and weight sync, and choose colocated versus disaggregated placement.", mapped_mechanisms: ["MECH-05", "MATH-06", "FAIL-05", "PROD-02"] }
+  - { capability: "Operate asynchronous RL with bounded staleness and correct train/inference logprob mismatch using truncated IS and ESS monitoring.", mapped_mechanisms: ["MECH-06", "MATH-07", "IMPL-02", "FAIL-06", "FAIL-07", "PROD-01"] }

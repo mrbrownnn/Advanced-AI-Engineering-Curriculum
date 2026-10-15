@@ -1,0 +1,587 @@
+module: "27-rl-post-training-systems"
+registry_version: "1.0.0"
+research_cutoff: "2026-09-30"
+change_reason: "Initial authoring of Module 27 (RL Post-Training Systems) from the EXPERT-TRACK.md scope contract. Module 19 Lesson 19.5 (RLHF/DPO/GRPO basics, GRPO advantage, Dr. GRPO/DAPO normalization and KL removal) is treated as prerequisite and not re-registered. Sources were opened on 2026-10-12 (arXiv abstracts via the arXiv API and full PDF text for papers whose sections, equations, or numbers are cited); verl source was read at a pinned pre-cutoff commit."
+out_of_scope_candidates:
+  - "Numerical root cause of sampler/trainer logprob mismatch (kernel reduction order, batch invariance) belongs to future Module 30; referenced only."
+  - "Rollout-engine serving internals (continuous batching, KV paging, speculative decoding) belong to Modules 03-05 and 20."
+  - "Distributed training sharding (FSDP/ZeRO, TP/PP for the trainer) belongs to future Module 26."
+  - "MoE routing replay for RL (e.g., R2/R3 modes in verl) is visible in the pinned source but not taught here."
+claims:
+  - id: CLM-001
+    claim: "PPO's clipped surrogate objective is L^CLIP(theta) = E_t[min(r_t(theta) A_t, clip(r_t(theta), 1-eps, 1+eps) A_t)], with r_t(theta) the probability ratio between the current policy and the policy that collected the data; it is designed to allow multiple epochs of minibatch updates on the same samples."
+    provenance: VERIFIED_FACT
+    domain: policy_gradient_estimator
+    concepts: [importance_ratio, ppo_clip]
+    confidence: high
+    currentness_status: "REFERENCE / BASELINE"
+    evidence: [{ source_type: paper, tier: 1, title: "Proximal Policy Optimization Algorithms", authors: "John Schulman, Filip Wolski, Prafulla Dhariwal, Alec Radford, Oleg Klimov", year: "2017", url: "https://arxiv.org/abs/1707.06347", version: "v2", section: "Abstract; Section 3 Clipped Surrogate Objective, Equation 7", accessed_at: "2026-10-12" }]
+    limitations: ["Clipping removes the incentive to move the ratio outside [1-eps, 1+eps] for the clipped sign of the advantage; it is not a hard trust-region constraint."]
+    applicability: "Every PPO/GRPO-family LLM RL loss that uses a ratio against a data-collecting policy."
+    curriculum_usage: { lessons: ["27.1"], labs: ["LAB-A"], assessments: ["Mastery-27"] }
+  - id: CLM-002
+    claim: "Generalized Advantage Estimation defines GAE(gamma, lambda) as the exponentially weighted sum of TD residuals delta_t = r_t + gamma V(s_{t+1}) - V(s_t), sum_l (gamma lambda)^l delta_{t+l}; lambda=0 reduces to the one-step TD residual (lower variance, biased unless V is exact) and lambda=1 to the Monte-Carlo return minus V (no bias from V, higher variance)."
+    provenance: VERIFIED_FACT
+    domain: policy_gradient_estimator
+    concepts: [gae, value_baseline, bias_variance]
+    confidence: high
+    currentness_status: "REFERENCE / BASELINE"
+    evidence: [{ source_type: paper, tier: 1, title: "High-Dimensional Continuous Control Using Generalized Advantage Estimation", authors: "John Schulman, Philipp Moritz, Sergey Levine, Michael Jordan, Pieter Abbeel", year: "2015", url: "https://arxiv.org/abs/1506.02438", version: "v6", section: "Section 3, Equations 16-18", accessed_at: "2026-10-12" }]
+    limitations: ["Requires a learned value function (critic), which is an extra model to train, store, and keep calibrated."]
+    applicability: "PPO with a critic; contrasts with critic-free group baselines."
+    curriculum_usage: { lessons: ["27.1"], labs: ["LAB-A"], assessments: ["Mastery-27"] }
+  - id: CLM-003
+    claim: "At verl commit fbb4b3a8bf636f290c9c59fc346f756849e9c241, compute_gae_advantage_return runs a reversed-time GAE recursion that skips masked positions and then whitens advantages over the response mask (masked_whiten); compute_grpo_outcome_advantage sums token-level rewards into one score per response, groups by prompt index, uses torch.mean and torch.std per group (mean 0 and std 1 for single-sample groups), and returns (score - mean)/(std + epsilon) with epsilon=1e-6, or score - mean when norm_adv_by_std_in_grpo is False (documented as Dr. GRPO), broadcast over response tokens."
+    provenance: VERIFIED_FACT
+    domain: estimator_implementation
+    concepts: [gae, group_baseline, advantage_whitening, verl]
+    confidence: high
+    currentness_status: "CURRENT DEFAULT"
+    evidence:
+      - { source_type: source_code, tier: 1, title: "verl PPO core algorithms", repository: "https://github.com/volcengine/verl", commit: "fbb4b3a8bf636f290c9c59fc346f756849e9c241", verification_date: "2026-10-12", file: "verl/trainer/ppo/core_algos.py", symbol: "compute_gae_advantage_return; compute_grpo_outcome_advantage", entry_point: "verl/trainer/ppo/ray_trainer.py::RayPPOTrainer.fit -> compute_advantage", execution_path: "fit computes token_level_rewards -> compute_advantage dispatches on algorithm.adv_estimator via get_adv_estimator_fn -> GAE recursion + masked_whiten, or GRPO per-group mean/std normalization", url: "https://github.com/volcengine/verl/blob/fbb4b3a8bf636f290c9c59fc346f756849e9c241/verl/trainer/ppo/core_algos.py", accessed_at: "2026-10-12" }
+    limitations: ["Static inspection only; CURRENT DEFAULT is scoped to this verl snapshot, not to the industry.", "torch.std uses Bessel's correction by default (CLM-004), so group std here is the sample std."]
+    applicability: "Reading and reproducing advantage values from a verl run."
+    curriculum_usage: { lessons: ["27.1"], labs: ["LAB-A"], assessments: ["Production-Source-Trace"] }
+  - id: CLM-004
+    claim: "PyTorch documents that torch.std defaults to Bessel's correction (correction=1), i.e., divides by N-1."
+    provenance: VERIFIED_FACT
+    domain: estimator_implementation
+    concepts: [group_baseline]
+    confidence: high
+    currentness_status: "CURRENT DEFAULT"
+    evidence: [{ source_type: official_docs, tier: 2, title: "torch.std", authors: "PyTorch", year: "2026", url: "https://docs.pytorch.org/docs/2.14/generated/torch.std.html", version: "2.14", accessed_at: "2026-10-12" }]
+    limitations: ["Applies to the documented PyTorch version; other frameworks default differently (e.g., NumPy defaults to ddof=0)."]
+    applicability: "Predicting GRPO advantage magnitudes in implementations that call torch.std."
+    curriculum_usage: { lessons: ["27.1"], labs: ["LAB-A"] }
+  - id: CLM-005
+    claim: "At verl commit fbb4b3a8bf636f290c9c59fc346f756849e9c241, agg_loss supports token-mean (masked sum divided by the global count of valid tokens), token-sum, seq-mean-token-sum, seq-mean-token-sum-norm (additionally divided by a constant horizon), and seq-mean-token-mean; compute_policy_loss_vanilla computes ratio = exp(clamp(log_prob - old_log_prob, -20, 20)), applies decoupled clip bounds 1-clip_ratio_low and 1+clip_ratio_high, a dual-clip bound clip_ratio_c for negative advantages, multiplies by rollout_is_weights when present, and aggregates with agg_loss; the actor config defaults are clip_ratio 0.2, clip_ratio_low 0.2, clip_ratio_high 0.2, clip_ratio_c 3.0, loss_agg_mode token-mean, entropy_coeff 0, use_kl_loss false, kl_loss_coef 0.001, ppo_epochs 1."
+    provenance: VERIFIED_FACT
+    domain: estimator_implementation
+    concepts: [loss_aggregation, ppo_clip, clip_higher, verl]
+    confidence: high
+    currentness_status: "CURRENT DEFAULT"
+    evidence:
+      - { source_type: source_code, tier: 1, title: "verl PPO core algorithms", repository: "https://github.com/volcengine/verl", commit: "fbb4b3a8bf636f290c9c59fc346f756849e9c241", verification_date: "2026-10-12", file: "verl/trainer/ppo/core_algos.py", symbol: "agg_loss; compute_policy_loss_vanilla", entry_point: "verl/workers/utils/losses.py::ppo_loss", execution_path: "ppo_loss selects policy_loss.loss_mode (default vanilla) via get_policy_loss_fn -> compute_policy_loss_vanilla(old_log_prob, log_prob, advantages, response_mask, loss_agg_mode, config, rollout_is_weights) -> agg_loss", url: "https://github.com/volcengine/verl/blob/fbb4b3a8bf636f290c9c59fc346f756849e9c241/verl/trainer/ppo/core_algos.py", accessed_at: "2026-10-12" }
+      - { source_type: source_code, tier: 1, title: "verl actor config", repository: "https://github.com/volcengine/verl", commit: "fbb4b3a8bf636f290c9c59fc346f756849e9c241", verification_date: "2026-10-12", file: "verl/trainer/config/actor/actor.yaml", symbol: "clip_ratio; clip_ratio_low; clip_ratio_high; clip_ratio_c; loss_agg_mode; entropy_coeff; use_kl_loss; kl_loss_coef; ppo_epochs", url: "https://github.com/volcengine/verl/blob/fbb4b3a8bf636f290c9c59fc346f756849e9c241/verl/trainer/config/actor/actor.yaml", accessed_at: "2026-10-12" }
+    limitations: ["Config-field defaults are not proof of what a given run used; read the resolved run config.", "Static inspection only."]
+    applicability: "Mapping loss-design choices to a production framework's knobs."
+    curriculum_usage: { lessons: ["27.1", "27.2"], labs: ["LAB-A"], assessments: ["Production-Source-Trace"] }
+  - id: CLM-006
+    claim: "DAPO reports that GRPO's sample-level loss (average over tokens within a sample, then over samples) gives tokens in longer responses a lower per-token contribution, which in long-CoT RL impeded learning from high-quality long samples and failed to penalize gibberish or repetition in overlong samples, leading to unhealthy growth of entropy and response length; DAPO replaces it with a token-level loss normalized by the total number of tokens in the group."
+    provenance: VERIFIED_FACT
+    domain: loss_aggregation
+    concepts: [loss_aggregation, length_bias]
+    confidence: high
+    currentness_status: "WORKLOAD-DEPENDENT"
+    evidence: [{ source_type: paper, tier: 1, title: "DAPO: An Open-Source LLM Reinforcement Learning System at Scale", authors: "Qiying Yu, Zheng Zhang, Ruofei Zhu, Yufeng Yuan, et al.", year: "2025", url: "https://arxiv.org/abs/2503.14476", version: "v2", section: "Section 3.3 Token-Level Policy Gradient Loss, Equation 12; Figure 4", accessed_at: "2026-10-12" }]
+    limitations: ["Observed in DAPO's long-CoT math setting with Qwen2.5-32B base; magnitude is setup-specific."]
+    applicability: "Choosing loss aggregation for long, variable-length responses."
+    curriculum_usage: { lessons: ["27.2"], labs: ["LAB-A", "LAB-B"], assessments: ["Mastery-27"] }
+  - id: CLM-007
+    claim: "DAPO reports entropy collapse with naive PPO/GRPO and attributes part of it to the upper clip: with eps=0.2 and positive advantage, tokens with old probability 0.01 and 0.9 can be raised at most to 0.012 and 1.08 (pi_old x (1+eps)), so low-probability exploration tokens are tightly bounded; it observed the mean probability of up-clipped tokens below 0.2, decoupled the bounds (Clip-Higher) with eps_low=0.2 and eps_high=0.28, and reported in its progressive ablation (Table 1, AIME24 avg@32, Qwen2.5-32B base) naive GRPO 30, +overlong filtering 36, +Clip-Higher 38, +soft overlong punishment 41, +token-level loss 42, +dynamic sampling (DAPO) 50."
+    provenance: VERIFIED_FACT
+    domain: entropy_control
+    concepts: [clip_higher, entropy_collapse]
+    confidence: high
+    currentness_status: "WORKLOAD-DEPENDENT"
+    evidence: [{ source_type: paper, tier: 1, title: "DAPO: An Open-Source LLM Reinforcement Learning System at Scale", authors: "Qiying Yu, Zheng Zhang, Ruofei Zhu, Yufeng Yuan, et al.", year: "2025", url: "https://arxiv.org/abs/2503.14476", version: "v2", section: "Section 3.1 Clip-Higher; Section 4 experimental settings; Table 1", table: "Table 1", accessed_at: "2026-10-12" }]
+    numeric_metadata: { numeric_type: measured_behavior, workload: "Long-CoT math RL (DAPO-Math dataset)", model: "Qwen2.5-32B base", metric_definition: "AIME 2024 avg@32 accuracy", measurement_method: "Author-reported single progressive ablation; not independently reproduced here" }
+    limitations: ["Progressive ablation adds techniques cumulatively; each increment is not an independent effect estimate.", "Single model family and task domain."]
+    applicability: "Diagnosing entropy collapse and choosing asymmetric clip bounds."
+    curriculum_usage: { lessons: ["27.2"], labs: ["LAB-A"], assessments: ["Mastery-27", "Incident-27.1"] }
+  - id: CLM-008
+    claim: "Cui et al. report that without entropy intervention policy entropy drops sharply early in RL for reasoning, fit an empirical relation R = -a exp(H) + b between entropy and downstream performance, and derive for tabular softmax policies that the step-wise entropy change is approximately the negative covariance between action log-probability and logit change, where under vanilla policy gradient the logit change is eta pi(a|s) A(s,a); they propose Clip-Cov and KL-Cov, which restrict updates of high-covariance tokens."
+    provenance: VERIFIED_FACT
+    domain: entropy_control
+    concepts: [entropy_collapse, entropy_covariance]
+    confidence: high
+    currentness_status: "FRONTIER"
+    evidence: [{ source_type: paper, tier: 1, title: "The Entropy Mechanism of Reinforcement Learning for Reasoning Language Models", authors: "Ganqu Cui, Yuchen Zhang, Jiacheng Chen, Lifan Yuan, et al.", year: "2025", url: "https://arxiv.org/abs/2505.22617", version: "v1", section: "Abstract; Section 3.1 Lemma 1; Section 3.2 Proposition 1, Theorem 1", accessed_at: "2026-10-12" }]
+    limitations: ["The derivation is first-order and for tabular softmax policies; LLM logits share parameters.", "The entropy-performance fit is empirical over the authors' runs, not a law."]
+    applicability: "Explaining and monitoring entropy decline in policy-gradient RL."
+    curriculum_usage: { lessons: ["27.2"], labs: ["LAB-A"], assessments: ["Mastery-27", "Incident-27.1"] }
+  - id: CLM-009
+    claim: "For a one-state tabular softmax policy updated by one vanilla policy-gradient step, the first-order entropy change -eta Cov_pi(log pi, pi A) is negative when the advantage is positively aligned with probability and positive when advantage favors low-probability actions; with pi=[0.7,0.2,0.1], eta=0.1, A=[0.3,-0.7,-0.7] the predicted change is -0.00986 nats versus -0.00991 exact, and with A=[-0.1,-0.1,0.9] it is +0.00321 versus +0.00321 exact."
+    provenance: DERIVED
+    domain: entropy_control
+    concepts: [entropy_covariance, entropy_collapse]
+    confidence: high
+    currentness_status: "REFERENCE / BASELINE"
+    assumptions: ["Single state, three actions, logits are the parameters, update z' = z + eta pi(a) A(a) (Proposition 1 of Cui et al.).", "Advantages are mean-zero under pi."]
+    derivation: "Cov_pi(log pi, pi A) = E_pi[log pi * pi A] - E_pi[log pi] E_pi[pi A]. Case 1 gives 0.098555, so the predicted dH = -0.1*0.098555 = -0.009855; recomputing the softmax after the update gives H from 0.80182 to 0.79191 (dH = -0.009906). Case 2 gives Cov = -0.032088, predicted +0.003209, exact +0.003210 (Python recomputation)."
+    limitations: ["Tabular toy; real LLM updates move shared parameters and many states at once."]
+    applicability: "Building intuition and a CPU check for the entropy-covariance mechanism."
+    related_claims: [CLM-008]
+    curriculum_usage: { lessons: ["27.2"], labs: ["LAB-A"] }
+  - id: CLM-010
+    claim: "GSPO defines the importance ratio from sequence likelihood with length normalization, s_i = (pi_theta(y_i|x)/pi_old(y_i|x))^(1/|y_i|) = exp(mean_t log ratio_t), and clips whole responses instead of tokens; the authors report better training efficiency than GRPO, stabilized Mixture-of-Experts RL training, and note that its clipping ranges differ from GRPO's by orders of magnitude because of the different ratio definition."
+    provenance: VERIFIED_FACT
+    domain: policy_gradient_estimator
+    concepts: [importance_ratio, sequence_level_ratio]
+    confidence: high
+    currentness_status: "FRONTIER"
+    evidence: [{ source_type: paper, tier: 1, title: "Group Sequence Policy Optimization", authors: "Chujie Zheng, Shixuan Liu, Mingze Li, Xiong-Hui Chen, et al.", year: "2025", url: "https://arxiv.org/abs/2507.18071", version: "v2", section: "Abstract; Section 4, Equation 7", accessed_at: "2026-10-12" }]
+    limitations: ["Author-reported comparison on the authors' models (Qwen3 lineage)."]
+    applicability: "Choosing token- versus sequence-level ratios, especially for MoE policies."
+    curriculum_usage: { lessons: ["27.2"], labs: ["LAB-A"], assessments: ["Mastery-27"] }
+  - id: CLM-011
+    claim: "Liu et al. report that popular open-source PPO implementations for LLM post-training normalize the loss by response length, which is not a constant and misaligns with the PPO objective, introducing a length bias that predates GRPO."
+    provenance: VERIFIED_FACT
+    domain: loss_aggregation
+    concepts: [length_bias, loss_aggregation]
+    confidence: high
+    currentness_status: "WORKLOAD-DEPENDENT"
+    evidence: [{ source_type: paper, tier: 1, title: "Understanding R1-Zero-Like Training: A Critical Perspective", authors: "Zichen Liu, Changyu Chen, Wenjun Li, Penghui Qi, Tianyu Pang, Chao Du, Wee Sun Lee, Min Lin", year: "2025", url: "https://arxiv.org/abs/2503.20783", version: "v2", section: "Section 3.1, Listing 1, Table 2", accessed_at: "2026-10-12" }]
+    limitations: ["Survey of implementations at the paper's date; implementations have since added options (CLM-005)."]
+    applicability: "Auditing a training framework's loss aggregation."
+    curriculum_usage: { lessons: ["27.2"], labs: ["LAB-B"], assessments: ["Production-Source-Trace"] }
+  - id: CLM-012
+    claim: "Tulu 3 introduces RLVR: a deterministic verifiable reward function gives reward alpha if a completion is verifiably correct and 0 otherwise, optimized with PPO under a KL-to-reference penalty; the authors report that some higher-KL RLVR runs on prompts with constraints (IFEval-style) produced overoptimized outputs that satisfied the checker without meaningful content (Appendix B.4)."
+    provenance: VERIFIED_FACT
+    domain: rlvr
+    concepts: [rlvr, verifier, overoptimization]
+    confidence: high
+    currentness_status: "CURRENT DEFAULT"
+    evidence: [{ source_type: paper, tier: 1, title: "Tulu 3: Pushing Frontiers in Open Language Model Post-Training", authors: "Nathan Lambert, Jacob Morrison, Valentina Pyatkin, Shengyi Huang, et al.", year: "2024", url: "https://arxiv.org/abs/2411.15124", version: "v5", section: "Section 6 (Figure 18, Equations 7-8); Appendix B.4, Figure 28", accessed_at: "2026-10-12" }]
+    limitations: ["CURRENT DEFAULT refers to RLVR as a common open recipe pattern for verifiable domains, not to Tulu 3's specific hyperparameters."]
+    applicability: "Defining RLVR and its exposure to checker overoptimization."
+    curriculum_usage: { lessons: ["27.3", "27.4"], labs: ["LAB-B"], assessments: ["Mastery-27"] }
+  - id: CLM-013
+    claim: "DeepSeek-R1-Zero used a rule-based reward of accuracy rewards (e.g., boxed final answers checked by rules, compiler and test cases for code) plus format rewards, and did not use an outcome or process neural reward model because the authors found neural reward models may suffer reward hacking in large-scale RL and add retraining cost and pipeline complexity."
+    provenance: VERIFIED_FACT
+    domain: rlvr
+    concepts: [rlvr, verifier, reward_hacking]
+    confidence: high
+    currentness_status: "REFERENCE / BASELINE"
+    evidence: [{ source_type: paper, tier: 1, title: "DeepSeek-R1: Incentivizing Reasoning Capability in LLMs via Reinforcement Learning", authors: "DeepSeek-AI, Daya Guo, Dejian Yang, Haowei Zhang, et al.", year: "2025", url: "https://arxiv.org/abs/2501.12948", version: "v1", section: "Section 2.2.2 Reward Modeling", accessed_at: "2026-10-12" }]
+    limitations: ["Statement of the authors' rationale; no controlled comparison is given in that section."]
+    applicability: "Choosing rule-based versus learned rewards."
+    curriculum_usage: { lessons: ["27.3"], labs: ["LAB-B"], assessments: ["Mastery-27"] }
+  - id: CLM-014
+    claim: "Huang et al. report for math RLVR that widely used rule-based verifiers had near-perfect precision (>99%) but limited recall (average 86%, i.e., 14% of correct responses marked incorrect; 0.78 on Skywork-OR1), with recall falling as the generating model gets stronger; model-based verifiers improved static accuracy (e.g., recall 84% to 92% on Skywork-OR1) but were susceptible to reward hacking during RL, misclassifying certain response patterns as correct, particularly after fine-tuning."
+    provenance: VERIFIED_FACT
+    domain: verifier_design
+    concepts: [verifier, verifier_false_negative, verifier_false_positive, reward_hacking]
+    confidence: high
+    currentness_status: "WORKLOAD-DEPENDENT"
+    evidence: [{ source_type: paper, tier: 1, title: "From Accuracy to Robustness: A Study of Rule- and Model-based Verifiers in Mathematical Reasoning", authors: "Yuzhen Huang, Weihao Zeng, Xingshan Zeng, Qi Zhu, Junxian He", year: "2025", url: "https://arxiv.org/abs/2505.22203", version: "v3", section: "Abstract; Section 1; Section 3.2; Figures 2-3", accessed_at: "2026-10-12" }]
+    numeric_metadata: { numeric_type: measured_behavior, workload: "Math RL datasets; responses sampled from several models including DeepSeek-R1-Distill-Qwen-32B", metric_definition: "Verifier precision and recall against labeled correctness", measurement_method: "Author-reported static classification evaluation" }
+    limitations: ["Math only; verifier versions and datasets are those evaluated."]
+    applicability: "Estimating verifier error rates before trusting a reward."
+    curriculum_usage: { lessons: ["27.3"], labs: ["LAB-B"], assessments: ["Mastery-27", "Incident-27.1"] }
+  - id: CLM-015
+    claim: "Shao et al. report that RLVR with GRPO improved Qwen2.5-Math-7B on MATH-500 by 21.4 points with randomly assigned rewards versus 29.1 points with ground-truth rewards, attribute part of this to a clipping bias that amplifies high-prior pretrained behaviors (e.g., code reasoning rising from 65% to over 90%), and report that such spurious rewards often fail to produce gains on other families such as Llama3 or OLMo2."
+    provenance: VERIFIED_FACT
+    domain: verifier_design
+    concepts: [spurious_reward, rlvr, ppo_clip]
+    confidence: high
+    currentness_status: "FRONTIER"
+    evidence: [{ source_type: paper, tier: 1, title: "Spurious Rewards: Rethinking Training Signals in RLVR", authors: "Rulin Shao, Shuyue Stella Li, Rui Xin, Scott Geng, et al.", year: "2025", url: "https://arxiv.org/abs/2506.10947", version: "v2", section: "Abstract; Section 2", accessed_at: "2026-10-12" }]
+    numeric_metadata: { numeric_type: measured_behavior, workload: "RLVR on math", model: "Qwen2.5-Math-7B", metric_definition: "MATH-500 accuracy gain in percentage points", measurement_method: "Author-reported" }
+    limitations: ["Strongly model-dependent; not evidence that rewards do not matter in general."]
+    applicability: "Requiring reward-ablation controls and multi-family validation for RLVR claims."
+    curriculum_usage: { lessons: ["27.3"], labs: ["LAB-B"], assessments: ["Mastery-27"] }
+  - id: CLM-016
+    claim: "Yue et al. report that RLVR-trained models outperform their base models at small k (e.g., pass@1), but base models achieve higher pass@k at large k across evaluated model families, algorithms, and benchmarks, and that the evaluated RLVR algorithms performed similarly."
+    provenance: VERIFIED_FACT
+    domain: rlvr
+    concepts: [rlvr, pass_at_k]
+    confidence: high
+    currentness_status: "FRONTIER"
+    evidence: [{ source_type: paper, tier: 1, title: "Does Reinforcement Learning Really Incentivize Reasoning Capacity in LLMs Beyond the Base Model?", authors: "Yang Yue, Zhiqi Chen, Rui Lu, Andrew Zhao, et al.", year: "2025", url: "https://arxiv.org/abs/2504.13837", version: "v5", section: "Abstract", accessed_at: "2026-10-12" }]
+    limitations: ["Abstract-level inspection; scope is the evaluated training setups and k range."]
+    applicability: "Choosing pass@1 versus pass@k as the RL evaluation contract."
+    curriculum_usage: { lessons: ["27.3"], labs: ["LAB-B"], assessments: ["Mastery-27"] }
+  - id: CLM-017
+    claim: "For a binary verifier with false-negative rate f_n on correct responses and false-positive rate f_p on incorrect ones, a policy whose responses are correct with probability q has expected reward q(1-f_n) + (1-q) f_p; the reward gap between a correct and an incorrect response is (1-f_n-f_p), so verifier errors shrink the learning signal, and if a response pattern raises f_p on incorrect answers the policy can increase reward while q falls."
+    provenance: DERIVED
+    domain: verifier_design
+    concepts: [verifier_false_negative, verifier_false_positive, reward_hacking]
+    confidence: high
+    currentness_status: "REFERENCE / BASELINE"
+    assumptions: ["Verifier errors are conditionally independent of anything except correctness and the pattern considered.", "Binary reward in {0,1}."]
+    derivation: "E[r] = P(correct)P(r=1|correct) + P(incorrect)P(r=1|incorrect). With f_n=0.14, f_p=0.01, q=0.60: E[r]=0.60*0.86+0.40*0.01=0.520. A hacking policy with q=0.30 whose incorrect answers use a pattern with f_p=0.90 gets 0.30*0.86+0.70*0.90=0.888 > 0.520."
+    limitations: ["Real verifier errors correlate with difficulty, format, and policy behavior; f_n and f_p drift as the policy changes (CLM-014)."]
+    applicability: "Budgeting verifier error before RL and designing audits."
+    related_claims: [CLM-014, CLM-019]
+    curriculum_usage: { lessons: ["27.3"], labs: ["LAB-B"], assessments: ["Mastery-27"] }
+  - id: CLM-018
+    claim: "Gao et al., using a synthetic setup where a fixed gold reward model labels data for a proxy reward model, find that gold reward as a function of d = sqrt(KL(pi || pi_init)) follows R_bon(d) = d(alpha_bon - beta_bon d) for best-of-n and R_RL(d) = d(alpha_RL - beta_RL log d) for RL (PPO), with coefficients scaling smoothly with reward-model size; best-of-n KL is computed analytically as log n - (n-1)/n; RL consumes far more KL than best-of-n; and in their setting varying the KL penalty did not change the KL-gold frontier, acting like early stopping, while having a strictly larger proxy-gold gap."
+    provenance: VERIFIED_FACT
+    domain: reward_overoptimization
+    concepts: [overoptimization, reward_model, kl_budget]
+    confidence: high
+    currentness_status: "REFERENCE / BASELINE"
+    evidence: [{ source_type: paper, tier: 1, title: "Scaling Laws for Reward Model Overoptimization", authors: "Leo Gao, John Schulman, Jacob Hilton", year: "2022", url: "https://arxiv.org/abs/2210.10760", version: "v1", section: "Section 1 (functional forms); Section 2 (BoN KL); Section 3.5 RL vs BoN; Section 3.6 Effect of KL Penalty", accessed_at: "2026-10-12" }]
+    limitations: ["Synthetic gold reward model, not human labels; the authors note the KL-penalty result may be sensitive to hyperparameters.", "Learned reward models; not directly a law for rule-based verifiers."]
+    applicability: "Treating KL from the initial policy as an optimization budget and expecting a gold-reward peak."
+    curriculum_usage: { lessons: ["27.4"], labs: ["LAB-B"], assessments: ["Mastery-27"] }
+  - id: CLM-019
+    claim: "Moya et al. characterize, via gradient flow with a fixed imperfect verifier, conditions under which reward rises while correctness falls in RLVR, show that observations available during RLVR are in general insufficient to detect or identify accepted errors, and propose a correction using audit feedback about correctness that reduces accepted errors under partial auditing in bandit and language-model experiments."
+    provenance: VERIFIED_FACT
+    domain: reward_hacking
+    concepts: [reward_hacking, verifier_false_positive, audit]
+    confidence: medium
+    currentness_status: "FRONTIER"
+    evidence: [{ source_type: paper, tier: 1, title: "Verifier Errors in RLVR: Reward Hacking, Limits of Feedback, and Selective Control", authors: "Christian Moya, Elliott Thornley, Guang Lin", year: "2026", url: "https://arxiv.org/abs/2609.35677", version: "v1", section: "Abstract", accessed_at: "2026-10-12" }]
+    limitations: ["Abstract-level inspection; preprint dated 2026-09-28, near the research cutoff; not peer reviewed."]
+    applicability: "Justifying independent audits rather than training-signal-only hacking detection."
+    curriculum_usage: { lessons: ["27.4"], labs: ["LAB-B"], assessments: ["Mastery-27"] }
+  - id: CLM-020
+    claim: "The CATCH testbed for coding RL deliberately exposes evaluator loopholes and labels hacking by comparing success under the vulnerable evaluator with correctness under an independent audit; its authors report that initial model and reward difficulty shape hacking emergence and that a chain-of-thought monitor initially suppressed hacking but its protection eroded as the policy learned to mislead the monitor with code comments."
+    provenance: VERIFIED_FACT
+    domain: reward_hacking
+    concepts: [reward_hacking, audit]
+    confidence: medium
+    currentness_status: "FRONTIER"
+    evidence: [{ source_type: paper, tier: 1, title: "CATCH: A Controllable Analysis Testbed for Reward Hacking in Coding RL", authors: "Shouli Wang, Yanfeng Jia, Zhihao Ou, Zitao Su, et al.", year: "2026", url: "https://arxiv.org/abs/2609.39533", version: "v3", section: "Abstract", accessed_at: "2026-10-12" }]
+    limitations: ["Abstract-level inspection; preprint near the research cutoff."]
+    applicability: "Designing hacking detection that is re-evaluated throughout training."
+    curriculum_usage: { lessons: ["27.4"], labs: ["LAB-B"], assessments: ["Mastery-27", "Incident-27.1"] }
+  - id: CLM-021
+    claim: "When a small policy is trained with GRPO against a verifier with a planted loophole, the training reward and an independent strict verifier's accuracy on the same held-out prompts will diverge, and the divergence (training-verifier pass rate minus strict pass rate) will become detectable before the training reward plateaus."
+    provenance: HYPOTHESIS
+    domain: reward_hacking
+    concepts: [reward_hacking, audit, verifier_false_positive]
+    confidence: medium
+    currentness_status: "WORKLOAD-DEPENDENT"
+    hypothesis:
+      prediction: "The paired gap (exploitable-verifier pass rate - strict-verifier pass rate) on a frozen held-out prompt set grows beyond a pre-declared margin delta while exploitable-verifier reward is still rising, and the fraction of responses containing the loophole pattern rises with it."
+      measurement_target: "Per-checkpoint paired pass rates under both verifiers on frozen held-out prompts with bootstrap intervals; loophole-pattern frequency; KL to the initial policy; response length."
+      falsifying_observation: "The gap stays within delta through training reward plateau, or it grows only after the reward has plateaued, or loophole frequency does not rise in the checkpoints where the gap grows."
+    limitations: ["Toy task and small model; loophole salience and base-model priors control whether hacking appears (CLM-020)."]
+    applicability: "LAB B and hacking monitors in production RLVR."
+    related_claims: [CLM-017, CLM-018, CLM-020]
+    curriculum_usage: { lessons: ["27.4"], labs: ["LAB-B"], assessments: ["Mastery-27"] }
+  - id: CLM-022
+    claim: "HybridFlow (the paper behind verl) models RLHF as a dataflow whose nodes are distributed training or generation programs, combines single-controller and multi-controller paradigms, and uses a 3D-HybridEngine to reshard actor weights between training and generation phases with zero memory redundancy and reduced communication; the authors report 1.53x to 20.57x throughput improvement over state-of-the-art baselines on evaluated RLHF algorithms."
+    provenance: VERIFIED_FACT
+    domain: rl_systems
+    concepts: [rollout_trainer_split, colocation, weight_sync]
+    confidence: high
+    currentness_status: "CURRENT DEFAULT"
+    evidence: [{ source_type: paper, tier: 1, title: "HybridFlow: A Flexible and Efficient RLHF Framework", authors: "Guangming Sheng, Chi Zhang, Zilingfeng Ye, Xibin Wu, Wang Zhang, Ru Zhang, Yanghua Peng, Haibin Lin, Chuan Wu", year: "2024", url: "https://arxiv.org/abs/2409.19256", version: "v2", section: "Abstract; Section 2", accessed_at: "2026-10-12" }]
+    numeric_metadata: { numeric_type: measured_behavior, metric_definition: "Throughput versus baseline RLHF frameworks", measurement_method: "Author-reported; range spans models, algorithms, and cluster sizes" }
+    limitations: ["Speedup range depends on baselines and configuration; not a general constant."]
+    applicability: "Colocated actor resharding between train and generate phases."
+    curriculum_usage: { lessons: ["27.5"], labs: ["LAB-C"], assessments: ["Mastery-27"] }
+  - id: CLM-023
+    claim: "StreamRL reports that the colocated architecture (generation and training time-multiplexed on the same GPUs) suffers resource coupling at scale because generation is memory-bandwidth-bound while training is compute-bound yet both must use the same resource quantity and hardware type; it identifies pipeline bubbles from stage dependencies and skewness bubbles from long-tail output lengths, addresses the latter with an output-length ranker and skewness-aware scheduling, and reports up to 2.66x throughput over existing systems."
+    provenance: VERIFIED_FACT
+    domain: rl_systems
+    concepts: [colocation, disaggregation, long_tail_rollout]
+    confidence: high
+    currentness_status: "WORKLOAD-DEPENDENT"
+    evidence: [{ source_type: paper, tier: 1, title: "StreamRL: Scalable, Heterogeneous, and Elastic RL for LLMs with Disaggregated Stream Generation", authors: "Yinmin Zhong, Zili Zhang, Xiaoniu Song, Hanpeng Hu, et al.", year: "2025", url: "https://arxiv.org/abs/2504.15930", version: "v1", section: "Abstract; Section 1; Section 3 (pipeline and skewness bubbles)", accessed_at: "2026-10-12" }]
+    limitations: ["Author-reported against their baselines; colocation remains attractive where resource coupling is not binding."]
+    applicability: "Colocated versus disaggregated placement decisions."
+    curriculum_usage: { lessons: ["27.5"], labs: ["LAB-C"], assessments: ["Mastery-27"] }
+  - id: CLM-024
+    claim: "AReaL reports that synchronous RL systems must wait for the longest output in a batch before updating, decouples generation from training with interruptible rollout workers that, on a weight update, discard KV caches, recompute them with new weights, and continue decoding (so trajectories can span policy versions), bounds staleness by admitting new generation requests only while floor((N_r - 1)/B) <= i + eta, and uses a decoupled PPO objective with separate behavior and proximal policies; in its ablation (1.5B model, math), naive PPO degraded with staleness (e.g., AIME24 23.3 at eta=4 vs 42.0 synchronous) while the decoupled objective stayed near the oracle up to eta=8 (41.0), with unbounded staleness still inferior; it reports up to 2.77x training speedup over synchronous systems with matched or improved final performance."
+    provenance: VERIFIED_FACT
+    domain: async_rl
+    concepts: [staleness, decoupled_ppo, async_rl, weight_sync]
+    confidence: high
+    currentness_status: "FRONTIER"
+    evidence: [{ source_type: paper, tier: 1, title: "AReaL: A Large-Scale Asynchronous Reinforcement Learning System for Language Reasoning", authors: "Wei Fu, Jiaxuan Gao, Xujie Shen, Chen Zhu, et al.", year: "2025", url: "https://arxiv.org/abs/2505.24298", version: "v5", section: "Abstract; Section 4 (interruptible rollout); Section 5.1 Equation 3; Section 5.2 Equations 4-5, Proposition 1; Table 2", table: "Table 2", accessed_at: "2026-10-12" }]
+    numeric_metadata: { numeric_type: measured_behavior, workload: "Math reasoning RL", model: "1.5B (ablation)", metric_definition: "AIME24/AIME25/AMC23/MATH500 accuracy after 250 steps", measurement_method: "Author-reported ablation" }
+    limitations: ["Ablation at one model size and task family; the non-monotonic naive-PPO row (eta=4 below eta=8) is reported as-is."]
+    applicability: "Bounding staleness and choosing the proximal policy in asynchronous RL."
+    curriculum_usage: { lessons: ["27.5", "27.6"], labs: ["LAB-C"], assessments: ["Mastery-27", "Incident-27.1"] }
+  - id: CLM-025
+    claim: "The DORA authors state that rollout accounts for 50%-80% of total RL step duration (citing prior work), that in math and coding the 99th-percentile response length can exceed the median by over an order of magnitude, that replication-based async methods that drop in-flight long trajectories bias the length distribution used by group-relative advantages, and that partial-rollout methods invalidate the KV cache at each weight update and force re-prefill."
+    provenance: VERIFIED_FACT
+    domain: rl_systems
+    concepts: [long_tail_rollout, throughput_accounting, async_rl]
+    confidence: medium
+    currentness_status: "FRONTIER"
+    evidence: [{ source_type: paper, tier: 1, title: "DORA: A Scalable Asynchronous Reinforcement Learning System for Language Model Training", authors: "Tianhao Hu, Xiangcheng Liu, Yuchun Miao, Youshao Xiao, et al.", year: "2026", url: "https://arxiv.org/abs/2604.26256", version: "v2", section: "Section 1 Introduction; Figures 1-3", accessed_at: "2026-10-12" }]
+    limitations: ["The 50%-80% range is attributed by the authors to cited works, not measured in a stated configuration; treat as a range to measure, not a constant."]
+    applicability: "Motivating per-stage step-time accounting."
+    curriculum_usage: { lessons: ["27.5"], labs: ["LAB-C"], assessments: ["Mastery-27"] }
+  - id: CLM-026
+    claim: "In a synchronous RL step where all responses decode concurrently at a per-sequence rate v until done, generation wall time is max_i(L_i)/v while useful decode slots are sum_i L_i out of B max_i(L_i), so slot utilization is sum_i L_i / (B max_i L_i) and the rollout fraction of the step is T_gen/(T_gen + T_logprob + T_update + T_sync)."
+    provenance: DERIVED
+    domain: throughput_accounting
+    concepts: [throughput_accounting, long_tail_rollout]
+    confidence: high
+    currentness_status: "REFERENCE / BASELINE"
+    assumptions: ["Per-sequence decode rate v is constant as batch occupancy falls (in practice it rises somewhat as the batch drains; Module 04).", "No preemption or KV-capacity stalls."]
+    derivation: "Synthetic B=512 with 461 responses of 4,096 tokens, 46 of 12,288, and 5 of 32,768: sum L = 2,617,344; B x max L = 16,777,216; utilization 15.6%. At v=30 tokens/s, T_gen = 32,768/30 = 1,092.3 s versus 136.5 s for a 4,096-token response; with T_logprob=120 s and T_update=300 s the rollout fraction is 1,092.3/1,512.3 = 72.2%."
+    limitations: ["Upper-bounds the long-tail penalty; real engines refill freed slots only if more work is admitted, which synchronous RL forbids within a step."]
+    applicability: "Step-time accounting and predicting gains from length caps, streaming, or asynchrony."
+    related_claims: [CLM-023, CLM-025]
+    curriculum_usage: { lessons: ["27.5"], labs: ["LAB-C"], assessments: ["Mastery-27"] }
+  - id: CLM-027
+    claim: "Weight synchronization time from trainer to rollout engines is at least model bytes divided by the effective transfer bandwidth of the slowest path: a 7x10^9-parameter model in bf16 (14 GB) takes about 0.28 s at an effective 50 GB/s but about 4.5 s over a 25 Gb/s (3.125 GB/s) link, so its share of step time depends on placement and on how often weights are pushed."
+    provenance: DERIVED
+    domain: weight_sync
+    concepts: [weight_sync, colocation, disaggregation]
+    confidence: high
+    currentness_status: "REFERENCE / BASELINE"
+    assumptions: ["Full-weight push in bf16 (2 bytes/parameter); no compression or delta transfer; bandwidths are synthetic effective values, not hardware specs."]
+    derivation: "14x10^9 bytes / 50x10^9 B/s = 0.28 s; 14x10^9 / 3.125x10^9 = 4.48 s. Colocated resharding replaces network transfer with on-device layout changes (CLM-022) whose cost must be measured."
+    limitations: ["Ignores resharding/gather overhead, engine reload, KV-cache invalidation (CLM-024, CLM-025), and pipelined or broadcast transfers."]
+    applicability: "Budgeting weight-sync frequency in disaggregated or async RL."
+    curriculum_usage: { lessons: ["27.5"], labs: ["LAB-C"], assessments: ["Mastery-27"] }
+  - id: CLM-028
+    claim: "At verl commit fbb4b3a8bf636f290c9c59fc346f756849e9c241, RayPPOTrainer.fit runs per step: async_rollout_manager.generate_sequences, checkpoint_manager.sleep_replicas, reward extraction, then either bypass mode (apply_bypass_mode sets old_log_probs to rollout_log_probs: two policies) or decoupled mode (_compute_old_log_prob recomputes old_log_probs with the training engine: three policies), optional reference and critic forward passes, KL-in-reward when algorithm.use_kl_in_reward is true, rollout correction (decoupled mode only, when rollout_log_probs are present), compute_advantage, optional critic update, _update_actor, and checkpoint_manager.update_weights to push new weights to rollout replicas."
+    provenance: VERIFIED_FACT
+    domain: rl_systems
+    concepts: [rollout_trainer_split, weight_sync, three_policy_view, verl]
+    confidence: high
+    currentness_status: "CURRENT DEFAULT"
+    evidence:
+      - { source_type: source_code, tier: 1, title: "verl PPO Ray trainer", repository: "https://github.com/volcengine/verl", commit: "fbb4b3a8bf636f290c9c59fc346f756849e9c241", verification_date: "2026-10-12", file: "verl/trainer/ppo/ray_trainer.py", symbol: "RayPPOTrainer.fit; RayPPOTrainer._compute_old_log_prob; RayPPOTrainer._update_actor; apply_kl_penalty; compute_advantage", entry_point: "RayPPOTrainer.fit", execution_path: "generate_sequences -> sleep_replicas -> extract_reward -> apply_bypass_mode | _compute_old_log_prob -> _compute_ref_log_prob -> _compute_values -> apply_kl_penalty (if use_kl_in_reward) -> compute_rollout_correction_and_add_to_batch (decoupled) -> compute_advantage -> _update_critic -> _update_actor -> checkpoint_manager.update_weights", url: "https://github.com/volcengine/verl/blob/fbb4b3a8bf636f290c9c59fc346f756849e9c241/verl/trainer/ppo/ray_trainer.py", accessed_at: "2026-10-12" }
+    limitations: ["Static inspection of the synchronous trainer; the experimental fully-async and one-step-off-policy trainers use different loops (CLM-029).", "Engine-side weight-update internals were not traced."]
+    applicability: "Locating rollout, logprob recomputation, correction, update, and sync in one production loop."
+    curriculum_usage: { lessons: ["27.5", "27.6"], labs: ["LAB-D"], assessments: ["Production-Source-Trace"] }
+  - id: CLM-029
+    claim: "At verl commit fbb4b3a8bf636f290c9c59fc346f756849e9c241, the experimental fully-async trainer config sets async_training.staleness_threshold 0.1, trigger_parameter_sync_step 4, and partial_rollout True; its README defines staleness_threshold as the maximum proportion of stale samples (0 means synchronous; the rollouter generates at most (1+staleness_threshold) x trigger_parameter_sync_step x require_batches x ppo_mini_batch_size minus excess stale samples between parameter syncs), states that 1 is roughly one-step-off-policy, and recommends values below 1."
+    provenance: VERIFIED_FACT
+    domain: async_rl
+    concepts: [staleness, async_rl, verl]
+    confidence: high
+    currentness_status: "FRONTIER"
+    evidence:
+      - { source_type: source_code, tier: 1, title: "verl fully-async trainer config", repository: "https://github.com/volcengine/verl", commit: "fbb4b3a8bf636f290c9c59fc346f756849e9c241", verification_date: "2026-10-12", file: "verl/experimental/fully_async_policy/config/fully_async_ppo_trainer.yaml", symbol: "async_training.staleness_threshold; async_training.trigger_parameter_sync_step; async_training.partial_rollout", url: "https://github.com/volcengine/verl/blob/fbb4b3a8bf636f290c9c59fc346f756849e9c241/verl/experimental/fully_async_policy/config/fully_async_ppo_trainer.yaml", accessed_at: "2026-10-12" }
+      - { source_type: official_docs, tier: 2, title: "verl fully_async_policy README", url: "https://github.com/volcengine/verl/blob/fbb4b3a8bf636f290c9c59fc346f756849e9c241/verl/experimental/fully_async_policy/README.md", version: "fbb4b3a8bf636f290c9c59fc346f756849e9c241", accessed_at: "2026-10-12" }
+    limitations: ["Experimental module; staleness here is a sample proportion, not AReaL's version-lag eta (CLM-024) - the two are not interchangeable.", "Rollouter/trainer code paths were not traced."]
+    applicability: "Reading staleness knobs in a production framework."
+    curriculum_usage: { lessons: ["27.6"], labs: ["LAB-C", "LAB-D"], assessments: ["Production-Source-Trace"] }
+  - id: CLM-030
+    claim: "Noukhovitch et al. propose asynchronous RLHF (generate new samples while training on old ones), which requires online but off-policy learning; among tested algorithms online DPO was most robust to off-policy data, robustness increased with policy scale, and they report a LLaMA 3.1 8B chatbot trained about 40% faster than synchronous and Rho 1B on GSM8k about 70% faster while matching final performance."
+    provenance: VERIFIED_FACT
+    domain: async_rl
+    concepts: [async_rl, staleness]
+    confidence: high
+    currentness_status: "WORKLOAD-DEPENDENT"
+    evidence: [{ source_type: paper, tier: 1, title: "Asynchronous RLHF: Faster and More Efficient Off-Policy RL for Language Models", authors: "Michael Noukhovitch, Shengyi Huang, Sophie Xhonneux, Arian Hosseini, Rishabh Agarwal, Aaron Courville", year: "2024", url: "https://arxiv.org/abs/2410.18252", version: "v3", section: "Abstract", accessed_at: "2026-10-12" }]
+    limitations: ["Abstract-level numbers; speedups depend on hardware split and generation/training ratio."]
+    applicability: "Off-policy tolerance as an algorithm property, not only a system knob."
+    curriculum_usage: { lessons: ["27.6"], labs: ["LAB-C"], assessments: ["Mastery-27"] }
+  - id: CLM-031
+    claim: "Hilton, Cobbe, and Schulman show that PPO-style algorithms can be made batch-size-invariant by decoupling the proximal policy (used to control the size of policy updates) from the behavior policy (used for off-policy corrections), which also makes more efficient use of stale data."
+    provenance: VERIFIED_FACT
+    domain: async_rl
+    concepts: [decoupled_ppo, three_policy_view]
+    confidence: high
+    currentness_status: "REFERENCE / BASELINE"
+    evidence: [{ source_type: paper, tier: 1, title: "Batch size-invariance for policy optimization", authors: "Jacob Hilton, Karl Cobbe, John Schulman", year: "2021", url: "https://arxiv.org/abs/2110.00641", version: "v3", section: "Abstract", accessed_at: "2026-10-12" }]
+    limitations: ["Evaluated outside LLMs (abstract-level inspection)."]
+    applicability: "Origin of the behavior/proximal decoupling used by AReaL and verl decoupled mode."
+    curriculum_usage: { lessons: ["27.6"], labs: ["LAB-D"], assessments: ["Mastery-27"] }
+  - id: CLM-032
+    claim: "Qi et al. state that RL frameworks use separate inference (rollout) and training engines whose numerically different outputs create a training-inference mismatch; they describe sequence-level importance sampling as unbiased but high-variance for long responses, truncated IS (min(ratio, C)) and masked IS (ratio x 1[ratio <= C]) as bias-for-variance trades, note that existing patches need an extra forward pass (about 25% added training cost under their assumption that backward costs twice forward) and leave a deployment gap, identify BF16's 7 mantissa bits (versus FP16's 10) as the primary source of the mismatch in their experiments, and report that switching RL fine-tuning to FP16 virtually eliminated it with more stable optimization across their tested algorithms and frameworks."
+    provenance: VERIFIED_FACT
+    domain: logprob_mismatch
+    concepts: [logprob_mismatch, truncated_importance_sampling, importance_ratio]
+    confidence: high
+    currentness_status: "FRONTIER"
+    evidence: [{ source_type: paper, tier: 1, title: "Defeating the Training-Inference Mismatch via FP16", authors: "Penghui Qi, Zichen Liu, Xiangxin Zhou, Tianyu Pang, Chao Du, Wee Sun Lee, Min Lin", year: "2025", url: "https://arxiv.org/abs/2510.26788", version: "v1", section: "Section 1; Section 2.1 Equations 5-7; Section 3 (precision formats)", accessed_at: "2026-10-12" }]
+    limitations: ["FP16 needs loss scaling for range; the claim that BF16 is the primary cause is the authors' finding for their setups. The numeric root cause analysis belongs to Module 30."]
+    applicability: "Defining mismatch and the correction options."
+    curriculum_usage: { lessons: ["27.6"], labs: ["LAB-D"], assessments: ["Mastery-27", "Incident-27.1"] }
+  - id: CLM-033
+    claim: "At verl commit fbb4b3a8bf636f290c9c59fc346f756849e9c241, rollout_corr_helper.py documents its purpose as correcting rollout/training implementation mismatch (e.g., vLLM BF16 vs FSDP FP32), model-update staleness, and general distribution shift; it computes log_ratio = old_log_prob - rollout_log_prob, token-level IS weights exp(clamp(log_ratio, -20, 20)) or a sequence-level weight exp(sum of log ratios) broadcast over tokens, truncates them with clamp(max=rollout_is_threshold) (TIS) or zeroes out-of-band weights for a lower_upper threshold (IcePop), detaches them, and reports metrics including effective sample size; the default algorithm config has rollout_is null (disabled), rollout_is_threshold 2.0, and bypass_mode false; compute_policy_loss_vanilla multiplies per-token losses by rollout_is_weights."
+    provenance: VERIFIED_FACT
+    domain: logprob_mismatch
+    concepts: [truncated_importance_sampling, logprob_mismatch, effective_sample_size, verl]
+    confidence: high
+    currentness_status: "CURRENT DEFAULT"
+    evidence:
+      - { source_type: source_code, tier: 1, title: "verl rollout correction helper", repository: "https://github.com/volcengine/verl", commit: "fbb4b3a8bf636f290c9c59fc346f756849e9c241", verification_date: "2026-10-12", file: "verl/trainer/ppo/rollout_corr_helper.py", symbol: "compute_rollout_correction_weights; compute_rollout_correction_and_rejection_mask; compute_rollout_correction_and_add_to_batch; compute_is_metrics; apply_bypass_mode", entry_point: "RayPPOTrainer.fit (decoupled mode)", execution_path: "fit -> compute_rollout_correction_and_add_to_batch(batch, rollout_corr_config) -> compute_rollout_correction_and_rejection_mask(old_log_probs, rollout_log_probs, response_mask, ...) -> compute_rollout_correction_weights -> batch['rollout_is_weights'] -> losses.ppo_loss -> compute_policy_loss_vanilla multiplies pg_losses", url: "https://github.com/volcengine/verl/blob/fbb4b3a8bf636f290c9c59fc346f756849e9c241/verl/trainer/ppo/rollout_corr_helper.py", accessed_at: "2026-10-12" }
+      - { source_type: source_code, tier: 1, title: "verl rollout correction config", repository: "https://github.com/volcengine/verl", commit: "fbb4b3a8bf636f290c9c59fc346f756849e9c241", verification_date: "2026-10-12", file: "verl/trainer/config/algorithm/rollout_correction.yaml", symbol: "rollout_is; rollout_is_threshold; bypass_mode", url: "https://github.com/volcengine/verl/blob/fbb4b3a8bf636f290c9c59fc346f756849e9c241/verl/trainer/config/algorithm/rollout_correction.yaml", accessed_at: "2026-10-12" }
+    limitations: ["Static inspection; disabled by default, so a run's behavior depends on its resolved config.", "IS weights correct pi_rollout to pi_old; the PPO ratio separately handles pi_old to pi_theta."]
+    applicability: "Production implementation of truncated IS for mismatch and staleness."
+    curriculum_usage: { lessons: ["27.6"], labs: ["LAB-D"], assessments: ["Production-Source-Trace"] }
+  - id: CLM-034
+    claim: "Huang et al. (VCPO) report that under high asynchrony stale rollouts produce heavy-tailed importance weights so a few trajectories dominate updates, that collapse is reliably predicted by a collapsing effective sample size (Kish ESS of the importance weights, in [1, B]), and that scaling the learning rate with ESS plus a closed-form off-policy baseline stabilized training up to 128 steps off-policy and matched synchronous performance on a long-horizon tool-use task with a 2.5x training-time speedup."
+    provenance: VERIFIED_FACT
+    domain: async_rl
+    concepts: [effective_sample_size, staleness, importance_ratio]
+    confidence: medium
+    currentness_status: "FRONTIER"
+    evidence: [{ source_type: paper, tier: 1, title: "Stable Asynchrony: Variance-Controlled Off-Policy RL for LLMs", authors: "Luke J. Huang, Zhuoyang Zhang, Qinghao Hu, Shang Yang, Song Han", year: "2026", url: "https://arxiv.org/abs/2602.17616", version: "v2", section: "Abstract; Section 1; Section 3 (ESS definition)", accessed_at: "2026-10-12" }]
+    limitations: ["Author-reported; the ESS-collapse diagnostic is the transferable part, not the speedup."]
+    applicability: "Monitoring ESS as an off-policy health signal."
+    curriculum_usage: { lessons: ["27.6"], labs: ["LAB-D"], assessments: ["Mastery-27", "Incident-27.1"] }
+  - id: CLM-035
+    claim: "Yu et al. (2026) characterize RLVR training-inference mismatch as an additive log-odds displacement whose distribution is approximately invariant to token confidence, propose calibrated importance sampling whose truncation cap tightens as token confidence increases, and report that upward clipping of small importance weights reduced held-out accuracy in their diagnostics."
+    provenance: VERIFIED_FACT
+    domain: logprob_mismatch
+    concepts: [logprob_mismatch, truncated_importance_sampling]
+    confidence: medium
+    currentness_status: "FRONTIER"
+    evidence: [{ source_type: paper, tier: 1, title: "Rethinking Training-Inference Mismatch in LLM Reinforcement Learning: Where It Arises and How to Correct It", authors: "Tianrun Yu, Kaixiang Zhao, Shangzhe Li, Yuxiao Yang, et al.", year: "2026", url: "https://arxiv.org/abs/2609.32444", version: "v1", section: "Abstract", accessed_at: "2026-10-12" }]
+    limitations: ["Abstract-level inspection; evaluated on three MoE models and math benchmarks; preprint near cutoff."]
+    applicability: "Frontier alternative to a single constant TIS threshold."
+    curriculum_usage: { lessons: ["27.6"], labs: ["LAB-D"] }
+  - id: CLM-036
+    claim: "Zhao et al. (ENTR) argue that the natural scale of an off-policy token ratio is set by token entropy, identify a low-entropy regime where near-zero probabilities amplify train-inference mismatch into noise, and report training stably up to 30 policy versions of staleness, matching synchronous GRPO at a 2.6x speedup."
+    provenance: VERIFIED_FACT
+    domain: async_rl
+    concepts: [staleness, logprob_mismatch, importance_ratio]
+    confidence: medium
+    currentness_status: "FRONTIER"
+    evidence: [{ source_type: paper, tier: 1, title: "Deconstructing Off-Policy Ratios: Entropy-Normalized Trust Regions for Asynchronous Reinforcement Learning", authors: "Guanqun Zhao, Zijun Xie, Binbin Zheng, Yehan Yang, et al.", year: "2026", url: "https://arxiv.org/abs/2607.22186", version: "v5", section: "Abstract", accessed_at: "2026-10-12" }]
+    limitations: ["Abstract-level inspection; author-reported."]
+    applicability: "Why one global ratio threshold can be wrong for both high- and low-entropy tokens."
+    curriculum_usage: { lessons: ["27.6"], labs: ["LAB-D"] }
+  - id: CLM-037
+    claim: "Li et al. (PACE) decompose trajectory staleness in fully asynchronous RL into generation staleness (accumulated before rollout completion) and waiting staleness (accumulated in the pool after completion), and rank completed trajectories by an effective-staleness score so that long or interrupted rollouts are not penalized solely for spanning multiple policy versions."
+    provenance: VERIFIED_FACT
+    domain: async_rl
+    concepts: [staleness, long_tail_rollout]
+    confidence: medium
+    currentness_status: "FRONTIER"
+    evidence: [{ source_type: paper, tier: 1, title: "Where Does Staleness Accumulate? Pool Aware Effective Staleness Control for Asynchronous RL in LLM Post-Training", authors: "Chenliang Li, Neiwen Ling, Zijun Wei, Alfredo Garcia", year: "2026", url: "https://arxiv.org/abs/2609.36830", version: "v1", section: "Abstract", accessed_at: "2026-10-12" }]
+    limitations: ["Abstract-level inspection; preprint near cutoff."]
+    applicability: "Staleness metrics that separate long-tail generation from queueing."
+    curriculum_usage: { lessons: ["27.6"], labs: ["LAB-C"] }
+  - id: CLM-038
+    claim: "Khatri et al. report, from more than 400,000 GPU-hours of ablations fit with sigmoidal compute-performance curves, that recipes differ in asymptotic performance while details such as loss aggregation, normalization, curriculum, and the off-policy algorithm primarily modulate compute efficiency without materially shifting the asymptote."
+    provenance: VERIFIED_FACT
+    domain: policy_gradient_estimator
+    concepts: [loss_aggregation, async_rl]
+    confidence: medium
+    currentness_status: "FRONTIER"
+    evidence: [{ source_type: paper, tier: 1, title: "The Art of Scaling Reinforcement Learning Compute for LLMs", authors: "Devvrit Khatri, Lovish Madaan, Rishabh Tiwari, Rachit Bansal, et al.", year: "2025", url: "https://arxiv.org/abs/2510.13786", version: "v1", section: "Abstract", accessed_at: "2026-10-12" }]
+    limitations: ["Abstract-level inspection; conclusions are scoped to the authors' recipes and compute range."]
+    applicability: "Comparing estimator variants by efficiency curves rather than single endpoints."
+    curriculum_usage: { lessons: ["27.2"], labs: ["LAB-A"] }
+  - id: CLM-039
+    claim: "A sequence-level importance weight is exp(sum_t log rho_t); if per-token log-ratios are independent with standard deviation sigma, the log-weight standard deviation grows as sigma sqrt(T), so for sigma=0.02 and T=1000 it is 0.632 and a +2 sigma sequence gets weight exp(1.265)=3.54, whereas token-level weights stay near 1 but drop the cross-token correction (biased)."
+    provenance: DERIVED
+    domain: logprob_mismatch
+    concepts: [sequence_level_ratio, importance_ratio, truncated_importance_sampling]
+    confidence: high
+    currentness_status: "REFERENCE / BASELINE"
+    assumptions: ["Independent per-token log-ratio noise with fixed sigma (a synthetic simplification; real mismatch is correlated and confidence-dependent, CLM-035, CLM-036)."]
+    derivation: "Var(sum of T independent terms) = T sigma^2, so sd = 0.02 x sqrt(1000) = 0.6325; exp(2 x 0.6325) = 3.54."
+    limitations: ["Ignores mean drift from staleness and correlated errors."]
+    applicability: "Explaining why sequence-level IS is high-variance and why GSPO normalizes by length."
+    related_claims: [CLM-010, CLM-032]
+    curriculum_usage: { lessons: ["27.6"], labs: ["LAB-D"], assessments: ["Mastery-27"] }
+  - id: CLM-040
+    claim: "In a GRPO run where rollouts come from a separate inference engine, the per-token mismatch between rollout and trainer log-probabilities on the same sampled tokens is concentrated in low-probability tokens, and enabling token-level TIS (or matching precision between engines) reduces the max IS weight and raises ESS relative to no correction."
+    provenance: HYPOTHESIS
+    domain: logprob_mismatch
+    concepts: [logprob_mismatch, truncated_importance_sampling, effective_sample_size]
+    confidence: medium
+    currentness_status: "WORKLOAD-DEPENDENT"
+    hypothesis:
+      prediction: "Binned by trainer token probability, mean |log pi_train - log pi_rollout| is largest in the lowest-probability bin; with TIS at C=2 the max weight is <= 2 by construction and batch ESS/B is higher than with untruncated weights; matched-precision runs show smaller mismatch KL than bf16-sampler/fp32-trainer runs."
+      measurement_target: "Per-token rollout and trainer log-probs for identical tokens, mismatch k1/k3 KL, probability-binned mismatch, IS weight max and quantiles, Kish ESS/B, reward and held-out accuracy curves."
+      falsifying_observation: "Mismatch is uniform across probability bins, or precision matching does not reduce mismatch KL beyond run-to-run noise, or truncation does not change ESS because weights rarely exceed C."
+    limitations: ["Mismatch depends on engine versions, kernels, batch composition, and model (MoE amplifies routing differences); root cause is Module 30."]
+    applicability: "LAB D and mismatch dashboards."
+    related_claims: [CLM-032, CLM-033, CLM-034, CLM-035]
+    curriculum_usage: { lessons: ["27.6"], labs: ["LAB-D"], assessments: ["Incident-27.1"] }
+  - id: CLM-041
+    claim: "In a discrete-event simulation of RL with heavy-tailed response lengths, raising the staleness bound from 0 (synchronous) to small positive values increases trainer utilization with diminishing returns, while the mean policy-version lag of consumed samples rises roughly in proportion to the bound."
+    provenance: HYPOTHESIS
+    domain: async_rl
+    concepts: [staleness, throughput_accounting, long_tail_rollout]
+    confidence: medium
+    currentness_status: "WORKLOAD-DEPENDENT"
+    hypothesis:
+      prediction: "Trainer busy fraction rises from the synchronous value (CLM-026 accounting) and saturates by a bound of 2-4 versions for the declared length distribution; mean consumed-sample lag increases monotonically with the bound."
+      measurement_target: "Simulated trainer and rollout busy fractions, samples/s, consumed-sample lag distribution, weight-sync count, for bounds {0,1,2,4,8} under fixed GPU split and length distribution."
+      falsifying_observation: "Utilization does not increase from bound 0 to 1, or keeps increasing linearly through bound 8, or lag does not increase with the bound."
+    limitations: ["Simulation validates system accounting only; learning-quality effects of staleness need real training (CLM-024, CLM-034)."]
+    applicability: "LAB C."
+    related_claims: [CLM-024, CLM-026]
+    curriculum_usage: { lessons: ["27.5"], labs: ["LAB-C"], assessments: ["Mastery-27"] }
+  - id: CLM-042
+    claim: "Ahmadian et al. argue that many PPO components are unnecessary in RLHF for LLMs and report that simpler REINFORCE-style variants (including RLOO's leave-one-out baseline) outperformed PPO and RL-free methods such as DPO and RAFT in their experiments."
+    provenance: VERIFIED_FACT
+    domain: policy_gradient_estimator
+    concepts: [group_baseline, value_baseline]
+    confidence: high
+    currentness_status: "WORKLOAD-DEPENDENT"
+    evidence: [{ source_type: paper, tier: 1, title: "Back to Basics: Revisiting REINFORCE Style Optimization for Learning from Human Feedback in LLMs", authors: "Arash Ahmadian, Chris Cremer, Matthias Gallé, Marzieh Fadaee, Julia Kreutzer, Olivier Pietquin, Ahmet Üstün, Sara Hooker", year: "2024", url: "https://arxiv.org/abs/2402.14740", version: "v2", section: "Abstract", accessed_at: "2026-10-12" }]
+    limitations: ["Abstract-level inspection; RLHF settings evaluated, not long-CoT RLVR."]
+    applicability: "Critic-free baselines versus GAE."
+    curriculum_usage: { lessons: ["27.1"], labs: ["LAB-A"], assessments: ["Mastery-27"] }
+  - id: CLM-043
+    claim: "If each rollout batch is used for exactly one gradient step on-policy (one PPO epoch, one mini-batch, and old_log_probs recomputed by the same trainer engine), then pi_theta equals pi_old at the point where the gradient is evaluated, the ratio is exactly 1, the clip never binds, and the PPO loss gradient equals the plain policy gradient with the given advantages; clipping matters only with multiple mini-batches or epochs per batch, or with stale or mismatched data."
+    provenance: DERIVED
+    domain: policy_gradient_estimator
+    concepts: [ppo_clip, importance_ratio, three_policy_view]
+    confidence: high
+    currentness_status: "REFERENCE / BASELINE"
+    assumptions: ["old_log_probs come from the same parameters and numerics as the current forward pass.", "Deterministic forward pass (no dropout)."]
+    derivation: "r = exp(log pi_theta - log pi_old) = 1 when theta = theta_old; clip(1, 1-eps, 1+eps) = 1 so min(rA, clip(r)A) = A and its gradient is A grad log pi. With several mini-batches, theta moves after the first, so later mini-batches see r != 1. If old_log_probs come from the rollout engine (bypass mode, CLM-028), r != 1 even on the first step because of mismatch."
+    limitations: ["Numerical non-determinism can make r deviate slightly from 1 even in this case."]
+    applicability: "Interpreting clip fraction metrics and choosing mini-batch counts."
+    related_claims: [CLM-001, CLM-028]
+    curriculum_usage: { lessons: ["27.1"], labs: ["LAB-A"], assessments: ["Mastery-27"] }
+  - id: CLM-044
+    claim: "For a GRPO group of G binary rewards with k successes, the population standard deviation is sqrt(p(1-p)) with p=k/G and the sample standard deviation is sqrt(G/(G-1)) times larger, so implementations using the sample std produce advantages smaller by sqrt((G-1)/G); for rewards [1,0,0,1] this gives +/-0.866 instead of +/-1.0."
+    provenance: DERIVED
+    domain: estimator_implementation
+    concepts: [group_baseline]
+    confidence: high
+    currentness_status: "REFERENCE / BASELINE"
+    assumptions: ["Binary rewards; epsilon negligible relative to the std."]
+    derivation: "Sample variance = G/(G-1) x population variance. For G=4, p=0.5: population std 0.5, sample std 0.5774; (1-0.5)/0.5774 = 0.866."
+    limitations: ["A constant per-G scale is absorbed by the learning rate only if G is fixed and no other term (e.g., KL) is in the loss."]
+    applicability: "Reconciling advantage values across frameworks."
+    related_claims: [CLM-003, CLM-004]
+    curriculum_usage: { lessons: ["27.1"], labs: ["LAB-A"] }
+  - id: CLM-045
+    claim: "At verl commit fbb4b3a8bf636f290c9c59fc346f756849e9c241, apply_kl_penalty subtracts beta x kl_penalty(old_log_probs, ref_log_prob) from token-level scores to form token_level_rewards and updates an adaptive or fixed KL controller; the default trainer config sets adv_estimator gae, norm_adv_by_std_in_grpo True, and use_kl_in_reward False, while the actor's use_kl_loss (default false, kl_loss_coef 0.001) puts KL in the loss instead."
+    provenance: VERIFIED_FACT
+    domain: kl_placement
+    concepts: [kl_placement, verl]
+    confidence: high
+    currentness_status: "CURRENT DEFAULT"
+    evidence:
+      - { source_type: source_code, tier: 1, title: "verl PPO Ray trainer", repository: "https://github.com/volcengine/verl", commit: "fbb4b3a8bf636f290c9c59fc346f756849e9c241", verification_date: "2026-10-12", file: "verl/trainer/ppo/ray_trainer.py", symbol: "apply_kl_penalty", entry_point: "RayPPOTrainer.fit", execution_path: "fit -> (algorithm.use_kl_in_reward) apply_kl_penalty -> token_level_rewards = token_level_scores - beta * kld -> compute_advantage", url: "https://github.com/volcengine/verl/blob/fbb4b3a8bf636f290c9c59fc346f756849e9c241/verl/trainer/ppo/ray_trainer.py", accessed_at: "2026-10-12" }
+      - { source_type: source_code, tier: 1, title: "verl PPO trainer config", repository: "https://github.com/volcengine/verl", commit: "fbb4b3a8bf636f290c9c59fc346f756849e9c241", verification_date: "2026-10-12", file: "verl/trainer/config/ppo_trainer.yaml", symbol: "algorithm.adv_estimator; algorithm.norm_adv_by_std_in_grpo; algorithm.use_kl_in_reward", url: "https://github.com/volcengine/verl/blob/fbb4b3a8bf636f290c9c59fc346f756849e9c241/verl/trainer/config/ppo_trainer.yaml", accessed_at: "2026-10-12" }
+    limitations: ["Static inspection; defaults are not run configurations."]
+    applicability: "Locating where KL enters the objective."
+    curriculum_usage: { lessons: ["27.4"], labs: ["LAB-B"], assessments: ["Production-Source-Trace"] }
+  - id: CLM-046
+    claim: "KL placed in the reward is transformed by the advantage estimator, while KL placed in the loss is a separate gradient term: with GAE it is discounted and whitened with the task reward, and with an outcome-only group estimator that sums token rewards into one score (as compute_grpo_outcome_advantage does) the per-token penalties collapse into a per-response total that is then group-centered and std-normalized, so responses are penalized relative to their group rather than absolutely."
+    provenance: DERIVED
+    domain: kl_placement
+    concepts: [kl_placement, group_baseline, gae]
+    confidence: high
+    currentness_status: "REFERENCE / BASELINE"
+    assumptions: ["verl code paths as in CLM-003 and CLM-045."]
+    derivation: "compute_grpo_outcome_advantage computes scores = token_level_rewards.sum(-1); with token_level_rewards = scores - beta*kld, each response's score becomes r_i - beta*sum_t kld_{i,t}; subtracting the group mean removes any KL shared by the whole group, and dividing by the group std rescales it. A KL loss term instead adds beta*grad KL to every token's gradient independent of the group."
+    limitations: ["Other estimators (RLOO, REINFORCE++) transform the penalty differently; read the one you run."]
+    applicability: "Choosing KL placement and interpreting KL-coefficient sweeps."
+    related_claims: [CLM-003, CLM-045]
+    curriculum_usage: { lessons: ["27.4"], labs: ["LAB-B"], assessments: ["Mastery-27"] }
+  - id: CLM-047
+    claim: "DAPO's Overlong Reward Shaping first masks the loss of truncated samples (Overlong Filtering), reporting that default punitive rewards for truncated samples add reward noise and that filtering stabilized training, then adds a Soft Overlong Punishment that is 0 for |y| <= L_max - L_cache, decreases linearly to -1 between L_max - L_cache and L_max, and is -1 beyond L_max; its experiments used an expected maximum length of 16,384 tokens plus a 4,096-token soft punishment cache (20,480 maximum generation tokens)."
+    provenance: VERIFIED_FACT
+    domain: long_tail_rollout
+    concepts: [long_tail_rollout, length_bias]
+    confidence: high
+    currentness_status: "WORKLOAD-DEPENDENT"
+    evidence: [{ source_type: paper, tier: 1, title: "DAPO: An Open-Source LLM Reinforcement Learning System at Scale", authors: "Qiying Yu, Zheng Zhang, Ruofei Zhu, Yufeng Yuan, et al.", year: "2025", url: "https://arxiv.org/abs/2503.14476", version: "v2", section: "Section 3.4 Overlong Reward Shaping, Equation 13; Section 4 settings; Figure 5", accessed_at: "2026-10-12" }]
+    limitations: ["Length caps trade long-tail step time against truncation bias; the right cap is task-dependent."]
+    applicability: "Coupling the systems knob (max length) with reward design."
+    curriculum_usage: { lessons: ["27.5"], labs: ["LAB-C"], assessments: ["Mastery-27"] }
+  - id: CLM-048
+    claim: "The primary sources that first proposed token-level truncated IS as a GRPO patch for vLLM/FSDP mismatch (Yao et al. 2025, cited by Qi et al. and by verl as fengyao.notion.site/off-policy-rl) and the blog 'When Speed Kills Stability: Demystifying RL Collapse from the Training-Inference Mismatch' (richardli.xyz/rl-collapse, cited in verl's helper docstring) could not be opened for this registry; their thresholds, measured mismatch magnitudes, and recommendations are not used."
+    provenance: TODO_VERIFY
+    domain: logprob_mismatch
+    concepts: [truncated_importance_sampling, logprob_mismatch]
+    confidence: low
+    limitations: ["Page fetch returned no content (client-rendered pages) on 2026-10-12."]
+    applicability: "Open these before citing their numbers."
+    curriculum_usage: { lessons: ["27.6"] }
+  - id: CLM-049
+    claim: "The experimental verl one_step_off_policy and separation trainers (verl/experimental/one_step_off_policy/ray_trainer.py, verl/experimental/separation/ray_trainer.py) exist at the pinned commit, but their loops, weight-sync paths, and staleness semantics were not traced."
+    provenance: TODO_VERIFY
+    domain: async_rl
+    concepts: [async_rl, weight_sync, verl]
+    confidence: low
+    limitations: ["File existence confirmed via the repository tree; behavior not inspected."]
+    applicability: "Extend the source trace before teaching these trainers."
+    curriculum_usage: { lessons: ["27.6"] }
