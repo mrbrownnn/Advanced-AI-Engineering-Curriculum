@@ -69,6 +69,18 @@ All Modules 00–24 are **authored** against the [instructional schema](INSTRUCT
 | [23](23-observability-reliability/) | Observability & Reliability | authored (6 lessons, 4 labs) | 23.5h | Trace/metric/event boundaries, offered-outcome SLIs, error budgets and burn rates, delayed quality labels, incident discrimination, rollback |
 | [24](24-model-system-codesign/) | Model-System Co-design | authored (6 lessons, 4 labs) | 25.5h | Architecture → memory/compute/communication → scheduler → quality/cost coupling; dense vs MoE and attention trade-offs under workload |
 
+## Expert Track (open-ended)
+
+Modules 25–36 target senior/expert-only depth not owned by 00–24. Scope contracts and expansion rule: [EXPERT-TRACK.md](EXPERT-TRACK.md).
+
+| Module | Title | Status | Effort | Key Topics |
+|---|---|---|---:|---|
+| [25](25-pretraining-dynamics-scaling/) | Pretraining Dynamics & Scaling | authored (6 lessons, 4 lab specifications) | 25h | Compute/data allocation, scaling-law validity, μP transfer, instability controls, schedules, data mixtures, checkpoint averaging |
+| [26](26-distributed-low-precision-training/) | Distributed & Low-Precision Training | authored (6 lessons, 4 lab specifications) | 25h | ZeRO/FSDP, activation recomputation, training TP/SP/PP/CP/EP, overlap, FP8/MX/NVFP4 recipes, restart economics |
+| [27](27-rl-post-training-systems/) | RL Post-Training Systems | authored (6 lessons, 4 lab specifications) | 25h | Policy-gradient estimators, RLVR, verifier failures, reward hacking, rollout/trainer architecture, staleness, log-prob mismatch |
+| [28](28-moe-training-dynamics/) | MoE Training Dynamics | authored (6 lessons, 4 lab specifications) | 25.5h | Router learning, load balancing, capacity and dropping, dropless kernels, specialization, upcycling, training collectives |
+| 29–36 | Remaining Expert Track | scoped | — | Kernels, determinism, alternative architectures, compression, interpretability, privacy, multi-tenant serving, edge and computer-use agents |
+
 ## Capstone and Graduation
 
 | Item | Description |
@@ -78,8 +90,9 @@ All Modules 00–24 are **authored** against the [instructional schema](INSTRUCT
 
 ## Effort Summary
 
-- All 25 authored modules: **665h** of declared module effort.
-- Program total including continuous capstone and graduation: **≈755–770h**. See [ROADMAP.md](ROADMAP.md) for the week plan.
+- Core Modules 00–24: **665h** of declared module effort.
+- Authored Expert Modules 25–28 add **100.5h**; their lab specifications are authored, but executable lab packages are intentionally deferred.
+- Core program total including continuous capstone and graduation: **≈755–770h**. Expert Track is post-graduation and open-ended. See [ROADMAP.md](ROADMAP.md).
 
 ## Cross-Cutting Concerns
 

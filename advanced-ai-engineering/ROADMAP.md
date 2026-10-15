@@ -41,6 +41,17 @@ The schedule is planned in hours, not one module per week. The global budget is 
 - Weeks 20–24 use the audited effort of the now-authored modules (23.5–25.5h each).
 - Capstone development runs continuously from Week 6; Week 25 is integration, load testing, failure injection, and defense.
 
+## Post-Graduation Expert Track
+
+Expert Track remains outside the 26-week core budget. Modules 25–28 are authored at 100.5h total; their executable lab packages are deferred. Modules 29–36 remain scoped and are added only when the ownership, durability, and breakability tests in [EXPERT-TRACK.md](EXPERT-TRACK.md) pass.
+
+| Module | Focus | Effort |
+|---|---|---:|
+| [25](25-pretraining-dynamics-scaling/) | Pretraining dynamics and scaling | 25h |
+| [26](26-distributed-low-precision-training/) | Distributed and low-precision training | 25h |
+| [27](27-rl-post-training-systems/) | RL post-training systems | 25h |
+| [28](28-moe-training-dynamics/) | MoE training dynamics | 25.5h |
+
 ## Progressive Integration
 
 - **Evidence discipline** — methodology from Module 00 applied in every lab.

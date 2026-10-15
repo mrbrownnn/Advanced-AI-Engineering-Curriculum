@@ -46,6 +46,8 @@
 
 > Modules 22–24 cover cross-cutting concerns woven throughout the program.
 
+**Expert Track (post-graduation, open-ended):** Modules 25–36 — training systems, deep kernels/numerics, non-attention architectures, compression, interpretability, privacy, edge and computer-use agents. See [EXPERT-TRACK.md](advanced-ai-engineering/EXPERT-TRACK.md).
+
 ---
 
 ## Satellite Track Integration
