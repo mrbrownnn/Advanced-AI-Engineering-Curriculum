@@ -1,0 +1,642 @@
+module: "28-moe-training-dynamics"
+registry_version: "1.0.0"
+research_cutoff: "2026-09-30"
+change_reason: "Initial authored module. Evidence opened 2026-10-12: Shazeer 2017, GShard, Switch, ST-MoE, Expert Choice, MegaBlocks, Sparse Upcycling, DeepSeekMoE, Auxiliary-Loss-Free Balancing, OLMoE, DeepSeek-V3, global-batch LBL, Qwen3, GSPO (MoE section); 2025-2026 frontier at abstract level (ALF-LB theory, Drop-Upcycling, Router Prior Bias, over-dispersed pruning, ID Balancing). Pinned static traces of Megatron-LM (Megatron-Core MoE router) and MegaBlocks."
+out_of_scope_candidates:
+  - "Inference expert placement, redundant experts, and EP serving layouts (Module 20, Module 24)."
+  - "General ZeRO/FSDP/TP/PP training parallelism and FP8 training recipes (Module 26)."
+  - "RL post-training estimators beyond the MoE routing-volatility issue (Module 27)."
+  - "Kimi K3 Quantile Balancing primary source (not opened; see CLM-053)."
+claims:
+  - id: CLM-001
+    claim: "Shazeer et al. introduce the sparsely-gated MoE layer with noisy top-k gating G(x)=Softmax(KeepTopK(H(x),k)); they observe that the gating network tends to converge to always producing large weights for the same few experts, an imbalance that is self-reinforcing because favored experts train faster and are selected more; they add an importance loss w_importance*CV(Importance(X))^2."
+    provenance: VERIFIED_FACT
+    domain: router_mechanics
+    concepts: [top_k_gating, router_collapse, importance_loss]
+    confidence: high
+    currentness_status: "REFERENCE / BASELINE"
+    evidence: [{ source_type: paper, tier: 1, title: "Outrageously Large Neural Networks: The Sparsely-Gated Mixture-of-Experts Layer", authors: "Noam Shazeer, Azalia Mirhoseini, Krzysztof Maziarz, Andy Davis, Quoc Le, Geoffrey Hinton, Jeff Dean", year: "2017", url: "https://arxiv.org/abs/1701.06538", section: "Section 2.1 Gating network (noisy top-k); Section 4 Balancing expert utilization", accessed_at: "2026-10-12" }]
+    limitations: ["LSTM-era MoE between recurrent layers; the self-reinforcement statement is an observation, not a measured rate."]
+    applicability: "Origin of the collapse mechanism and of auxiliary balancing."
+    curriculum_usage: { lessons: ["28.1", "28.2"], labs: ["LAB-A"], assessments: ["Mastery-28"] }
+  - id: CLM-002
+    claim: "Switch Transformer routes each token to a single expert (k=1, a 'Switch layer') using router probabilities p_i(x)=exp(h(x)_i)/sum_j exp(h(x)_j); for stability it casts the router input to float32 only inside the router (selective precision) and reduces the default Transformer initialization scale by a factor of 10."
+    provenance: VERIFIED_FACT
+    domain: router_mechanics
+    concepts: [softmax_router, top_1_routing, selective_precision, init_scale]
+    confidence: high
+    currentness_status: "REFERENCE / BASELINE"
+    evidence: [{ source_type: paper, tier: 1, title: "Switch Transformers: Scaling to Trillion Parameter Models with Simple and Efficient Sparsity", authors: "William Fedus, Barret Zoph, Noam Shazeer", year: "2021 (v3 2022, JMLR)", url: "https://arxiv.org/abs/2101.03961", section: "Section 2.1 Simplifying Sparse Routing; Section 2.4 Improved Training and Fine-Tuning Techniques", accessed_at: "2026-10-12" }]
+    limitations: ["T5-based encoder-decoder models on TPUs; precision and init recommendations are for that setting."]
+    applicability: "Router numerics and initialization in training."
+    curriculum_usage: { lessons: ["28.1", "28.5"], labs: ["LAB-A"], assessments: ["Mastery-28"] }
+  - id: CLM-003
+    claim: "Switch Transformer's differentiable load-balancing loss is loss = alpha*N*sum_i f_i*P_i, where f_i is the fraction of tokens in the batch dispatched (argmax) to expert i and P_i is the mean router probability for expert i; it is minimized under uniform routing, and the paper uses alpha=10^-2."
+    provenance: VERIFIED_FACT
+    domain: load_balancing
+    concepts: [aux_load_balancing_loss, dispatch_fraction, router_probability_mass]
+    confidence: high
+    currentness_status: "REFERENCE / BASELINE"
+    evidence: [{ source_type: paper, tier: 1, title: "Switch Transformers: Scaling to Trillion Parameter Models with Simple and Efficient Sparsity", authors: "William Fedus, Barret Zoph, Noam Shazeer", year: "2021 (v3 2022)", url: "https://arxiv.org/abs/2101.03961", section: "Section 2.2 Differentiable Load Balancing Loss (Equations 4-6)", accessed_at: "2026-10-12" }]
+    limitations: ["f_i is a count and not differentiable; only P_i carries gradient.", "Defined over a batch whose scope (micro-batch, global batch, sequence) is an implementation choice (CLM-019, CLM-025)."]
+    applicability: "Default auxiliary balancing formula reused by many frameworks."
+    curriculum_usage: { lessons: ["28.2"], labs: ["LAB-A", "LAB-B"], assessments: ["Mastery-28"] }
+  - id: CLM-004
+    claim: "Switch Transformer defines expert capacity = (tokens per batch / number of experts) x capacity factor; tokens routed to an expert beyond its capacity have their computation skipped and pass to the next layer through the residual connection; the paper reports that Switch Transformers perform better at lower capacity factors (1.0, 1.25)."
+    provenance: VERIFIED_FACT
+    domain: capacity_and_dropping
+    concepts: [expert_capacity, capacity_factor, token_dropping]
+    confidence: high
+    currentness_status: "LEGACY"
+    evidence: [{ source_type: paper, tier: 1, title: "Switch Transformers: Scaling to Trillion Parameter Models with Simple and Efficient Sparsity", authors: "William Fedus, Barret Zoph, Noam Shazeer", year: "2021 (v3 2022)", url: "https://arxiv.org/abs/2101.03961", section: "Section 2.2 Distributed Switch Implementation; Section 2.3", accessed_at: "2026-10-12" }]
+    limitations: ["Capacity factor preference is for that paper's models and hardware; dropless training (CLM-033) removes the trade-off at a kernel cost.", "LEGACY label refers to fixed-capacity dropping as a training default for decoder LLMs, not to the formula."]
+    applicability: "Static-shape expert computation with fixed buffers."
+    curriculum_usage: { lessons: ["28.4"], labs: ["LAB-C"], assessments: ["Mastery-28"] }
+  - id: CLM-005
+    claim: "GShard uses top-2 gating with a per-expert capacity, partitions batch tokens into G local groups dispatched in parallel, adds an auxiliary loss l_aux=(1/E)*sum_e (c_e/S)*m_e, dispatches to the second-best expert with probability proportional to its weight, and passes over-capacity tokens to the next layer via residual connections."
+    provenance: VERIFIED_FACT
+    domain: load_balancing
+    concepts: [top_2_gating, local_group_dispatch, aux_load_balancing_loss, random_routing]
+    confidence: high
+    currentness_status: "REFERENCE / BASELINE"
+    evidence: [{ source_type: paper, tier: 1, title: "GShard: Scaling Giant Models with Conditional Computation and Automatic Sharding", authors: "Dmitry Lepikhin, HyoukJoong Lee, Yuanzhong Xu, Dehao Chen, Orhan Firat, Yanping Huang, Maxim Krikun, Noam Shazeer, Zhifeng Chen", year: "2020", url: "https://arxiv.org/abs/2006.16668", section: "Section 2.2 Position-wise Mixture-of-Experts Layer", accessed_at: "2026-10-12" }]
+    limitations: ["Machine-translation models on TPU; the local-group scope is itself a balance-scope choice."]
+    applicability: "Top-2 routing and group-local balancing."
+    curriculum_usage: { lessons: ["28.2", "28.4"], labs: ["LAB-A"], assessments: ["Mastery-28"] }
+  - id: CLM-006
+    claim: "Expert Choice routing computes S=Softmax(X*W_g) and lets each expert select its top-k tokens with capacity k=n*c/e, so a token can be received by a variable number of experts, including none; the authors report more than 2x faster training convergence than their top-1/top-2 baselines and state the method might not immediately apply to auto-regressive generation because the implementation uses past and future tokens for top-k selection."
+    provenance: VERIFIED_FACT
+    domain: router_mechanics
+    concepts: [expert_choice, token_choice, causal_leakage]
+    confidence: high
+    currentness_status: "WORKLOAD-DEPENDENT"
+    evidence: [{ source_type: paper, tier: 1, title: "Mixture-of-Experts with Expert Choice Routing", authors: "Yanqi Zhou, Tao Lei, Hanxiao Liu, Nan Du, Yanping Huang, Vincent Zhao, Andrew Dai, Zhifeng Chen, Quoc Le, James Laudon", year: "2022 (NeurIPS 2022)", url: "https://arxiv.org/abs/2202.09368", section: "Section 3.2; Section 4.2; Section 6 Limitations", accessed_at: "2026-10-12" }]
+    limitations: ["Speedup is author-reported against their baselines; the causal limitation is stated by the authors."]
+    applicability: "Choosing token-choice versus expert-choice for causal LM training."
+    curriculum_usage: { lessons: ["28.1"], labs: ["LAB-A"], assessments: ["Mastery-28"] }
+  - id: CLM-007
+    claim: "Wang et al. argue that expert-choice routing leaks future-token information in causal language modeling because future tokens influence the expert assignment of earlier tokens, and give a leakage bound of more than K*log2((1-R)/R) bits per token, which in their example amounts to about 50 bits, enough to identify the successor token."
+    provenance: VERIFIED_FACT
+    domain: router_mechanics
+    concepts: [expert_choice, causal_leakage]
+    confidence: medium
+    currentness_status: "REFERENCE / BASELINE"
+    evidence: [{ source_type: paper, tier: 1, title: "Auxiliary-Loss-Free Load Balancing Strategy for Mixture-of-Experts", authors: "Lean Wang, Huazuo Gao, Chenggang Zhao, Xu Sun, Damai Dai", year: "2024", url: "https://arxiv.org/abs/2408.15664", section: "Section 5.2 (expert choice and future token leakage)", accessed_at: "2026-10-12" }]
+    limitations: ["The 50-bit figure depends on the paper's chosen K and R; the bound is an argument, not a measured leak in a specific model."]
+    applicability: "Why decoder LLM pretraining keeps token-choice routing."
+    related_claims: [CLM-006]
+    curriculum_usage: { lessons: ["28.1"], assessments: ["Mastery-28"] }
+  - id: CLM-008
+    claim: "OLMoE reports that token-choice routing outperformed expert-choice routing for the same token budget, even though expert choice ran faster, and notes that expert choice can drop tokens that no expert selects."
+    provenance: VERIFIED_FACT
+    domain: router_mechanics
+    concepts: [expert_choice, token_choice]
+    confidence: high
+    currentness_status: "CURRENT DEFAULT"
+    evidence: [{ source_type: paper, tier: 1, title: "OLMoE: Open Mixture-of-Experts Language Models", authors: "Niklas Muennighoff, Luca Soldaini, Dirk Groeneveld, Kyle Lo, et al. (24 authors)", year: "2024 (v2 2025, ICLR 2025)", url: "https://arxiv.org/abs/2409.02060", section: "Section 4.1.4 Expert choice vs token choice", accessed_at: "2026-10-12" }]
+    limitations: ["One model family (OLMoE ablation scale); CURRENT DEFAULT scoped to open decoder MoE LLM recipes inspected here."]
+    applicability: "Router family choice."
+    curriculum_usage: { lessons: ["28.1"], assessments: ["Mastery-28"] }
+  - id: CLM-009
+    claim: "DeepSeek-V3 computes token-to-expert affinity with a sigmoid, s_{i,t}=Sigmoid(u_t^T e_i), normalizes gating values among the selected experts, and adds N_s shared experts that every token uses to N_r routed experts; it has 1 shared and 256 routed experts per MoE layer, each with intermediate dimension 2048, and activates 8 routed experts per token."
+    provenance: VERIFIED_FACT
+    domain: router_mechanics
+    concepts: [sigmoid_router, gate_normalization, shared_experts, fine_grained_experts]
+    confidence: high
+    currentness_status: "CURRENT DEFAULT"
+    evidence: [{ source_type: paper, tier: 1, title: "DeepSeek-V3 Technical Report", authors: "DeepSeek-AI (200 authors)", year: "2024 (v2 2025)", url: "https://arxiv.org/abs/2412.19437", section: "Section 2.1.2 DeepSeekMoE with Auxiliary-Loss-Free Load Balancing; Section 4.2 Hyper-Parameters", accessed_at: "2026-10-12" }]
+    limitations: ["One model family's architecture; CURRENT DEFAULT means a widely studied open recipe, not an industry survey."]
+    applicability: "Sigmoid gating and shared-plus-routed layout."
+    curriculum_usage: { lessons: ["28.1", "28.5"], labs: ["LAB-B"], assessments: ["Mastery-28"] }
+  - id: CLM-010
+    claim: "In top-k routing without straight-through or noise tricks, the language-model loss reaches the router only through the gate values of the selected experts; the selection itself is non-differentiable, so for a given token unselected experts receive no task gradient and the router receives no task signal about them, which is the mechanical basis of the rich-get-richer dynamic."
+    provenance: DERIVED
+    domain: router_mechanics
+    concepts: [top_k_gating, router_gradient, router_collapse]
+    confidence: high
+    currentness_status: "REFERENCE / BASELINE"
+    assumptions: ["Output y = sum over selected experts of g_i * E_i(x); g computed by softmax or normalized sigmoid over selected logits; top-k selection treated as a constant index set in backward."]
+    derivation: "dL/dW_e = 0 for every expert e not in the selected set, because E_e(x) does not appear in y. dL/dlogit_j for unselected j is zero when gates are softmax over selected logits only (topk-then-softmax) or normalized sigmoid over selected scores; with softmax-over-all-then-topk the unselected logits receive gradient only via the normalizer of selected probabilities, not via their own expert output. Hence experts that are already selected get trained and become better for their tokens, reinforcing selection (CLM-001)."
+    limitations: ["Auxiliary losses (CLM-003) add gradient to all experts' router probabilities; noisy gating and Sinkhorn-style routing change the picture."]
+    applicability: "Explaining collapse and why balancing must be added explicitly."
+    related_claims: [CLM-001, CLM-003]
+    curriculum_usage: { lessons: ["28.1", "28.2"], labs: ["LAB-A"], assessments: ["Mastery-28"] }
+  - id: CLM-011
+    claim: "Wang et al. vary the auxiliary-loss coefficient alpha over 1e-2, 1e-3, 1e-4, and 0 and report that a small alpha causes routing collapse while a large alpha keeps balance under control but notably degrades model performance; their auxiliary-loss baseline uses alpha=0.001 as a trade-off."
+    provenance: VERIFIED_FACT
+    domain: load_balancing
+    concepts: [aux_load_balancing_loss, interference_gradient, router_collapse]
+    confidence: high
+    currentness_status: "REFERENCE / BASELINE"
+    evidence: [{ source_type: paper, tier: 1, title: "Auxiliary-Loss-Free Load Balancing Strategy for Mixture-of-Experts", authors: "Lean Wang, Huazuo Gao, Chenggang Zhao, Xu Sun, Damai Dai", year: "2024", url: "https://arxiv.org/abs/2408.15664", section: "Section 2.2; Section 4.1 Experimental setup", accessed_at: "2026-10-12" }]
+    limitations: ["DeepSeekMoE-style models up to 3B parameters and 200B tokens."]
+    applicability: "Choosing the auxiliary coefficient."
+    curriculum_usage: { lessons: ["28.2"], labs: ["LAB-A", "LAB-B"], assessments: ["Mastery-28"] }
+  - id: CLM-012
+    claim: "OLMoE reports that training without the load-balancing loss leaves most experts' usage flat, so they become dead weights that occupy GPU memory but are not used; OLMoE-1B-7B uses a load-balancing loss with weight 0.01."
+    provenance: VERIFIED_FACT
+    domain: load_balancing
+    concepts: [router_collapse, dead_experts, aux_load_balancing_loss]
+    confidence: high
+    currentness_status: "CURRENT DEFAULT"
+    evidence: [{ source_type: paper, tier: 1, title: "OLMoE: Open Mixture-of-Experts Language Models", authors: "Niklas Muennighoff, Luca Soldaini, Dirk Groeneveld, Kyle Lo, et al. (24 authors)", year: "2024 (v2 2025)", url: "https://arxiv.org/abs/2409.02060", section: "Section 4.1.6 Load balancing loss", accessed_at: "2026-10-12" }]
+    limitations: ["Ablation at OLMoE scale with dropless training."]
+    applicability: "Evidence that collapse occurs in modern decoder MoE pretraining."
+    curriculum_usage: { lessons: ["28.2"], labs: ["LAB-A", "LAB-B"], assessments: ["Mastery-28"] }
+  - id: CLM-013
+    claim: "Wang et al. define MaxVio = (max_i Load_i - mean Load)/mean Load, where Load_i is tokens assigned to expert i and mean Load is the expected load under perfect balance; MaxVio_global counts load on the whole validation set and MaxVio_batch on each training batch."
+    provenance: VERIFIED_FACT
+    domain: balance_metrics
+    concepts: [maxvio, balance_scope]
+    confidence: high
+    currentness_status: "CURRENT DEFAULT"
+    evidence: [{ source_type: paper, tier: 1, title: "Auxiliary-Loss-Free Load Balancing Strategy for Mixture-of-Experts", authors: "Lean Wang, Huazuo Gao, Chenggang Zhao, Xu Sun, Damai Dai", year: "2024", url: "https://arxiv.org/abs/2408.15664", section: "Section 4.1 Metrics", accessed_at: "2026-10-12" }]
+    limitations: ["MaxVio reports only the worst expert; it does not show how many experts are starved."]
+    applicability: "Balance instrumentation."
+    curriculum_usage: { lessons: ["28.2", "28.3"], labs: ["LAB-A", "LAB-B"], assessments: ["Mastery-28"] }
+  - id: CLM-014
+    claim: "With f_i and P_i each summing to 1 (top-1), N*sum_i f_i*P_i equals 1 under uniform routing and N when all tokens and probability go to one expert; because f_i is a non-differentiable count, the gradient of alpha*N*sum f_i P_i with respect to P_i is alpha*N*f_i, so the loss lowers router probability on experts in proportion to their current load."
+    provenance: DERIVED
+    domain: load_balancing
+    concepts: [aux_load_balancing_loss, router_gradient]
+    confidence: high
+    currentness_status: "REFERENCE / BASELINE"
+    assumptions: ["Switch normalization (CLM-003); for top-k, f_i normalized by T*k as in Megatron-Core (CLM-025) keeps the uniform value at 1."]
+    derivation: "Uniform: f_i=P_i=1/N, so N*N*(1/N^2)=1. Full collapse onto expert j: f_j=P_j=1, so N*1=N. d/dP_i (alpha*N*sum f P) = alpha*N*f_i with f treated as constant. The loss is a proxy: its value depends on which tokens are in the batch over which f and P are computed."
+    limitations: ["The loss can be near 1 while a few experts are starved if P and f anti-correlate; monitor MaxVio and per-expert load directly."]
+    applicability: "Reading aux-loss curves and choosing alpha."
+    related_claims: [CLM-003, CLM-013]
+    curriculum_usage: { lessons: ["28.2"], labs: ["LAB-A"], assessments: ["Mastery-28"] }
+  - id: CLM-015
+    claim: "Loss-Free Balancing adds an expert-wise bias b_i to routing scores before top-K selection only, not to the gate value that weights expert outputs, and updates it after each batch as b_i = b_i + u*sign(e_i) with e_i = mean load - c_i (c_i tokens assigned to expert i); the paper uses sigmoid gating and u=0.001, and argues the method produces no interference gradients."
+    provenance: VERIFIED_FACT
+    domain: aux_loss_free_balancing
+    concepts: [expert_bias, bias_update_rate, interference_gradient, sigmoid_router]
+    confidence: high
+    currentness_status: "CURRENT DEFAULT"
+    evidence: [{ source_type: paper, tier: 1, title: "Auxiliary-Loss-Free Load Balancing Strategy for Mixture-of-Experts", authors: "Lean Wang, Huazuo Gao, Chenggang Zhao, Xu Sun, Damai Dai", year: "2024", url: "https://arxiv.org/abs/2408.15664", section: "Section 3 (Equation 3, Algorithm 1); Section 4.1; Section 4.3", accessed_at: "2026-10-12" }]
+    limitations: ["Validated up to 3B parameters and 200B tokens by the authors."]
+    applicability: "Aux-loss-free balancing in pretraining."
+    curriculum_usage: { lessons: ["28.3"], labs: ["LAB-B"], assessments: ["Mastery-28"] }
+  - id: CLM-016
+    claim: "Wang et al. report validation perplexity and MaxVio_global for auxiliary-loss-controlled versus loss-free balancing: 1B model 9.56 vs 9.50 and 0.72 vs 0.04; 3B model 7.97 vs 7.92 and 0.52 vs 0.04."
+    provenance: VERIFIED_FACT
+    domain: aux_loss_free_balancing
+    concepts: [expert_bias, maxvio]
+    confidence: medium
+    currentness_status: "CURRENT DEFAULT"
+    evidence: [{ source_type: paper, tier: 1, title: "Auxiliary-Loss-Free Load Balancing Strategy for Mixture-of-Experts", authors: "Lean Wang, Huazuo Gao, Chenggang Zhao, Xu Sun, Damai Dai", year: "2024", url: "https://arxiv.org/abs/2408.15664", section: "Section 4.2", table: "Table 2", accessed_at: "2026-10-12" }]
+    numeric_metadata: { numeric_type: measured_behavior, model: "DeepSeekMoE-style MoE, 1B and 3B total parameters", workload: "Language-model pretraining, up to 200B tokens (authors' corpus)", configuration: "Aux baseline alpha=0.001; loss-free u=0.001; sigmoid gating", metric_definition: "Validation perplexity; MaxVio_global over the validation set", measurement_method: "Author-reported single runs; no variance reported in the table as inspected" }
+    limitations: ["Author-reported, not independently reproduced; perplexity gaps are small and seeds are not reported."]
+    applicability: "Magnitude of the balance-versus-quality trade-off at small scale."
+    curriculum_usage: { lessons: ["28.3"], labs: ["LAB-B"], assessments: ["Mastery-28"] }
+  - id: CLM-017
+    claim: "DeepSeek-V3 uses the bias only for routing, decreasing an expert's bias by gamma when it is overloaded and increasing it when underloaded, with gamma=0.001 for the first 14.3T tokens and 0.0 for the remaining 500B; it adds a complementary sequence-wise balance loss alpha*sum f_i P_i over the T tokens of one sequence with alpha=0.0001, uses node-limited routing (at most M nodes per token), and drops no tokens in training or inference."
+    provenance: VERIFIED_FACT
+    domain: aux_loss_free_balancing
+    concepts: [expert_bias, bias_update_rate, sequence_level_balance, node_limited_routing, dropless]
+    confidence: high
+    currentness_status: "CURRENT DEFAULT"
+    evidence: [{ source_type: paper, tier: 1, title: "DeepSeek-V3 Technical Report", authors: "DeepSeek-AI (200 authors)", year: "2024 (v2 2025)", url: "https://arxiv.org/abs/2412.19437", section: "Section 2.1.2 (Auxiliary-Loss-Free Load Balancing; Complementary Sequence-Wise Auxiliary Loss; Node-Limited Routing; No Token-Dropping); Section 4.2", accessed_at: "2026-10-12" }]
+    limitations: ["One production-scale recipe; the gamma schedule and alpha are that run's choices."]
+    applicability: "A full balancing recipe combining bias control and a small sequence-level loss."
+    curriculum_usage: { lessons: ["28.3", "28.4"], labs: ["LAB-B"], assessments: ["Mastery-28"] }
+  - id: CLM-018
+    claim: "DeepSeek-V3 reports that the auxiliary-loss-free strategy achieved better performance on most evaluated benchmarks than an auxiliary-loss baseline at 15.7B total parameters on 1.33T tokens and 228.7B on 578B tokens; on 1B models validation losses were 2.258 with a sequence-wise auxiliary loss, 2.253 with the auxiliary-loss-free method, and 2.253 with a batch-wise auxiliary loss; it names two risks of batch-wise balance (imbalance within certain sequences or small batches, and domain-shift-induced imbalance at inference) and reports that the auxiliary-loss-free model shows greater expert specialization across layers."
+    provenance: VERIFIED_FACT
+    domain: balance_scope
+    concepts: [sequence_level_balance, batch_level_balance, expert_specialization]
+    confidence: medium
+    currentness_status: "CURRENT DEFAULT"
+    evidence: [{ source_type: paper, tier: 1, title: "DeepSeek-V3 Technical Report", authors: "DeepSeek-AI (200 authors)", year: "2024 (v2 2025)", url: "https://arxiv.org/abs/2412.19437", section: "Section 4.5.2; Section 4.5.3; Appendix C", accessed_at: "2026-10-12" }]
+    numeric_metadata: { numeric_type: measured_behavior, model: "DeepSeek-V3 ablation MoE models (1B for the loss comparison)", workload: "Authors' pretraining corpus", configuration: "Sequence-wise aux loss vs aux-loss-free vs batch-wise aux loss", metric_definition: "Validation loss", measurement_method: "Author-reported; repetitions not stated in the inspected text" }
+    limitations: ["Author-reported; 0.005 loss gaps without stated variance."]
+    applicability: "Balance scope trade-off."
+    related_claims: [CLM-019]
+    curriculum_usage: { lessons: ["28.3", "28.5"], labs: ["LAB-B"], assessments: ["Mastery-28"] }
+  - id: CLM-019
+    claim: "Qiu et al. observe that frameworks compute the load-balancing loss within a micro-batch and average across parallel groups, which for billion-scale LLMs is almost sequence-level and pushes even domain-specific sequences to spread across all experts; synchronizing f_i across micro-batches to compute a global-batch loss gave about 0.1 lower pre-training perplexity and about 2 points on benchmarks, domain specialization emerged clearly only with global-batch balance, the method added less than 3% latency, and adding a micro-batch loss at 1% of the global weight made training 2.6% slower than baseline with a minimal performance decrease."
+    provenance: VERIFIED_FACT
+    domain: balance_scope
+    concepts: [micro_batch_balance, global_batch_balance, expert_specialization]
+    confidence: medium
+    currentness_status: "CURRENT DEFAULT"
+    evidence: [{ source_type: paper, tier: 1, title: "Demons in the Detail: On Implementing Load Balancing Loss for Training Specialized Mixture-of-Expert Models", authors: "Zihan Qiu, Zeyu Huang, Bo Zheng, Kaiyue Wen, Zekun Wang, Rui Men, Ivan Titov, Dayiheng Liu, Jingren Zhou, Junyang Lin", year: "2025 (v2)", url: "https://arxiv.org/abs/2501.11873", section: "Sections 1, 2.2, 3, 4.1 (Table 1), 4.2, 5", accessed_at: "2026-10-12" }]
+    numeric_metadata: { numeric_type: measured_behavior, model: "MoE LLMs 3.4B-A0.6B (64 experts, top-4, 4 shared), 15B-A2.54B and 43B-A6.6B (160 experts, top-4, 4 shared)", workload: "Pretraining up to 400B tokens", configuration: "Balance batch size (BSZ) from 2 to 512; e.g. 3.4A0.6B at 120B tokens: Avg PPL 8.167 at BSZ 4 vs 8.038 at BSZ 512", metric_definition: "Average pre-training perplexity; downstream benchmark averages", measurement_method: "Author-reported" }
+    limitations: ["Author-reported; latency overhead depends on configuration."]
+    applicability: "Choosing balance scope."
+    curriculum_usage: { lessons: ["28.3", "28.5"], labs: ["LAB-B"], assessments: ["Mastery-28"] }
+  - id: CLM-020
+    claim: "The Qwen3 technical report states that Qwen3 MoE models have 128 total experts with 8 activated per token, exclude shared experts (unlike Qwen2.5-MoE), and adopt the global-batch load-balancing loss; Qwen3-30B-A3B has 48 layers and Qwen3-235B-A22B has 94."
+    provenance: VERIFIED_FACT
+    domain: balance_scope
+    concepts: [global_batch_balance, shared_experts, fine_grained_experts]
+    confidence: high
+    currentness_status: "CURRENT DEFAULT"
+    evidence: [{ source_type: paper, tier: 1, title: "Qwen3 Technical Report", authors: "An Yang, Anfeng Li, Baosong Yang, et al. (Qwen Team)", year: "2025", url: "https://arxiv.org/abs/2505.09388", section: "Section 2 Architecture", table: "MoE model architecture table", accessed_at: "2026-10-12" }]
+    limitations: ["Architecture statement; no ablation of the shared-expert removal was inspected."]
+    applicability: "Evidence that global-batch balance and no-shared-expert layouts are in released models."
+    curriculum_usage: { lessons: ["28.3", "28.5"], assessments: ["Mastery-28"] }
+  - id: CLM-021
+    claim: "Balance scope decides what the loss penalizes: two sequences that each route all tokens to a disjoint half of 4 experts score 2.0 under a per-sequence Switch loss (twice the minimum) but 1.0 (the minimum) under a global-batch loss, so a sequence- or micro-batch-level loss penalizes per-domain specialization that a global loss permits; conversely, global balance permits per-micro-batch imbalance that lengthens expert-parallel steps."
+    provenance: DERIVED
+    domain: balance_scope
+    concepts: [sequence_level_balance, global_batch_balance, expert_specialization]
+    confidence: high
+    currentness_status: "REFERENCE / BASELINE"
+    assumptions: ["N=4 experts, top-1; sequence A routes uniformly to experts 1-2, sequence B to experts 3-4; P_i equals f_i within each sequence; global f_i averages the two sequences while P_i stays local, as in CLM-019's LBL_global."]
+    derivation: "Per sequence: 4*(0.5*0.5+0.5*0.5)=2.0 for each. Global: f=(0.25,0.25,0.25,0.25); per-sequence term 4*(0.25*0.5+0.25*0.5)=1.0, averaged 1.0. Expert-parallel step time is set by the most-loaded rank in each micro-batch (Module 20, Lesson 20.4), which a global constraint does not bound."
+    limitations: ["Toy case; real routing is soft and partial."]
+    applicability: "Explaining why balance scope affects both quality and step time."
+    related_claims: [CLM-018, CLM-019]
+    curriculum_usage: { lessons: ["28.3"], labs: ["LAB-B"], assessments: ["Mastery-28"] }
+  - id: CLM-022
+    claim: "Jin et al. (ID Balancing, 2026) frame DeepSeek's loss-free method as a fixed-step integral controller and Kimi K3's Quantile Balancing as a generalized proportional controller, propose an integral-derivative controller, and report over 50% lower worst-case backbone MaxVio than the best baselines with Top-3 routing over 768 experts."
+    provenance: VERIFIED_FACT
+    domain: aux_loss_free_balancing
+    concepts: [expert_bias, control_view_of_balancing, extreme_sparsity]
+    confidence: low
+    currentness_status: "FRONTIER"
+    evidence: [{ source_type: paper, tier: 1, title: "ID Balancing: Stable Training of Extremely Sparse MoE via PID-Based Load Control", authors: "Peng Jin, Zihan Qiu, Zekun Wang, Bo Zheng, Yang Xu, Tian Xie, Xiao Li, Huaqing Zhang, Haoran Lian, Rui Men, Dayiheng Liu", year: "2026", url: "https://arxiv.org/abs/2609.39137", section: "Abstract only (v1, 2026-09-30)", accessed_at: "2026-10-12" }]
+    limitations: ["Abstract-level inspection; author-reported; not reproduced."]
+    applicability: "Reading lead on bias-controller design at extreme sparsity."
+    curriculum_usage: { lessons: ["28.3"], assessments: ["Mastery-28"] }
+  - id: CLM-023
+    claim: "Han and Zhong cast auxiliary-loss-free load balancing as a primal-dual method with a single-shot constant-time update per iteration for an assignment problem, deriving in a stylized deterministic setting a preference rule that moves tokens from overloaded to underloaded experts and an approximate-balancing guarantee, and a logarithmic expected regret bound in an online setting under certain step sizes."
+    provenance: VERIFIED_FACT
+    domain: aux_loss_free_balancing
+    concepts: [expert_bias, control_view_of_balancing]
+    confidence: low
+    currentness_status: "FRONTIER"
+    evidence: [{ source_type: paper, tier: 1, title: "A Theoretical Framework for Auxiliary-Loss-Free Load Balancing of Sparse Mixture-of-Experts in Large-Scale AI Models", authors: "X. Y. Han, Yuan Zhong", year: "2025 (v3)", url: "https://arxiv.org/abs/2512.03915", section: "Abstract only", accessed_at: "2026-10-12" }]
+    limitations: ["Abstract-level inspection; stylized assumptions."]
+    applicability: "Theory lead for the bias update as a dual step."
+    curriculum_usage: { lessons: ["28.3"], assessments: ["Mastery-28"] }
+  - id: CLM-024
+    claim: "At Megatron-LM commit e998be072d22ff57b4b49899819a1a153f4f3dc9, aux-loss-free routing keeps an fp32 expert_bias buffer per router; topk_routing_with_score_function adds the bias to sigmoid (or sqrtsoftplus) scores only to choose top-k indices and gathers the unbiased scores as gate weights; _apply_expert_bias accumulates local_tokens_per_expert only when grad is enabled; finalize_model_grads calls _update_router_expert_bias once per global batch, which all-reduces counts across the TPxDPxCP group and applies bias += rate*sign(total - count*num_experts); config validation rejects expert bias with the softmax score function, and moe_router_bias_update_rate defaults to 1e-3."
+    provenance: VERIFIED_FACT
+    domain: production_source_trace
+    concepts: [expert_bias, bias_update_rate, sigmoid_router]
+    confidence: high
+    currentness_status: "CURRENT DEFAULT"
+    evidence:
+      - { source_type: source_code, tier: 1, title: "Megatron-Core MoE router and utilities", repository: "https://github.com/NVIDIA/Megatron-LM", commit: "e998be072d22ff57b4b49899819a1a153f4f3dc9", verification_date: "2026-10-12", file: "megatron/core/transformer/moe/router.py; megatron/core/transformer/moe/moe_utils.py; megatron/core/distributed/finalize_model_grads.py; megatron/core/transformer/transformer_config.py", symbol: "TopKRouter.__init__; TopKRouter.routing; TopKRouter._apply_expert_bias; topk_routing_with_score_function; get_updated_expert_bias; _update_router_expert_bias; finalize_model_grads; TransformerConfig.moe_router_enable_expert_bias; TransformerConfig.moe_router_bias_update_rate", entry_point: "MoE layer forward -> TopKRouter.forward -> routing(); optimizer step path -> finalize_model_grads", execution_path: "routing: topk_routing_with_score_function(score_function=sigmoid, expert_bias) -> scores_for_routing = scores + expert_bias -> topk indices -> gather unbiased scores -> normalize over selected -> _apply_expert_bias adds routing_map counts to local_tokens_per_expert; finalize_model_grads -> _update_router_expert_bias -> get_updated_expert_bias (all_reduce, sign update) -> expert_bias.copy_; reset_model_temporary_tensors zeroes counts", url: "https://github.com/NVIDIA/Megatron-LM/blob/e998be072d22ff57b4b49899819a1a153f4f3dc9/megatron/core/transformer/moe/moe_utils.py", accessed_at: "2026-10-12" }
+    limitations: ["Static inspection only; commit dated 2026-09-30 on main, not a tagged release.", "Fused Transformer Engine path (moe_router_fusion) was not inspected."]
+    applicability: "Source trace of bias-based balancing."
+    curriculum_usage: { lessons: ["28.3"], labs: ["LAB-D"], assessments: ["Production-Source-Trace"] }
+  - id: CLM-025
+    claim: "At Megatron-LM commit e998be072d22ff57b4b49899819a1a153f4f3dc9, switch_load_balancing_loss_func computes sum(probs summed over tokens * tokens_per_expert) * num_experts * coeff / (topk * T^2); TopKRouter._apply_aux_loss reduces token counts over the TP x CP group (micro-batch scope), _apply_seq_aux_loss reshapes so each sequence is balanced separately and divides by batch size, and _apply_global_aux_loss reduces counts over TP x DP x CP and averages them over gradient-accumulation steps; moe_aux_loss_coeff defaults to 0.0 and moe_router_load_balancing_type to aux_loss."
+    provenance: VERIFIED_FACT
+    domain: production_source_trace
+    concepts: [aux_load_balancing_loss, micro_batch_balance, sequence_level_balance, global_batch_balance]
+    confidence: high
+    currentness_status: "CURRENT DEFAULT"
+    evidence:
+      - { source_type: source_code, tier: 1, title: "Megatron-Core MoE auxiliary losses", repository: "https://github.com/NVIDIA/Megatron-LM", commit: "e998be072d22ff57b4b49899819a1a153f4f3dc9", verification_date: "2026-10-12", file: "megatron/core/transformer/moe/router.py; megatron/core/transformer/moe/moe_utils.py", symbol: "switch_load_balancing_loss_func; get_tokens_per_expert_and_token_count; TopKRouter._apply_aux_loss; TopKRouter._apply_seq_aux_loss; TopKRouter._apply_global_aux_loss; compute_routing_scores_for_aux_loss", entry_point: "TopKRouter.routing when training and aux loss enabled", execution_path: "compute_routing_scores_for_aux_loss (unbiased scores and top-k map) -> _apply_aux_loss / _apply_seq_aux_loss / _apply_global_aux_loss -> switch_load_balancing_loss_func -> attach_and_log_load_balancing_loss (MoEAuxLossAutoScaler attaches the loss gradient to probs)", url: "https://github.com/NVIDIA/Megatron-LM/blob/e998be072d22ff57b4b49899819a1a153f4f3dc9/megatron/core/transformer/moe/router.py", accessed_at: "2026-10-12" }
+    limitations: ["Static inspection; defaults are one framework's, not an industry default."]
+    applicability: "Mapping balance scope to code."
+    related_claims: [CLM-019]
+    curriculum_usage: { lessons: ["28.2", "28.3"], labs: ["LAB-D"], assessments: ["Production-Source-Trace"] }
+  - id: CLM-026
+    claim: "At Megatron-LM commit e998be072d22ff57b4b49899819a1a153f4f3dc9, z_loss_func returns mean over tokens of logsumexp(logits)^2 times the coefficient; TopKRouter.apply_z_loss applies it to router logits before top-k only when training with grad enabled, and moe_z_loss_coeff defaults to None with a code comment suggesting 1e-3 as a starting value."
+    provenance: VERIFIED_FACT
+    domain: production_source_trace
+    concepts: [router_z_loss]
+    confidence: high
+    currentness_status: "CURRENT DEFAULT"
+    evidence:
+      - { source_type: source_code, tier: 1, title: "Megatron-Core router z-loss", repository: "https://github.com/NVIDIA/Megatron-LM", commit: "e998be072d22ff57b4b49899819a1a153f4f3dc9", verification_date: "2026-10-12", file: "megatron/core/transformer/moe/moe_utils.py; megatron/core/transformer/moe/router.py; megatron/core/transformer/transformer_config.py", symbol: "z_loss_func; TopKRouter.apply_z_loss; TransformerConfig.moe_z_loss_coeff", entry_point: "TopKRouter.routing", execution_path: "routing -> apply_z_loss(logits) -> z_loss_func -> MoEAuxLossAutoScaler.apply(logits, z_loss) -> top-k", url: "https://github.com/NVIDIA/Megatron-LM/blob/e998be072d22ff57b4b49899819a1a153f4f3dc9/megatron/core/transformer/moe/moe_utils.py", accessed_at: "2026-10-12" }
+    limitations: ["Static inspection; the 1e-3 suggestion is a comment, not evidence of effect."]
+    applicability: "Source trace of router z-loss."
+    related_claims: [CLM-029]
+    curriculum_usage: { lessons: ["28.5"], labs: ["LAB-D"], assessments: ["Production-Source-Trace"] }
+  - id: CLM-027
+    claim: "At Megatron-LM commit e998be072d22ff57b4b49899819a1a153f4f3dc9, token dropping runs only when moe_expert_capacity_factor is set (default None means no dropping); apply_router_token_dropping computes capacity with get_capacity(num_tokens*topk, num_experts, cf) = ceil(num_tokens*topk/num_experts*cf), keeps the top-capacity tokens per expert by router probability (drop_policy probs) or by position, and can pad to capacity."
+    provenance: VERIFIED_FACT
+    domain: production_source_trace
+    concepts: [expert_capacity, capacity_factor, token_dropping, dropless]
+    confidence: high
+    currentness_status: "CURRENT DEFAULT"
+    evidence:
+      - { source_type: source_code, tier: 1, title: "Megatron-Core token dropping", repository: "https://github.com/NVIDIA/Megatron-LM", commit: "e998be072d22ff57b4b49899819a1a153f4f3dc9", verification_date: "2026-10-12", file: "megatron/core/transformer/moe/moe_utils.py; megatron/core/transformer/moe/router.py; megatron/core/transformer/transformer_config.py", symbol: "get_capacity; apply_router_token_dropping; TopKRouter.routing; TransformerConfig.moe_expert_capacity_factor", entry_point: "TopKRouter.routing", execution_path: "topk_routing_with_score_function -> if moe_expert_capacity_factor is not None: apply_router_token_dropping -> get_capacity -> torch.topk over tokens per expert -> capacity_mask AND routing_map", url: "https://github.com/NVIDIA/Megatron-LM/blob/e998be072d22ff57b4b49899819a1a153f4f3dc9/megatron/core/transformer/moe/moe_utils.py", accessed_at: "2026-10-12" }
+    limitations: ["Static inspection; capacity is computed over the local token set the router sees."]
+    applicability: "Source trace of capacity and dropping."
+    curriculum_usage: { lessons: ["28.4"], labs: ["LAB-C", "LAB-D"], assessments: ["Production-Source-Trace"] }
+  - id: CLM-028
+    claim: "At databricks/megablocks commit 952db33d6eac334d22c61e47a0d5d41446298784, ParallelDroplessMLP uses blocking=128 and indices_and_padded_bins rounds each expert's token count up to a multiple of 128 before block-sparse expert computation; the non-dropless ParallelMLP.expert_capacity is int(moe_capacity_factor * top_k * tokens * ep_world_size / num_experts); ParallelMLP.load_balancing_loss scales dot(tokens_per_expert, mean expert scores) by num_experts/(tokens*top_k)."
+    provenance: VERIFIED_FACT
+    domain: production_source_trace
+    concepts: [dropless, block_sparse_moe, expert_capacity]
+    confidence: high
+    currentness_status: "WORKLOAD-DEPENDENT"
+    evidence:
+      - { source_type: source_code, tier: 1, title: "MegaBlocks dMoE and MoE layers", repository: "https://github.com/databricks/megablocks", commit: "952db33d6eac334d22c61e47a0d5d41446298784", verification_date: "2026-10-12", file: "megablocks/layers/dmoe.py; megablocks/layers/moe.py", symbol: "ParallelDroplessMLP.__init__; ParallelDroplessMLP.indices_and_padded_bins; ParallelDroplessMLP.sparse_forward_once; ParallelMLP.expert_capacity; ParallelMLP.load_balancing_loss", entry_point: "dMoE.forward -> ParallelDroplessMLP.forward_once", execution_path: "sparse_forward_once: indices_and_padded_bins (sort, histogram, round_up to 128) -> padded_gather -> topology -> block-sparse mlp -> padded_scatter", url: "https://github.com/databricks/megablocks/blob/952db33d6eac334d22c61e47a0d5d41446298784/megablocks/layers/dmoe.py", accessed_at: "2026-10-12" }
+    limitations: ["Static inspection; main branch last committed 2026-03-25."]
+    applicability: "Source trace of dropless block-sparse MoE."
+    related_claims: [CLM-033]
+    curriculum_usage: { lessons: ["28.4"], labs: ["LAB-C", "LAB-D"], assessments: ["Production-Source-Trace"] }
+  - id: CLM-029
+    claim: "ST-MoE defines the router z-loss L_z = (1/B)*sum_i (log sum_j exp(x_j^(i)))^2, which penalizes large router logits that exacerbate roundoff errors in exponentials, uses c_z=0.001 in L = L_CE + c_B*L_B + c_z*L_z, and reports in Table 4 that the baseline was stable in 4 of 6 seeds (quality -1.755) while router z-loss was stable in 3 of 3 (quality -1.741) and update clipping in 3 of 3 with worse quality (-4.206), on sparse models FLOP-matched to T5-XL; removing multiplicative components or adding input jitter/dropout improved stability but significantly hurt quality."
+    provenance: VERIFIED_FACT
+    domain: training_stability
+    concepts: [router_z_loss, roundoff_error, training_instability]
+    confidence: medium
+    currentness_status: "CURRENT DEFAULT"
+    evidence: [{ source_type: paper, tier: 1, title: "ST-MoE: Designing Stable and Transferable Sparse Expert Models", authors: "Barret Zoph, Irwan Bello, Sameer Kumar, Nan Du, Yanping Huang, Jeff Dean, Noam Shazeer, William Fedus", year: "2022 (v2)", url: "https://arxiv.org/abs/2202.08906", section: "Section 3 Stabilizing Training; Section 3.3; Section 3.4", table: "Table 4", accessed_at: "2026-10-12" }]
+    numeric_metadata: { numeric_type: measured_behavior, model: "Sparse encoder-decoder models FLOP-matched to T5-XL", workload: "Authors' pretraining", configuration: "Baseline 6 seeds; each stability technique 3 seeds", metric_definition: "Fraction of stable runs; quality as reported (negative log perplexity)", measurement_method: "Author-reported" }
+    limitations: ["Small seed counts; stability at other scales or with sigmoid routers is not established by this table."]
+    applicability: "Router z-loss rationale and evidence."
+    curriculum_usage: { lessons: ["28.5"], labs: ["LAB-B"], assessments: ["Mastery-28"] }
+  - id: CLM-030
+    claim: "ST-MoE recommends top-2 routing with a 1.25 capacity factor and at most one expert per core; it reports that raising train and eval capacity factors improves quality but that at larger scale the small gains from higher train capacity were offset by a 14% slowdown, and that fine-tuning quality was not materially impacted by dropping up to 10-15% of tokens."
+    provenance: VERIFIED_FACT
+    domain: capacity_and_dropping
+    concepts: [capacity_factor, token_dropping]
+    confidence: medium
+    currentness_status: "LEGACY"
+    evidence: [{ source_type: paper, tier: 1, title: "ST-MoE: Designing Stable and Transferable Sparse Expert Models", authors: "Barret Zoph, Irwan Bello, Sameer Kumar, Nan Du, Yanping Huang, Jeff Dean, Noam Shazeer, William Fedus", year: "2022 (v2)", url: "https://arxiv.org/abs/2202.08906", section: "Section 4.4; Section 5; Section 5.2", accessed_at: "2026-10-12" }]
+    limitations: ["TPU encoder-decoder setting; the drop tolerance is for fine-tuning, not pretraining."]
+    applicability: "Capacity factor trade-off in fixed-capacity systems."
+    curriculum_usage: { lessons: ["28.4", "28.6"], labs: ["LAB-C"], assessments: ["Mastery-28"] }
+  - id: CLM-031
+    claim: "ST-MoE reports that sparse models are prone to overfit in fine-tuning; updating only the non-MoE parameters works about as well as updating all parameters, while updating only the MoE parameters (about 80% of parameters) significantly degrades fine-tuning; dropout gives modest gains (peak at 0.1 global dropout in their sweep); sparse models benefit from smaller batch sizes and higher learning rates, nearly opposite to dense models; and load-balance losses improve fine-tuning."
+    provenance: VERIFIED_FACT
+    domain: moe_fine_tuning
+    concepts: [moe_fine_tuning, overfitting, parameter_subset_tuning]
+    confidence: medium
+    currentness_status: "WORKLOAD-DEPENDENT"
+    evidence: [{ source_type: paper, tier: 1, title: "ST-MoE: Designing Stable and Transferable Sparse Expert Models", authors: "Barret Zoph, Irwan Bello, Sameer Kumar, Nan Du, Yanping Huang, Jeff Dean, Noam Shazeer, William Fedus", year: "2022 (v2)", url: "https://arxiv.org/abs/2202.08906", section: "Sections 4.1, 4.2, 4.3, 4.4", accessed_at: "2026-10-12" }]
+    limitations: ["SuperGLUE-era encoder-decoder fine-tuning; transfer to chat SFT or RL of decoder MoE LLMs must be measured."]
+    applicability: "Starting hypotheses for MoE fine-tuning."
+    curriculum_usage: { lessons: ["28.6"], labs: ["LAB-D"], assessments: ["Mastery-28"] }
+  - id: CLM-032
+    claim: "ST-MoE observes that encoder experts specialize (at least one expert per layer in sentinel tokens; some in punctuation, verbs, proper names), that specialization is far less noticeable in the decoder, and that experts trained on multilingual mixtures do not show language specialization."
+    provenance: VERIFIED_FACT
+    domain: expert_specialization
+    concepts: [expert_specialization]
+    confidence: medium
+    currentness_status: "REFERENCE / BASELINE"
+    evidence: [{ source_type: paper, tier: 1, title: "ST-MoE: Designing Stable and Transferable Sparse Expert Models", authors: "Barret Zoph, Irwan Bello, Sameer Kumar, Nan Du, Yanping Huang, Jeff Dean, Noam Shazeer, William Fedus", year: "2022 (v2)", url: "https://arxiv.org/abs/2202.08906", section: "Sections 7.1, 7.2, 7.3", accessed_at: "2026-10-12" }]
+    limitations: ["Qualitative token-level inspection on one model family."]
+    applicability: "What specialization looks like at the token level."
+    curriculum_usage: { lessons: ["28.5"], assessments: ["Mastery-28"] }
+  - id: CLM-033
+    claim: "MegaBlocks reformulates MoE expert computation as block-sparse operations (SDD then DSD in the forward pass, 128x128 blocks) so it never drops tokens; in its Section 3 study (Transformer-Small base, 64 experts, top-1) an MoE with capacity factor 1 reduced validation loss by 0.15 versus the dense baseline while the dropless MoE reduced it by 0.26; it reports end-to-end training speedups of 1.38x, 2.0x, and 4.35x for MoE-XS, MoE-Small, and MoE-Medium over padding-based token-drop avoidance in Tutel."
+    provenance: VERIFIED_FACT
+    domain: capacity_and_dropping
+    concepts: [dropless, block_sparse_moe, token_dropping, padding_waste]
+    confidence: medium
+    currentness_status: "CURRENT DEFAULT"
+    evidence: [{ source_type: paper, tier: 1, title: "MegaBlocks: Efficient Sparse Training with Mixture-of-Experts", authors: "Trevor Gale, Deepak Narayanan, Cliff Young, Matei Zaharia", year: "2022 (MLSys 2023)", url: "https://arxiv.org/abs/2211.15841", section: "Abstract; Section 3; Section 4.1; Section 5.1; Section 6.1", accessed_at: "2026-10-12" }]
+    numeric_metadata: { numeric_type: measured_behavior, model: "GPT-style MoE-XS/Small/Medium, 64 experts, top-1", workload: "The Pile pretraining (authors' setup)", configuration: "8-way expert parallelism for MoE layers; data parallelism elsewhere; baseline Tutel with dynamic capacity factor", metric_definition: "Validation loss reduction vs dense; end-to-end time to equal quality", measurement_method: "Author-reported on A100 GPUs" }
+    limitations: ["Author-reported against 2022 baselines; kernel landscape has moved (grouped GEMM paths)."]
+    applicability: "Quality cost of dropping and the dropless alternative."
+    curriculum_usage: { lessons: ["28.4"], labs: ["LAB-C"], assessments: ["Mastery-28"] }
+  - id: CLM-034
+    claim: "With T tokens, top-k routing, E experts, and capacity factor CF, per-expert capacity is C=ceil(T*k/E*CF); dropped assignments are sum_e max(0, n_e - C), fixed-buffer padding is E*C - sum_e min(n_e, C), padding every expert to the largest load wastes E*max_e n_e - T*k slots, and block-sparse dropless rounding wastes sum_e (ceil(n_e/b)*b - n_e) rows for block size b."
+    provenance: DERIVED
+    domain: capacity_and_dropping
+    concepts: [expert_capacity, capacity_factor, token_dropping, padding_waste, dropless]
+    confidence: high
+    currentness_status: "REFERENCE / BASELINE"
+    assumptions: ["Capacity computed per routing group as in CLM-004 and CLM-027; n_e are assignment counts after top-k."]
+    derivation: "Direct counting over the per-expert assignment vector n_e with sum n_e = T*k."
+    limitations: ["Ignores which tokens are dropped (probability- vs position-based policies) and the second-order quality effect."]
+    applicability: "Sizing capacity and comparing drop, pad, and dropless."
+    curriculum_usage: { lessons: ["28.4"], labs: ["LAB-C"], assessments: ["Mastery-28"] }
+  - id: CLM-035
+    claim: "DeepSeek-V3 reports that cross-node expert parallelism gives a computation-to-communication ratio of about 1:1, splits each forward and backward chunk into attention, all-to-all dispatch, MLP, and all-to-all combine for overlap (DualPipe), dedicates 20 SMs to communication, cites NVLink at 160 GB/s versus InfiniBand at 50 GB/s, limits each token to at most 4 nodes (about 3.2 experts per node on average), and quantizes activations to FP8 before dispatch."
+    provenance: VERIFIED_FACT
+    domain: ep_training_communication
+    concepts: [expert_parallelism, all_to_all, communication_overlap, node_limited_routing]
+    confidence: high
+    currentness_status: "CURRENT DEFAULT"
+    evidence: [{ source_type: paper, tier: 1, title: "DeepSeek-V3 Technical Report", authors: "DeepSeek-AI (200 authors)", year: "2024 (v2 2025)", url: "https://arxiv.org/abs/2412.19437", section: "Sections 3.2.1, 3.2.2, 3.3.3", accessed_at: "2026-10-12" }]
+    limitations: ["H800 cluster specifics; the 1:1 ratio is author-stated for their configuration."]
+    applicability: "Why EP communication is a first-class training cost."
+    curriculum_usage: { lessons: ["28.4"], labs: ["LAB-C"], assessments: ["Mastery-28"] }
+  - id: CLM-036
+    claim: "Per MoE layer and micro-batch in expert-parallel training, the forward pass performs a dispatch and a combine all-to-all and the backward pass performs their transposes (gradient combine and gradient dispatch), so four all-to-alls of the same payload size occur per layer, six if the MoE layer is recomputed; each carries about B*k*d*bytes per rank, of which (R-1)/R leaves the rank under uniform placement, and completion is set by the most-loaded receiver."
+    provenance: DERIVED
+    domain: ep_training_communication
+    concepts: [expert_parallelism, all_to_all, activation_recomputation]
+    confidence: medium
+    currentness_status: "REFERENCE / BASELINE"
+    assumptions: ["Token-choice top-k routing, one expert copy, no deduplication of copies bound for the same rank, no capacity-based padding, hidden size d unchanged across dispatch and combine.", "Recomputation re-runs the forward dispatch and combine."]
+    derivation: "Dispatch is a permutation-and-send of hidden states; its adjoint sends gradients back along the same routes. Combine similarly. Hence backward mirrors forward. Payload per rank is tokens*k*d*bytes; uniform placement over R ranks keeps 1/R local."
+    limitations: ["Node-limited routing with intra-node forwarding (CLM-035) and FP8 dispatch change bytes; overlap hides time without changing bytes."]
+    applicability: "Training-time communication model, extending the inference model in Module 24, Lesson 24.4."
+    related_claims: [CLM-035]
+    curriculum_usage: { lessons: ["28.4"], labs: ["LAB-C"], assessments: ["Mastery-28"] }
+  - id: CLM-037
+    claim: "DeepSeekMoE segments each expert FFN into m smaller experts (intermediate dimension reduced to 1/m) and activates m times as many to keep computation constant, isolates K_s always-active shared experts to capture common knowledge, and cites 120 combinations for top-2 of 16 experts versus 4,426,165,368 for top-8 of 64; it uses expert-level and device-level balance losses and reports DeepSeekMoE 2B comparable to GShard 2.9B and DeepSeekMoE 16B comparable to LLaMA2 7B with about 40% of the computation."
+    provenance: VERIFIED_FACT
+    domain: expert_architecture
+    concepts: [fine_grained_experts, shared_experts, combinatorial_flexibility, device_level_balance]
+    confidence: high
+    currentness_status: "CURRENT DEFAULT"
+    evidence: [{ source_type: paper, tier: 1, title: "DeepSeekMoE: Towards Ultimate Expert Specialization in Mixture-of-Experts Language Models", authors: "Damai Dai, Chengqi Deng, Chenggang Zhao, R. X. Xu, Huazuo Gao, Deli Chen, Jiashi Li, Wangding Zeng, Xingkai Yu, Y. Wu, Zhenda Xie, Y. K. Li, et al.", year: "2024", url: "https://arxiv.org/abs/2401.06066", section: "Section 1; Section 3.1; Section 3.2; Section 3.3; Abstract", accessed_at: "2026-10-12" }]
+    limitations: ["Comparisons are author-reported against their own baselines."]
+    applicability: "Fine-grained and shared-expert design."
+    curriculum_usage: { lessons: ["28.5"], labs: ["LAB-B"], assessments: ["Mastery-28"] }
+  - id: CLM-038
+    claim: "OLMoE-1B-7B has 6.9B total and 1.3B active parameters with 64 experts and 8 active per token; its ablations report that more granular experts improved loss and downstream results with diminishing returns (about 10% gains moving to 32 experts, a further 1-2% at 64), that a shared expert performed slightly worse, that router z-loss with weight 0.001 improved stability (fewer spikes) and quality, and that the MoE reached the dense model's performance only about 2x faster in training time."
+    provenance: VERIFIED_FACT
+    domain: expert_architecture
+    concepts: [fine_grained_experts, shared_experts, router_z_loss]
+    confidence: medium
+    currentness_status: "WORKLOAD-DEPENDENT"
+    evidence: [{ source_type: paper, tier: 1, title: "OLMoE: Open Mixture-of-Experts Language Models", authors: "Niklas Muennighoff, Luca Soldaini, Dirk Groeneveld, Kyle Lo, et al. (24 authors)", year: "2024 (v2 2025)", url: "https://arxiv.org/abs/2409.02060", section: "Section 2 (Table 1); Sections 4.1.1, 4.1.2, 4.1.3, 4.1.7", accessed_at: "2026-10-12" }]
+    limitations: ["Ablation-scale results; the shared-expert finding contradicts DeepSeekMoE's design choice and is scale- and recipe-dependent."]
+    applicability: "Counter-evidence on shared experts and granularity returns."
+    contradicts: [CLM-037]
+    curriculum_usage: { lessons: ["28.5"], labs: ["LAB-B"], assessments: ["Mastery-28"] }
+  - id: CLM-039
+    claim: "OLMoE defines router saturation as the proportion of expert activations at an intermediate checkpoint that match those of the final checkpoint and reports that after 1% of pretraining (5000 steps or 20B tokens) up to about 60% of routing to the top-8 experts has saturated; it measures expert co-activation (finding little strong co-activation within a layer) and domain and vocabulary specialization as the proportion of a domain's tokens or a token ID's occurrences routed to an expert."
+    provenance: VERIFIED_FACT
+    domain: expert_specialization
+    concepts: [router_saturation, expert_coactivation, domain_specialization, vocabulary_specialization]
+    confidence: medium
+    currentness_status: "CURRENT DEFAULT"
+    evidence: [{ source_type: paper, tier: 1, title: "OLMoE: Open Mixture-of-Experts Language Models", authors: "Niklas Muennighoff, Luca Soldaini, Dirk Groeneveld, Kyle Lo, et al. (24 authors)", year: "2024 (v2 2025)", url: "https://arxiv.org/abs/2409.02060", section: "Sections 5.1, 5.2, 5.3, 5.4", accessed_at: "2026-10-12" }]
+    limitations: ["One model; the final-checkpoint reference makes saturation a retrospective metric."]
+    applicability: "Specialization instrumentation."
+    curriculum_usage: { lessons: ["28.5"], labs: ["LAB-B"], assessments: ["Mastery-28"] }
+  - id: CLM-040
+    claim: "Sparse Upcycling initializes each expert as a copy of the dense MLP and adds a randomly initialized router, replacing half of the MLP layers with MoE layers (expert choice in the encoder, top-2 in the decoder, capacity factor C=2); it reports outperforming dense continuation using about 50% of the initial dense pretraining sunk cost, that from-scratch MoE matched the upcycled model at about 120% of the original dense budget, and an initial performance drop from the structural change."
+    provenance: VERIFIED_FACT
+    domain: upcycling
+    concepts: [sparse_upcycling, expert_symmetry, router_initialization]
+    confidence: high
+    currentness_status: "WORKLOAD-DEPENDENT"
+    evidence: [{ source_type: paper, tier: 1, title: "Sparse Upcycling: Training Mixture-of-Experts from Dense Checkpoints", authors: "Aran Komatsuzaki, Joan Puigcerver, James Lee-Thorp, Carlos Riquelme Ruiz, Basil Mustafa, Joshua Ainslie, Yi Tay, Mostafa Dehghani, Neil Houlsby", year: "2022 (ICLR 2023)", url: "https://arxiv.org/abs/2212.05055", section: "Abstract; Section 1; Section 3; Section 3.1; Section 4.2.1; Appendix B.2, B.8", accessed_at: "2026-10-12" }]
+    limitations: ["T5 language and ViT vision models; budget crossovers are for those settings."]
+    applicability: "Deciding whether to upcycle."
+    curriculum_usage: { lessons: ["28.6"], labs: ["LAB-D"], assessments: ["Mastery-28"] }
+  - id: CLM-041
+    claim: "OLMoE upcycled OLMo-1B (0724) at 2T tokens into an MoE and reports that the MoE trained from scratch started outperforming the upcycled MoE at around 600B tokens."
+    provenance: VERIFIED_FACT
+    domain: upcycling
+    concepts: [sparse_upcycling]
+    confidence: medium
+    currentness_status: "WORKLOAD-DEPENDENT"
+    evidence: [{ source_type: paper, tier: 1, title: "OLMoE: Open Mixture-of-Experts Language Models", authors: "Niklas Muennighoff, Luca Soldaini, Dirk Groeneveld, Kyle Lo, et al. (24 authors)", year: "2024 (v2 2025)", url: "https://arxiv.org/abs/2409.02060", section: "Section 4.1.5 Sparse upcycling", accessed_at: "2026-10-12" }]
+    limitations: ["One crossover point at one scale."]
+    applicability: "Upcycling budget crossover."
+    related_claims: [CLM-040, CLM-042]
+    curriculum_usage: { lessons: ["28.6"], labs: ["LAB-D"], assessments: ["Mastery-28"] }
+  - id: CLM-042
+    claim: "Drop-Upcycling (Nakamura et al., 2025) states that upcycling gives initial gains but trains slower than from scratch, leading to suboptimal long-term performance, and proposes statistically re-initializing part of the upcycled weights to promote expert specialization; the authors report a 5.9B-active MoE comparable to a 13B dense model of the same family with about 1/4 of the training FLOPs."
+    provenance: VERIFIED_FACT
+    domain: upcycling
+    concepts: [sparse_upcycling, expert_symmetry, partial_reinitialization]
+    confidence: low
+    currentness_status: "FRONTIER"
+    evidence: [{ source_type: paper, tier: 1, title: "Drop-Upcycling: Training Sparse Mixture of Experts with Partial Re-initialization", authors: "Taishi Nakamura, Takuya Akiba, Kazuki Fujii, Yusuke Oda, Rio Yokota, Jun Suzuki", year: "2025 (ICLR 2025)", url: "https://arxiv.org/abs/2502.19261", section: "Abstract only", accessed_at: "2026-10-12" }]
+    limitations: ["Abstract-level inspection; author-reported."]
+    applicability: "Symmetry breaking in upcycling."
+    curriculum_usage: { lessons: ["28.6"], assessments: ["Mastery-28"] }
+  - id: CLM-043
+    claim: "The GSPO paper reports that in RL training of the 48-layer Qwen3-30B-A3B-Base, roughly 10% of the experts activated under the new policy differ from those under the old policy after a gradient update; the team's earlier approach, Routing Replay, cached the old policy's activated experts and replayed them when computing the new policy, and GSPO eliminates that dependency."
+    provenance: VERIFIED_FACT
+    domain: moe_fine_tuning
+    concepts: [routing_volatility, routing_replay, moe_fine_tuning]
+    confidence: medium
+    currentness_status: "FRONTIER"
+    evidence: [{ source_type: paper, tier: 1, title: "Group Sequence Policy Optimization", authors: "Chujie Zheng, Shixuan Liu, Mingze Li, Xiong-Hui Chen, Bowen Yu, Chang Gao, Kai Dang, Yuqiong Liu, Rui Men, An Yang, Jingren Zhou, Junyang Lin", year: "2025 (v2)", url: "https://arxiv.org/abs/2507.18071", section: "Section 5.3 Benefit of GSPO for MoE Training", accessed_at: "2026-10-12" }]
+    limitations: ["One model and RL recipe; the 10% figure is the authors' measurement without stated variance."]
+    applicability: "Routing drift as a fine-tuning and RL hazard (estimator detail in Module 27)."
+    curriculum_usage: { lessons: ["28.6"], labs: ["LAB-D"], assessments: ["Mastery-28"] }
+  - id: CLM-044
+    claim: "At Megatron-LM commit e998be072d22ff57b4b49899819a1a153f4f3dc9, TransformerConfig.moe_enable_routing_replay (default False) makes TopKRouter construct a RouterReplay object that topk_routing_with_score_function uses, through get_replay_topk, to return previously recorded top-k selections instead of computing new ones."
+    provenance: VERIFIED_FACT
+    domain: production_source_trace
+    concepts: [routing_replay]
+    confidence: medium
+    currentness_status: "WORKLOAD-DEPENDENT"
+    evidence:
+      - { source_type: source_code, tier: 1, title: "Megatron-Core routing replay hook", repository: "https://github.com/NVIDIA/Megatron-LM", commit: "e998be072d22ff57b4b49899819a1a153f4f3dc9", verification_date: "2026-10-12", file: "megatron/core/transformer/moe/router.py; megatron/core/transformer/moe/moe_utils.py; megatron/core/transformer/transformer_config.py", symbol: "TopKRouter.__init__ (router_replay); topk_routing_with_score_function.compute_topk; TransformerConfig.moe_enable_routing_replay", entry_point: "TopKRouter.routing", execution_path: "TopKRouter.__init__: if moe_enable_routing_replay -> RouterReplay() -> routing passes router_replay -> compute_topk calls router_replay.get_replay_topk(...) instead of _compute_topk", url: "https://github.com/NVIDIA/Megatron-LM/blob/e998be072d22ff57b4b49899819a1a153f4f3dc9/megatron/core/transformer/moe/router.py", accessed_at: "2026-10-12" }
+    limitations: ["router_replay.py itself was not inspected; recording and replay policy are TODO_VERIFY."]
+    applicability: "Where routing replay plugs into a training framework."
+    related_claims: [CLM-043]
+    curriculum_usage: { lessons: ["28.6"], labs: ["LAB-D"], assessments: ["Production-Source-Trace"] }
+  - id: CLM-045
+    claim: "Router Prior Bias (Lee et al., 2026) reports that in MoE post-training, re-imposing a uniformity load-balancing loss flattens the base router's non-uniform co-activation structure, and that softly anchoring router logits to a prior from the frozen base router reached 45.77 in-domain math accuracy on Moonlight-16B-A3B versus 31.91 with re-applied LBL and 29.44 with unanchored fine-tuning, with the ordering against LBL reproduced on Qwen3-30B-A3B-Base."
+    provenance: VERIFIED_FACT
+    domain: moe_fine_tuning
+    concepts: [moe_fine_tuning, router_anchoring, routing_volatility]
+    confidence: low
+    currentness_status: "FRONTIER"
+    evidence: [{ source_type: paper, tier: 1, title: "Router Prior Bias: Preserving Base Routing Structure in MoE Post-Training", authors: "Jaedeok Lee, Keonwoo Kim, Dongyoon Han, Sangdoo Yun, Yera Choi, Haanju Yoo", year: "2026", url: "https://arxiv.org/abs/2609.08115", section: "Abstract only (v1, 2026-09-08)", accessed_at: "2026-10-12" }]
+    limitations: ["Abstract-level inspection; author-reported; single domain (math)."]
+    applicability: "Whether to re-apply balancing loss during fine-tuning."
+    curriculum_usage: { lessons: ["28.6"], labs: ["LAB-D"], assessments: ["Mastery-28"] }
+  - id: CLM-046
+    claim: "Kapusuzoglu et al. (2026) report that in an over-dispersed routing regime, which they associate with aggressive load balancing in training, router-probability expert-importance signals collapse and pruning perplexity stops predicting downstream accuracy (on gpt-oss-20B), unlike under standard routing such as Mixtral-8x7B-Instruct."
+    provenance: VERIFIED_FACT
+    domain: expert_specialization
+    concepts: [over_dispersed_routing, expert_specialization]
+    confidence: low
+    currentness_status: "FRONTIER"
+    evidence: [{ source_type: paper, tier: 1, title: "When Load-Balancing Goes Too Far: Expert Pruning in Over-Dispersed Mixture-of-Experts Models", authors: "Berkcan Kapusuzoglu, Connor Pryor, Sangwoo Cho, Supriyo Chakraborty, Shi-Xiong Zhang, Sambit Sahu, Milind Naphade", year: "2026", url: "https://arxiv.org/abs/2609.04453", section: "Abstract only (v1, 2026-09-03)", accessed_at: "2026-10-12" }]
+    limitations: ["Abstract-level; the causal link to training-time balancing is the authors' association, not a controlled training experiment."]
+    applicability: "Downstream cost of over-balancing."
+    curriculum_usage: { lessons: ["28.5"], assessments: ["Mastery-28"] }
+  - id: CLM-047
+    claim: "When every expert is an identical copy of a dense MLP and the gates of the selected experts sum to 1, an upcycled MoE layer initially computes exactly the dense MLP output; experts then diverge only because the router sends them different tokens, so the router and data order alone break the symmetry, and total parameters grow by (E-1) MLPs per converted layer while per-token expert compute grows by a factor of k."
+    provenance: DERIVED
+    domain: upcycling
+    concepts: [sparse_upcycling, expert_symmetry, router_initialization]
+    confidence: high
+    currentness_status: "REFERENCE / BASELINE"
+    assumptions: ["Top-k with gates renormalized over selected experts (softmax over selected, or normalized sigmoid); no shared expert; no noise in expert initialization."]
+    derivation: "y = sum_{i in S} g_i * MLP(x) = MLP(x) * sum g_i = MLP(x). Gradient to expert i is g_i times the upstream gradient on tokens routed to i; identical experts receiving different token sets diverge. Parameter and compute counts follow from Module 01, Lesson 1.7 accounting."
+    limitations: ["With softmax-then-topk without renormalization, sum g_i < 1 and the initial output is scaled down, one cause of the initial drop reported in CLM-040."]
+    applicability: "Predicting upcycling's initial behavior and specialization speed."
+    related_claims: [CLM-040, CLM-042]
+    curriculum_usage: { lessons: ["28.6"], labs: ["LAB-D"], assessments: ["Mastery-28"] }
+  - id: CLM-048
+    claim: "Load balance and specialization are different quantities: global per-expert load can be exactly uniform while each domain uses a disjoint subset of experts; specialization must therefore be measured conditionally (per-domain or per-token-ID routing shares against the uniform baseline k/E), not inferred from balance metrics."
+    provenance: DERIVED
+    domain: expert_specialization
+    concepts: [expert_specialization, domain_specialization, maxvio]
+    confidence: high
+    currentness_status: "REFERENCE / BASELINE"
+    assumptions: ["Routing shares measured over a held-out set with known domain labels, as in CLM-039."]
+    derivation: "Two domains of equal size routed to disjoint halves of the experts give uniform global load (MaxVio=0) and per-domain share 2k/E on the used half and 0 on the other, the maximum separation."
+    limitations: ["Specialization metrics need domain labels; token-level specialization can exist without domain separation."]
+    applicability: "Designing specialization measurements."
+    related_claims: [CLM-021, CLM-039]
+    curriculum_usage: { lessons: ["28.5"], labs: ["LAB-B"], assessments: ["Mastery-28"] }
+  - id: CLM-049
+    claim: "In a toy token-choice MoE trained on clustered synthetic data with no balancing term, per-expert load becomes progressively more skewed and at least one expert falls below 1% of assignments within the training budget, while adding the Switch loss at alpha=1e-2 keeps MaxVio_batch bounded."
+    provenance: HYPOTHESIS
+    domain: load_balancing
+    concepts: [router_collapse, aux_load_balancing_loss, maxvio]
+    confidence: medium
+    currentness_status: "REFERENCE / BASELINE"
+    hypothesis: { prediction: "Without balancing, MaxVio_batch rises over training and at least one expert ends below 1% load; with alpha=1e-2, MaxVio_batch stays below the no-balancing value at every checkpoint after warm-up.", measurement_target: "Per-expert assignment counts and MaxVio_batch every 50 steps, 3 seeds each.", falsifying_observation: "Without balancing, all experts stay above 1% load and MaxVio_batch does not grow across 3 seeds, or the alpha=1e-2 run is not lower." }
+    limitations: ["Toy model; collapse speed depends on initialization scale, learning rate, and data clustering."]
+    applicability: "LAB A."
+    related_claims: [CLM-001, CLM-012]
+    curriculum_usage: { lessons: ["28.2"], labs: ["LAB-A"], assessments: ["Mastery-28"] }
+  - id: CLM-050
+    claim: "On a small MoE language model, bias-based balancing with sigmoid gating reaches MaxVio_global no higher than an auxiliary loss at alpha=1e-2 with validation loss no worse, and a global-batch auxiliary loss yields higher per-domain routing concentration than a micro-batch one at similar validation loss."
+    provenance: HYPOTHESIS
+    domain: aux_loss_free_balancing
+    concepts: [expert_bias, global_batch_balance, expert_specialization]
+    confidence: low
+    currentness_status: "WORKLOAD-DEPENDENT"
+    hypothesis: { prediction: "Bias (u=1e-3) MaxVio_global <= aux(1e-2) MaxVio_global and val loss within the run-to-run spread or better; global-batch aux gives larger max per-domain expert share than micro-batch aux.", measurement_target: "MaxVio_global, MaxVio_batch, validation loss, per-domain expert share on a labeled held-out set; 3 seeds per arm.", falsifying_observation: "Bias arm has higher MaxVio_global or worse val loss outside the seed spread; or global vs micro shows no difference in per-domain concentration." }
+    limitations: ["Small-scale; author-reported effects (CLM-016, CLM-019) were at 1B+ parameters."]
+    applicability: "LAB B."
+    related_claims: [CLM-016, CLM-019]
+    curriculum_usage: { lessons: ["28.3"], labs: ["LAB-B"], assessments: ["Mastery-28"] }
+  - id: CLM-051
+    claim: "Under Zipf-skewed expert popularity, a capacity factor of 1.0 drops a fraction of assignments that grows with skew and degrades validation loss relative to dropless training at matched steps, while padding-to-max wastes more slots than block-rounded dropless computation."
+    provenance: HYPOTHESIS
+    domain: capacity_and_dropping
+    concepts: [token_dropping, dropless, padding_waste]
+    confidence: medium
+    currentness_status: "WORKLOAD-DEPENDENT"
+    hypothesis: { prediction: "Drop rate at CF=1.0 increases monotonically with Zipf exponent; dropless val loss <= CF=1.0 val loss at matched steps; pad-to-max wasted slots > block-rounded waste at b=128 for every skew.", measurement_target: "Simulated drop rate and waste across Zipf exponents; on COLAB, val loss for CF=1.0 vs dropless over 3 seeds.", falsifying_observation: "Drop rate not monotone in skew, or CF=1.0 val loss better than dropless beyond seed spread." }
+    limitations: ["Small models may be insensitive to dropping (CLM-030 reports tolerance in fine-tuning)."]
+    applicability: "LAB C."
+    related_claims: [CLM-033, CLM-034]
+    curriculum_usage: { lessons: ["28.4"], labs: ["LAB-C"], assessments: ["Mastery-28"] }
+  - id: CLM-052
+    claim: "Fine-tuning a pretrained MoE on a shifted domain changes top-k routing for a measurable fraction of tokens; re-applying a uniform balancing loss changes routing more than training with the router frozen and yields lower in-domain gain."
+    provenance: HYPOTHESIS
+    domain: moe_fine_tuning
+    concepts: [routing_volatility, moe_fine_tuning, router_anchoring]
+    confidence: low
+    currentness_status: "WORKLOAD-DEPENDENT"
+    hypothesis: { prediction: "Routing drift (fraction of tokens whose top-k set differs from base) is highest with re-applied LBL, lowest with frozen router; in-domain eval gain ordered frozen-router or anchored >= re-applied LBL.", measurement_target: "Per-layer routing drift on a fixed probe set; in-domain and retained eval with paired intervals (Module 15, Lesson 15.4); 3 seeds per arm.", falsifying_observation: "Re-applied LBL arm shows drift no higher than the trainable-router arm, or in-domain gain higher than frozen-router beyond intervals." }
+    limitations: ["Tiny model from LAB B; post-training results (CLM-045) were on 16B-30B models."]
+    applicability: "LAB D."
+    related_claims: [CLM-031, CLM-043, CLM-045]
+    curriculum_usage: { lessons: ["28.6"], labs: ["LAB-D"], assessments: ["Mastery-28"] }
+  - id: CLM-054
+    claim: "Softmax over router logits is invariant to adding a constant to every logit, so the language-model loss does not constrain the common magnitude of router logits; the router z-loss (logsumexp(x))^2 grows with that magnitude, and its gradient with respect to logit j is 2*logsumexp(x)*softmax(x)_j, so it pulls all logits down in proportion to their probability."
+    provenance: DERIVED
+    domain: training_stability
+    concepts: [router_z_loss, softmax_router]
+    confidence: high
+    currentness_status: "REFERENCE / BASELINE"
+    assumptions: ["Softmax router; z-loss as defined in CLM-029 and CLM-026."]
+    derivation: "softmax(x+c)=softmax(x). logsumexp(x+c)=logsumexp(x)+c, so (lse)^2 rises with c. d(lse^2)/dx_j = 2*lse*dlse/dx_j = 2*lse*softmax(x)_j."
+    limitations: ["Sigmoid routers are not shift-invariant in the same way; the stability benefit there must be measured."]
+    applicability: "Why z-loss addresses a direction the main loss ignores."
+    related_claims: [CLM-026, CLM-029]
+    curriculum_usage: { lessons: ["28.5"], labs: ["LAB-B"], assessments: ["Mastery-28"] }
+  - id: CLM-053
+    claim: "Kimi K3's Quantile Balancing is an auxiliary-loss-free balancing method that sets a per-expert bias from quantiles of routing scores rather than fixed-step sign updates; Megatron-Core exposes a quantile_balancing routing type at the pinned commit."
+    provenance: TODO_VERIFY
+    domain: aux_loss_free_balancing
+    concepts: [expert_bias, control_view_of_balancing]
+    confidence: low
+    currentness_status: "FRONTIER"
+    limitations: ["Primary Kimi K3 source not opened; the method is known here only through the ID Balancing abstract (CLM-022) and a Megatron-Core code path (TopKRouter.quantile_balancing) whose algorithm was not traced."]
+    applicability: "Reading lead only; no lesson relies on it."
+    related_claims: [CLM-022]
+    curriculum_usage: { lessons: ["28.3"] }

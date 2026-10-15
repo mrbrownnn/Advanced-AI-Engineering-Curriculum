@@ -1,0 +1,100 @@
+module: "28-moe-training-dynamics"
+registry_version: "1.0.0"
+
+required_concepts: [top_k_gating, softmax_router, sigmoid_router, gate_normalization, token_choice, expert_choice, causal_leakage, router_gradient, router_collapse, dead_experts, aux_load_balancing_loss, interference_gradient, maxvio, expert_bias, bias_update_rate, balance_scope, sequence_level_balance, micro_batch_balance, global_batch_balance, expert_capacity, capacity_factor, token_dropping, padding_waste, dropless, block_sparse_moe, ep_training_all_to_all, router_z_loss, selective_precision, fine_grained_experts, shared_experts, expert_specialization, router_saturation, sparse_upcycling, expert_symmetry, moe_fine_tuning, routing_volatility, routing_replay, router_anchoring]
+prerequisite_concepts: [moe_parameter_accounting, softmax, cross_entropy_gradient, expert_parallelism, all_to_all_cost, expert_skew, paired_inference, training_memory, activation_recomputation]
+first_occurrence_concepts: [sigmoid_router, gate_normalization, expert_choice, causal_leakage, router_gradient, router_collapse, aux_load_balancing_loss, interference_gradient, maxvio, expert_bias, balance_scope, global_batch_balance, token_dropping, padding_waste, dropless, block_sparse_moe, ep_training_all_to_all, router_z_loss, fine_grained_experts, shared_experts, expert_specialization, router_saturation, sparse_upcycling, expert_symmetry, routing_volatility, routing_replay, router_anchoring]
+
+concept_dependencies:
+  - { concept: top_k_gating, depends_on: [moe_parameter_accounting, softmax] }
+  - { concept: softmax_router, depends_on: [top_k_gating] }
+  - { concept: sigmoid_router, depends_on: [top_k_gating] }
+  - { concept: gate_normalization, depends_on: [softmax_router, sigmoid_router] }
+  - { concept: expert_choice, depends_on: [token_choice] }
+  - { concept: causal_leakage, depends_on: [expert_choice] }
+  - { concept: router_gradient, depends_on: [top_k_gating, cross_entropy_gradient] }
+  - { concept: router_collapse, depends_on: [router_gradient] }
+  - { concept: dead_experts, depends_on: [router_collapse] }
+  - { concept: aux_load_balancing_loss, depends_on: [router_collapse] }
+  - { concept: interference_gradient, depends_on: [aux_load_balancing_loss] }
+  - { concept: maxvio, depends_on: [router_collapse] }
+  - { concept: expert_bias, depends_on: [sigmoid_router, interference_gradient] }
+  - { concept: bias_update_rate, depends_on: [expert_bias] }
+  - { concept: balance_scope, depends_on: [aux_load_balancing_loss, expert_bias] }
+  - { concept: sequence_level_balance, depends_on: [balance_scope] }
+  - { concept: micro_batch_balance, depends_on: [balance_scope] }
+  - { concept: global_batch_balance, depends_on: [balance_scope] }
+  - { concept: expert_capacity, depends_on: [top_k_gating] }
+  - { concept: capacity_factor, depends_on: [expert_capacity] }
+  - { concept: token_dropping, depends_on: [capacity_factor] }
+  - { concept: padding_waste, depends_on: [capacity_factor] }
+  - { concept: dropless, depends_on: [token_dropping, padding_waste] }
+  - { concept: block_sparse_moe, depends_on: [dropless] }
+  - { concept: ep_training_all_to_all, depends_on: [expert_parallelism, all_to_all_cost, expert_skew, activation_recomputation] }
+  - { concept: router_z_loss, depends_on: [softmax_router] }
+  - { concept: selective_precision, depends_on: [router_z_loss] }
+  - { concept: fine_grained_experts, depends_on: [moe_parameter_accounting] }
+  - { concept: shared_experts, depends_on: [fine_grained_experts] }
+  - { concept: expert_specialization, depends_on: [maxvio, global_batch_balance] }
+  - { concept: router_saturation, depends_on: [expert_specialization] }
+  - { concept: sparse_upcycling, depends_on: [moe_parameter_accounting, gate_normalization] }
+  - { concept: expert_symmetry, depends_on: [sparse_upcycling] }
+  - { concept: moe_fine_tuning, depends_on: [training_memory, paired_inference] }
+  - { concept: routing_volatility, depends_on: [moe_fine_tuning, router_gradient] }
+  - { concept: routing_replay, depends_on: [routing_volatility] }
+  - { concept: router_anchoring, depends_on: [routing_volatility, aux_load_balancing_loss] }
+
+mechanisms:
+  - { id: "MECH-01", description: "Token-choice top-k routing: router logits are scored by softmax (before or after top-k) or by sigmoid with renormalization over selected experts; the selection is non-differentiable, so only selected experts and their gate values receive task gradient. Expert-choice routing balances by construction but leaks future-token information in causal LMs and can drop tokens.", evidence_ids: ["CLM-001", "CLM-002", "CLM-006", "CLM-007", "CLM-008", "CLM-009", "CLM-010"], derived_from: [] }
+  - { id: "MECH-02", description: "Router collapse is a positive feedback loop: selected experts train on more tokens, become better for them, and are selected more; without a balancing signal, experts become dead weights.", evidence_ids: ["CLM-001", "CLM-010", "CLM-012", "CLM-049"], derived_from: ["MECH-01"] }
+  - { id: "MECH-03", description: "Auxiliary load-balancing loss alpha*N*sum f_i P_i pushes router probability away from overloaded experts in proportion to load; too small an alpha permits collapse, too large an alpha adds interference gradients that hurt the LM objective.", evidence_ids: ["CLM-003", "CLM-005", "CLM-011", "CLM-014"], derived_from: ["MECH-02"] }
+  - { id: "MECH-04", description: "Auxiliary-loss-free balancing adds a non-learned per-expert bias to selection scores only and moves it by a fixed step against the sign of each expert's load error once per global batch; the gate weights stay unbiased, so balancing adds no gradient to the LM loss. Its behavior is that of an integral controller with a fixed step.", evidence_ids: ["CLM-015", "CLM-016", "CLM-017", "CLM-022", "CLM-023", "CLM-024"], derived_from: ["MECH-02"] }
+  - { id: "MECH-05", description: "Balance scope (sequence, micro-batch, global batch) sets which co-occurring tokens must spread across experts; narrow scope bounds per-step expert-parallel load but suppresses domain specialization, global scope permits specialization but permits per-micro-batch imbalance.", evidence_ids: ["CLM-017", "CLM-018", "CLM-019", "CLM-020", "CLM-021", "CLM-025"], derived_from: ["MECH-03", "MECH-04"] }
+  - { id: "MECH-06", description: "Capacity limits make expert buffers static: overflow assignments are dropped to the residual path and underflow slots are padding; dropless block-sparse or grouped computation removes both at the cost of dynamic shapes and block rounding.", evidence_ids: ["CLM-004", "CLM-027", "CLM-028", "CLM-030", "CLM-033", "CLM-034"], derived_from: ["MECH-01"] }
+  - { id: "MECH-07", description: "Expert-parallel training performs dispatch and combine all-to-all in forward and their transposes in backward (and again under recomputation); completion is set by the most-loaded receiver, so imbalance is paid in step time, and node-limited routing, low-precision dispatch, and overlap change bytes or exposure.", evidence_ids: ["CLM-035", "CLM-036"], derived_from: ["MECH-05", "MECH-06"] }
+  - { id: "MECH-08", description: "Router z-loss penalizes the squared log-partition of router logits, keeping logits small to reduce roundoff in the router exponential; selective fp32 router precision and smaller init scale are complementary stability controls.", evidence_ids: ["CLM-002", "CLM-026", "CLM-029", "CLM-038"], derived_from: ["MECH-01"] }
+  - { id: "MECH-09", description: "Fine-grained experts raise the number of expert combinations at constant compute and shared experts take common computation out of routing; both are recipe-dependent and their benefit is measured, not assumed. Specialization is measured conditionally by token type, domain, vocabulary ID, co-activation, or routing saturation rather than inferred from load balance.", evidence_ids: ["CLM-009", "CLM-020", "CLM-032", "CLM-037", "CLM-038", "CLM-039", "CLM-048", "CLM-050"], derived_from: ["MECH-01"] }
+  - { id: "MECH-10", description: "Upcycling copies a dense MLP into every expert and adds a fresh router; with renormalized gates the layer initially reproduces the dense output, and only routing breaks the symmetry, so upcycled experts specialize slowly and from-scratch MoE overtakes at a larger budget.", evidence_ids: ["CLM-040", "CLM-041", "CLM-042", "CLM-047"], derived_from: ["MECH-01"] }
+  - { id: "MECH-11", description: "Fine-tuning and RL of MoE models change routing as well as weights: routing drift between policy snapshots, overfitting, and re-imposed uniform balancing interact; mitigations include tuning only non-expert parameters, freezing or anchoring the router, and routing replay.", evidence_ids: ["CLM-031", "CLM-043", "CLM-044", "CLM-045", "CLM-052"], derived_from: ["MECH-03", "MECH-05"] }
+
+mathematical_models:
+  - { id: "MATH-01", description: "Switch LBL = alpha*N*sum_i f_i P_i; value 1 at uniform, N at full collapse; dLBL/dP_i = alpha*N*f_i with f_i constant.", evidence_ids: ["CLM-003", "CLM-014"], derived_from: ["MECH-03"] }
+  - { id: "MATH-02", description: "MaxVio = (max_i Load_i - mean Load)/mean Load at a declared scope (batch or global).", evidence_ids: ["CLM-013"], derived_from: ["MECH-03"] }
+  - { id: "MATH-03", description: "Bias update b_i <- b_i + u*sign(mean load - c_i), applied once per global batch; selection uses s_i+b_i, gate uses s_i normalized over the selected set.", evidence_ids: ["CLM-015", "CLM-017", "CLM-024"], derived_from: ["MECH-04"] }
+  - { id: "MATH-04", description: "Capacity C=ceil(T*k/E*CF); dropped = sum max(0,n_e-C); padding = E*C - sum min(n_e,C); dropless block waste = sum(ceil(n_e/b)*b - n_e).", evidence_ids: ["CLM-004", "CLM-027", "CLM-028", "CLM-034"], derived_from: ["MECH-06"] }
+  - { id: "MATH-05", description: "EP training all-to-all bytes per layer per micro-batch ~ n_a2a * B*k*d*bytes*(R-1)/R with n_a2a=4 (6 with MoE recompute); time >= Gamma*bytes/BW_eff.", evidence_ids: ["CLM-035", "CLM-036"], derived_from: ["MECH-07"] }
+  - { id: "MATH-06", description: "Router z-loss L_z = mean over tokens of (logsumexp(logits))^2 with c_z=1e-3 in ST-MoE; gradient 2*lse*softmax(logits).", evidence_ids: ["CLM-026", "CLM-029", "CLM-054"], derived_from: ["MECH-08"] }
+
+implementation_mechanisms:
+  - { id: "IMPL-01", description: "Megatron-Core at e998be07: TopKRouter.routing applies z-loss, top-k with optional expert_bias (sigmoid/sqrtsoftplus only), optional capacity dropping, aux/seq/global aux losses on unbiased scores, and token counting; finalize_model_grads updates the bias once per global batch with an all-reduced sign step.", evidence_ids: ["CLM-024", "CLM-025", "CLM-026", "CLM-027", "CLM-044"], derived_from: ["MECH-04", "MECH-05", "MECH-06", "MECH-08"] }
+  - { id: "IMPL-02", description: "MegaBlocks at 952db33d: dropless ParallelDroplessMLP sorts tokens by expert, rounds bins up to 128, and runs block-sparse expert matmuls; the capacity-based ParallelMLP keeps a capacity factor path.", evidence_ids: ["CLM-028", "CLM-033"], derived_from: ["MECH-06"] }
+
+failure_modes:
+  - { id: "FAIL-01", description: "Router collapse and dead experts: balancing disabled, coefficient too small, or misconfigured scope; loss looks normal while most experts are unused.", evidence_ids: ["CLM-001", "CLM-011", "CLM-012", "CLM-049"], derived_from: ["MECH-02"] }
+  - { id: "FAIL-02", description: "Over-balancing: a large auxiliary coefficient or narrow scope forces uniform routing, degrading LM quality and suppressing specialization, which can surface later as uninformative routing.", evidence_ids: ["CLM-011", "CLM-019", "CLM-046"], derived_from: ["MECH-03", "MECH-05"] }
+  - { id: "FAIL-03", description: "Silent token dropping: capacity factor set (or defaulted) in a framework, skew rises, and a growing fraction of assignments bypass experts, degrading quality without errors.", evidence_ids: ["CLM-004", "CLM-027", "CLM-033", "CLM-051"], derived_from: ["MECH-06"] }
+  - { id: "FAIL-04", description: "Expert-parallel straggling: per-micro-batch imbalance under global-only balance makes the most-loaded rank set all-to-all and expert-compute time in both forward and backward.", evidence_ids: ["CLM-018", "CLM-021", "CLM-036"], derived_from: ["MECH-07"] }
+  - { id: "FAIL-05", description: "Router logit growth and instability: large router logits amplify roundoff in the exponential and produce loss spikes or divergence without z-loss or fp32 routing.", evidence_ids: ["CLM-002", "CLM-029", "CLM-038"], derived_from: ["MECH-08"] }
+  - { id: "FAIL-06", description: "Bias-controller misbehavior: bias updated per micro-batch or on non-training passes, counts not reduced across data-parallel ranks, update rate too large (oscillation) or too small (lag), or bias used with softmax where it shifts all gates.", evidence_ids: ["CLM-015", "CLM-017", "CLM-024"], derived_from: ["MECH-04"] }
+  - { id: "FAIL-07", description: "Causal leakage from expert-choice routing in decoder training yields optimistic training metrics that do not transfer to autoregressive inference.", evidence_ids: ["CLM-006", "CLM-007"], derived_from: ["MECH-01"] }
+  - { id: "FAIL-08", description: "MoE fine-tuning pitfalls: overfitting, degraded quality when only expert parameters are tuned, routing drift between RL policy snapshots, and loss of base routing structure when uniform balancing is re-imposed.", evidence_ids: ["CLM-031", "CLM-043", "CLM-045", "CLM-052"], derived_from: ["MECH-11"] }
+  - { id: "FAIL-09", description: "Upcycling stall: symmetric experts specialize slowly, and continued upcycled training falls behind a from-scratch MoE beyond a budget crossover.", evidence_ids: ["CLM-040", "CLM-041", "CLM-042", "CLM-047"], derived_from: ["MECH-10"] }
+
+production_connections:
+  - { id: "PROD-01", description: "Released MoE recipes combine sigmoid or softmax top-k, fine-grained routed experts with or without shared experts, dropless execution, and a balance policy (bias plus small sequence loss in DeepSeek-V3; global-batch loss in Qwen3; micro-batch loss plus z-loss in OLMoE).", evidence_ids: ["CLM-009", "CLM-012", "CLM-017", "CLM-020", "CLM-038"], derived_from: ["MECH-04", "MECH-05", "MECH-09"] }
+  - { id: "PROD-02", description: "Training throughput depends on EP all-to-all overlap, node-limited routing, and low-precision dispatch, so balance is a throughput control as well as a quality control (inference placement in Modules 20 and 24).", evidence_ids: ["CLM-035", "CLM-036"], derived_from: ["MECH-07"] }
+
+research_connections:
+  - { id: "RESEARCH-01", description: "Control-theoretic and primal-dual analyses of bias balancing (ALF-LB theory, ID Balancing) and quantile balancing are active work at extreme sparsity.", evidence_ids: ["CLM-022", "CLM-023"], derived_from: ["MECH-04"] }
+  - { id: "RESEARCH-02", description: "Post-training of MoE (routing replay, sequence-level RL objectives, router anchoring) and the cost of over-dispersed routing for pruning are 2025-2026 frontier topics.", evidence_ids: ["CLM-043", "CLM-045", "CLM-046"], derived_from: ["MECH-11"] }
+
+todo_verify:
+  - { id: "TODO-01", description: "Kimi K3 Quantile Balancing primary source and the Megatron-Core quantile_balancing algorithm were not traced.", evidence_ids: ["CLM-053"], derived_from: ["MECH-04"] }
+
+candidate_capabilities:
+  - { capability: "Explain and compute router outputs and gradients for softmax and sigmoid top-k and choose token- versus expert-choice for causal LM training.", mapped_mechanisms: ["MECH-01", "FAIL-07"] }
+  - { capability: "Diagnose router collapse and over-balancing from per-expert load, MaxVio, and auxiliary-loss curves, and tune the auxiliary coefficient.", mapped_mechanisms: ["MECH-02", "MECH-03", "MATH-01", "MATH-02", "FAIL-01", "FAIL-02"] }
+  - { capability: "Implement and trace auxiliary-loss-free bias balancing and choose a balance scope with its quality and step-time consequences.", mapped_mechanisms: ["MECH-04", "MECH-05", "MATH-03", "IMPL-01", "FAIL-04", "FAIL-06"] }
+  - { capability: "Size capacity, quantify dropping and padding, compare dropless execution, and estimate EP training all-to-all cost.", mapped_mechanisms: ["MECH-06", "MECH-07", "MATH-04", "MATH-05", "IMPL-02", "FAIL-03"] }
+  - { capability: "Stabilize router training with z-loss and precision controls and measure expert specialization separately from balance.", mapped_mechanisms: ["MECH-08", "MECH-09", "MATH-06", "FAIL-05", "PROD-01"] }
+  - { capability: "Decide upcycling versus from-scratch and plan MoE fine-tuning with routing-drift monitoring.", mapped_mechanisms: ["MECH-10", "MECH-11", "FAIL-08", "FAIL-09"] }
