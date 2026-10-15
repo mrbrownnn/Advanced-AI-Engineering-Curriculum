@@ -1,0 +1,87 @@
+module: "25-pretraining-dynamics-scaling"
+registry_version: "1.0.0"
+
+required_concepts: [six_nd_rule, non_embedding_params, power_law, parametric_loss, compute_optimal_allocation, isoflop, schedule_confound, inference_aware_scaling, irreducible_loss, extrapolation_error, fit_reliability, data_constrained_scaling, downstream_scaling, proxy_validity, standard_parametrization, mup, hp_transfer, depth_transfer, lr_sensitivity, adam_epsilon, attention_logit_growth, qk_norm, output_logit_divergence, z_loss, logit_softcap, loss_spike, rollback_skip, cosine_schedule, wsd_schedule, cooldown, decay_to_zero, data_mixture, mixing_law, checkpoint_averaging]
+prerequisite_concepts: [flop_accounting, softmax_logits, attention_scores, rmsnorm, adam_states, experimental_unit, confidence_interval, data_lineage, deduplication]
+first_occurrence_concepts: [six_nd_rule, non_embedding_params, parametric_loss, compute_optimal_allocation, isoflop, schedule_confound, inference_aware_scaling, irreducible_loss, extrapolation_error, data_constrained_scaling, proxy_validity, standard_parametrization, mup, hp_transfer, depth_transfer, lr_sensitivity, adam_epsilon, attention_logit_growth, qk_norm, output_logit_divergence, z_loss, logit_softcap, loss_spike, rollback_skip, cosine_schedule, wsd_schedule, cooldown, decay_to_zero, data_mixture, mixing_law, checkpoint_averaging]
+
+concept_dependencies:
+  - { concept: six_nd_rule, depends_on: [flop_accounting] }
+  - { concept: non_embedding_params, depends_on: [flop_accounting] }
+  - { concept: power_law, depends_on: [six_nd_rule] }
+  - { concept: parametric_loss, depends_on: [power_law, irreducible_loss] }
+  - { concept: compute_optimal_allocation, depends_on: [parametric_loss, six_nd_rule] }
+  - { concept: isoflop, depends_on: [compute_optimal_allocation] }
+  - { concept: schedule_confound, depends_on: [compute_optimal_allocation, cosine_schedule] }
+  - { concept: inference_aware_scaling, depends_on: [compute_optimal_allocation] }
+  - { concept: extrapolation_error, depends_on: [parametric_loss, confidence_interval] }
+  - { concept: fit_reliability, depends_on: [extrapolation_error, experimental_unit] }
+  - { concept: data_constrained_scaling, depends_on: [parametric_loss, deduplication] }
+  - { concept: proxy_validity, depends_on: [extrapolation_error, hp_transfer] }
+  - { concept: mup, depends_on: [standard_parametrization, adam_states] }
+  - { concept: hp_transfer, depends_on: [mup] }
+  - { concept: depth_transfer, depends_on: [hp_transfer] }
+  - { concept: lr_sensitivity, depends_on: [hp_transfer] }
+  - { concept: adam_epsilon, depends_on: [adam_states] }
+  - { concept: attention_logit_growth, depends_on: [attention_scores, softmax_logits] }
+  - { concept: qk_norm, depends_on: [attention_logit_growth, rmsnorm] }
+  - { concept: output_logit_divergence, depends_on: [softmax_logits] }
+  - { concept: z_loss, depends_on: [output_logit_divergence] }
+  - { concept: logit_softcap, depends_on: [attention_logit_growth] }
+  - { concept: rollback_skip, depends_on: [loss_spike] }
+  - { concept: wsd_schedule, depends_on: [cosine_schedule] }
+  - { concept: cooldown, depends_on: [wsd_schedule] }
+  - { concept: decay_to_zero, depends_on: [cosine_schedule] }
+  - { concept: mixing_law, depends_on: [data_mixture, power_law] }
+  - { concept: data_mixture, depends_on: [data_lineage] }
+  - { concept: checkpoint_averaging, depends_on: [wsd_schedule] }
+
+mechanisms:
+  - { id: "MECH-01", description: "Compute-optimal allocation: under C≈6ND and a parametric loss E + A/N^α + B/D^β, the loss-minimizing (N, D) at fixed C follows N ∝ C^a, D ∝ C^b with a = β/(α+β); the exponents depend on parameter counting, schedule length, warmup, optimizer tuning, and fit procedure, which is why Kaplan (0.73) and Chinchilla (~0.5) disagree; inference demand shifts the optimum toward smaller, longer-trained models.", evidence_ids: ["CLM-001", "CLM-002", "CLM-003", "CLM-004", "CLM-005", "CLM-006", "CLM-007", "CLM-008", "CLM-010"], derived_from: [] }
+  - { id: "MECH-02", description: "Scaling-law forecasting fits a functional form on proxy runs and extrapolates; validity requires matched schedules, consistent parameter counting, held invariants (data, tokenizer, parametrization), an irreducible-loss term, enough runs to estimate seed noise, and unique-data assumptions or a repetition-aware D'.", evidence_ids: ["CLM-005", "CLM-009", "CLM-011", "CLM-012", "CLM-013", "CLM-014"], derived_from: ["MECH-01"] }
+  - { id: "MECH-03", description: "Parametrization decides how per-layer initialization, multipliers, and learning rates scale with width (and depth); muP keeps the optimal LR stable across width so proxies can tune HPs, while SP with per-layer LR prescriptions can also transfer, and depth transfer needs residual-branch scaling (CompleteP).", evidence_ids: ["CLM-015", "CLM-016", "CLM-017", "CLM-018", "CLM-019", "CLM-021"], derived_from: ["MECH-02"] }
+  - { id: "MECH-04", description: "Training instabilities arise when logits grow: attention logits grow with query/key norms and collapse attention entropy (mitigated by QK-norm, soft-capping, QK-Clip), output logits drift through the free shift of log Z (mitigated by z-loss or weight decay); loss spikes from batch-state interactions are handled operationally by rollback and batch skipping or skip-step optimizers; LR sensitivity is the summary metric.", evidence_ids: ["CLM-020", "CLM-021", "CLM-022", "CLM-023", "CLM-024", "CLM-025", "CLM-026", "CLM-027", "CLM-029", "CLM-030"], derived_from: ["MECH-03"] }
+  - { id: "MECH-05", description: "LR schedules trade budget commitment against final loss: cosine ties the schedule to a fixed token budget, while warmup-stable-decay keeps a constant trunk and realizes the loss drop in a short cooldown, so one trunk serves many budgets; loss tracks both LR area and annealing area.", evidence_ids: ["CLM-031", "CLM-032", "CLM-033", "CLM-034", "CLM-035", "CLM-036", "CLM-038"], derived_from: ["MECH-01"] }
+  - { id: "MECH-06", description: "Data-mixture optimization chooses domain weights by proxy runs (DRO, regression, or mixing laws), but proxy-optimal mixtures may not keep their advantage at scale; checkpoint averaging within one basin reduces oscillation and can approximate annealing.", evidence_ids: ["CLM-039", "CLM-040", "CLM-041", "CLM-042", "CLM-043", "CLM-044", "CLM-045", "CLM-046", "CLM-047", "CLM-048", "CLM-049"], derived_from: ["MECH-02", "MECH-05"] }
+
+mathematical_models:
+  - { id: "MATH-01", description: "C ≈ 6ND training FLOPs with N excluding embeddings (Kaplan); compute-optimal N_opt = G(C/6)^a, D_opt = G^-1(C/6)^b, G = (αA/(βB))^(1/(α+β)), a = β/(α+β).", evidence_ids: ["CLM-001", "CLM-003", "CLM-008"], derived_from: ["MECH-01"] }
+  - { id: "MATH-02", description: "Data-constrained effective tokens D' = U_D + U_D R*_D (1 − e^(−R_D/R*_D)), R*_D ≈ 15.4.", evidence_ids: ["CLM-009"], derived_from: ["MECH-02"] }
+  - { id: "MATH-03", description: "Extrapolation error of a pure power law fitted to data with an irreducible term grows with the extrapolation ratio; reported best-case ARE ≈ 4%.", evidence_ids: ["CLM-011", "CLM-013"], derived_from: ["MECH-02"] }
+  - { id: "MATH-04", description: "Cross-entropy shift invariance and z-loss gradient 2k·log Z·softmax(z); attention two-key weight 1/(1+e^-Δ) with Δ scaling as |q||k|.", evidence_ids: ["CLM-020", "CLM-029"], derived_from: ["MECH-04"] }
+  - { id: "MATH-05", description: "Schedule arithmetic: cosine η(t) = η_min + (η_max − η_min)(1+cos(πt/T))/2; WSD constant then linear decay; LR-annealing loss L(s) = L_0 + A S_1^-α − C S_2.", evidence_ids: ["CLM-035", "CLM-037", "CLM-038"], derived_from: ["MECH-05"] }
+
+implementation_mechanisms:
+  - { id: "IMPL-01", description: "Pinned OLMo-core: cross_entropy_loss with optional z-loss on logsumexp^2; SkipStepOptimizer skipping steps beyond sigma_factor standard deviations of rolling loss/grad-norm; olmo2_7B config with qk_norm and reordered norm.", evidence_ids: ["CLM-024", "CLM-028"], derived_from: ["MECH-04"] }
+  - { id: "IMPL-02", description: "Pinned OLMo-core WSD.get_lr and CosWithWarmup.get_lr schedule implementations.", evidence_ids: ["CLM-037"], derived_from: ["MECH-05"] }
+
+failure_modes:
+  - { id: "FAIL-01", description: "Confounded scaling fit: using intermediate checkpoints of one long cosine run, non-embedding counts, fixed warmup, or untuned small-scale optimizers biases the allocation exponent.", evidence_ids: ["CLM-002", "CLM-004", "CLM-006", "CLM-007"], derived_from: ["MECH-01"] }
+  - { id: "FAIL-02", description: "Over-confident extrapolation: pure power law without irreducible term, too few runs, seed noise ignored, downstream metrics extrapolated as if predictable, or data repetition ignored.", evidence_ids: ["CLM-005", "CLM-009", "CLM-011", "CLM-012", "CLM-013"], derived_from: ["MECH-02"] }
+  - { id: "FAIL-03", description: "HP transfer failure: proxy-tuned LR applied under SP to a wider or deeper target, or regularization HPs assumed to transfer.", evidence_ids: ["CLM-015", "CLM-017", "CLM-018", "CLM-019"], derived_from: ["MECH-03"] }
+  - { id: "FAIL-04", description: "Logit-growth divergence and loss spikes: attention entropy collapse, output-logit drift, too-large Adam epsilon at scale, or data-triggered spikes.", evidence_ids: ["CLM-020", "CLM-021", "CLM-022", "CLM-023", "CLM-024", "CLM-027", "CLM-030"], derived_from: ["MECH-04"] }
+  - { id: "FAIL-05", description: "Schedule mismatch: comparing or forecasting with checkpoints from a schedule that has not decayed, or a cosine cycle overshooting the actual run length.", evidence_ids: ["CLM-004", "CLM-031", "CLM-038"], derived_from: ["MECH-05"] }
+  - { id: "FAIL-06", description: "Mixture non-transfer and averaging misuse: proxy-optimal mixture loses at scale, rankings inside seed noise, or averaging checkpoints from different basins.", evidence_ids: ["CLM-043", "CLM-047", "CLM-048", "CLM-049"], derived_from: ["MECH-06"] }
+
+production_connections:
+  - { id: "PROD-01", description: "Open recipes (OLMo 2) combine QK-norm, z-loss, no embedding weight decay, repeated-n-gram filtering, linear decay to zero in mid-training, and souping of annealed checkpoints.", evidence_ids: ["CLM-024", "CLM-028", "CLM-046"], derived_from: ["MECH-04", "MECH-06"] }
+  - { id: "PROD-02", description: "WSD trunks with branched cooldowns let one run serve multiple budgets, continued training, and scaling-law sweeps.", evidence_ids: ["CLM-031", "CLM-032", "CLM-044"], derived_from: ["MECH-05"] }
+
+research_connections:
+  - { id: "RESEARCH-01", description: "Reconciling compute-optimal exponents and measuring fit reliability remain active (replications, discrepancy studies, downstream unpredictability).", evidence_ids: ["CLM-005", "CLM-006", "CLM-007", "CLM-011", "CLM-012"], derived_from: ["MECH-02"] }
+  - { id: "RESEARCH-02", description: "Parametrization beyond width (depth transfer, per-layer SP prescriptions) and schedule theory (river valley, convex bounds, annealing laws, decay to zero).", evidence_ids: ["CLM-017", "CLM-018", "CLM-033", "CLM-034", "CLM-035", "CLM-036"], derived_from: ["MECH-03", "MECH-05"] }
+  - { id: "RESEARCH-03", description: "Mixture laws across scale and pretraining-time model merging.", evidence_ids: ["CLM-040", "CLM-042", "CLM-043", "CLM-044"], derived_from: ["MECH-06"] }
+
+todo_verify:
+  - { id: "TODO-01", description: "Porian et al. cite Kaplan's exponent as 0.88 whereas Kaplan reports 0.73 for non-embedding compute; the basis of 0.88 was not checked.", evidence_ids: ["CLM-007"], derived_from: [] }
+  - { id: "TODO-02", description: "Functional forms of the Data Mixing Law (Ye et al.) and the optimal-mixture scaling law (Shukor et al.) were not read; abstract-level only.", evidence_ids: ["CLM-040", "CLM-042"], derived_from: [] }
+  - { id: "TODO-03", description: "OLMo 2 z-loss weight differs between Table 1 (1e-5) and Section 3.3.3 (1e-4); the OLMo-core 7B script uses 1e-5, but the exact published-run config was not confirmed.", evidence_ids: ["CLM-024", "CLM-028"], derived_from: [] }
+  - { id: "TODO-04", description: "Several quotes (CLM-005, -006, -007, -010, -011, -031, -032, -033, -035, -044) were read from HTML renders through a summarizing fetch; spot-check against PDFs before publication.", evidence_ids: ["CLM-005", "CLM-031", "CLM-044"], derived_from: [] }
+
+candidate_capabilities:
+  - { capability: "Allocate a compute budget between parameters and tokens with a stated loss model, and explain why published allocation exponents disagree.", mapped_mechanisms: ["MECH-01", "MATH-01", "FAIL-01"] }
+  - { capability: "Fit a scaling law on proxies, predict a held-out run with an interval, and state the conditions that invalidate the prediction.", mapped_mechanisms: ["MECH-02", "MATH-02", "MATH-03", "FAIL-02"] }
+  - { capability: "Implement muP and demonstrate LR-optimum drift under SP across width.", mapped_mechanisms: ["MECH-03", "FAIL-03"] }
+  - { capability: "Induce, instrument, and mitigate attention-logit and output-logit instabilities, and trace the mitigations in a pinned training library.", mapped_mechanisms: ["MECH-04", "MATH-04", "IMPL-01", "FAIL-04"] }
+  - { capability: "Choose and implement cosine or WSD schedules and plan branched cooldowns for multiple budgets.", mapped_mechanisms: ["MECH-05", "MATH-05", "IMPL-02", "FAIL-05"] }
+  - { capability: "Optimize a data mixture with proxies, test whether it transfers, and use checkpoint averaging with a stated basin assumption.", mapped_mechanisms: ["MECH-06", "FAIL-06", "PROD-01"] }

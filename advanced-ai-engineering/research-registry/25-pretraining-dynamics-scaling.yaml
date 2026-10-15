@@ -1,0 +1,626 @@
+module: "25-pretraining-dynamics-scaling"
+registry_version: "1.0.0"
+research_cutoff: "2026-09-30"
+change_reason: "Initial evidence registry for Module 25 (Pretraining Dynamics & Scaling): compute-optimal allocation and the Kaplan/Chinchilla disagreement, scaling-law fitting and failure (extrapolation, data repetition, downstream unpredictability), muP and hyperparameter transfer, training instabilities (attention-logit growth, output-logit divergence, loss spikes) and their mitigations, cosine versus warmup-stable-decay schedules, data-mixture optimization, and checkpoint averaging. Sources opened on 2026-10-12; abstract-only or HTML-render inspection is marked per claim."
+out_of_scope_candidates:
+  - "ZeRO/FSDP sharding, pipeline/tensor/context parallelism for training, FP8/MX training recipes (Module 26)."
+  - "Fine-tuning, LoRA, preference optimization (Module 19); RL post-training systems (Module 27)."
+  - "Data lineage, deduplication, and contamination mechanics (Module 08)."
+  - "MoE router stability and router z-loss (Module 28)."
+  - "u-muP (arXiv:2407.17465) was not verified in this pass."
+claims:
+  # ---------------- Lesson 25.1: compute accounting and compute-optimal allocation ----------------
+  - id: CLM-001
+    claim: "Kaplan et al. (2020) define N as model parameters excluding vocabulary and positional embeddings, estimate non-embedding training compute as C ≈ 6N FLOPs per training token (C ≈ 6NBS over B·S tokens), and report power laws L(N)=(N_c/N)^α_N with α_N ≈ 0.076, L(D)=(D_c/D)^α_D with α_D ≈ 0.095, and L(C_min)=(C_c^min/C_min)^α_C^min with α_C^min ≈ 0.050."
+    provenance: VERIFIED_FACT
+    domain: scaling_laws
+    concepts: [six_nd_rule, power_law, non_embedding_params]
+    confidence: high
+    currentness_status: "REFERENCE / BASELINE"
+    evidence: [{ source_type: paper, tier: 1, title: "Scaling Laws for Neural Language Models", authors: "Jared Kaplan, Sam McCandlish, Tom Henighan, Tom B. Brown, Benjamin Chess, Rewon Child, Scott Gray, Alec Radford, Jeffrey Wu, Dario Amodei", year: "2020", url: "https://arxiv.org/abs/2001.08361", section: "Section 1.2 (Eqs. 1.1-1.3); Section 1.3; Section 2.1; Appendix A Table 4 (full text, v1)", accessed_at: "2026-10-12" }]
+    limitations: ["Exponents are fits to the paper's WebText2 models, tokenizer, architecture, and schedule; they are not constants of nature.", "6N omits the context-dependent attention term and counts only non-embedding compute."]
+    applicability: "Compute accounting and the historical baseline for scaling-law forms."
+    curriculum_usage: { lessons: ["25.1", "25.2"], labs: ["LAB-A"], assessments: ["Mastery-25"] }
+  - id: CLM-002
+    claim: "Kaplan et al. report that compute-efficient training uses very large models stopped significantly short of convergence, with optimal model size growing as N(C_min) ∝ C_min^0.73 and data as D ∝ C^0.27, and that all their models were trained for a fixed 2.5×10^5 steps with a 3,000-step linear warmup followed by cosine decay to zero."
+    provenance: VERIFIED_FACT
+    domain: compute_optimal
+    concepts: [compute_optimal_allocation, lr_schedule]
+    confidence: high
+    currentness_status: "LEGACY"
+    evidence: [{ source_type: paper, tier: 1, title: "Scaling Laws for Neural Language Models", authors: "Jared Kaplan, Sam McCandlish, Tom Henighan, et al.", year: "2020", url: "https://arxiv.org/abs/2001.08361", section: "Section 1.1; Section 2.2; Section 6.1 Eq. 6.1; Table 5 (full text)", accessed_at: "2026-10-12" }]
+    limitations: ["Superseded as an allocation rule by CLM-003 and the reconciliations in CLM-006 and CLM-007; kept as the canonical counterexample of a confounded scaling fit."]
+    applicability: "Explaining the Kaplan/Chinchilla disagreement."
+    related_claims: [CLM-003, CLM-004, CLM-006, CLM-007]
+    curriculum_usage: { lessons: ["25.1"], labs: ["LAB-A"], assessments: ["Mastery-25"] }
+  - id: CLM-003
+    claim: "Hoffmann et al. (Chinchilla, 2022) fit N_opt ∝ C^a and D_opt ∝ C^b with three approaches, reporting a = 0.50, 0.49, and 0.46 and b = 0.50, 0.51, and 0.54 (Table 2), versus Kaplan's 0.73/0.27; Approach 3 fits L(N,D) = E + A/N^α + B/D^β with E = 1.69, A = 406.4, B = 410.7, α = 0.34, β = 0.28 under FLOPs ≈ 6ND; Chinchilla (70B parameters, 1.4T tokens) was trained with the same FLOPs as Gopher."
+    provenance: VERIFIED_FACT
+    domain: compute_optimal
+    concepts: [compute_optimal_allocation, parametric_loss, isoflop]
+    confidence: high
+    currentness_status: "REFERENCE / BASELINE"
+    evidence: [{ source_type: paper, tier: 1, title: "Training Compute-Optimal Large Language Models", authors: "Jordan Hoffmann, Sebastian Borgeaud, Arthur Mensch, Elena Buchatskaya, Trevor Cai, Eliza Rutherford, et al.", year: "2022", url: "https://arxiv.org/abs/2203.15556", section: "Section 3 (Eqs. 2-4); Table 2; Section 4; Appendix D.2 Eq. 10 (full text, v1)", accessed_at: "2026-10-12" }]
+    limitations: ["Fits are for the paper's MassiveText data, tokenizer, and architecture.", "Approach 3 parameter values are rounded and the fit was later disputed (CLM-005).", "Venue is not stated on the arXiv page and is not cited here."]
+    applicability: "Compute-optimal allocation baseline; parametric loss form used in Lessons 25.1-25.2."
+    related_claims: [CLM-002, CLM-005, CLM-008]
+    curriculum_usage: { lessons: ["25.1", "25.2"], labs: ["LAB-A"], assessments: ["Mastery-25", "Incident-25.1"] }
+  - id: CLM-004
+    claim: "Hoffmann et al. attribute part of the disagreement with Kaplan to Kaplan using a fixed number of training tokens and learning-rate schedule for all models, state that matching the cosine schedule length to the number of training tokens gives the best final loss regardless of model size, and report that a cosine cycle overshooting the number of training steps by more than 25% noticeably degrades performance."
+    provenance: VERIFIED_FACT
+    domain: compute_optimal
+    concepts: [lr_schedule, schedule_confound]
+    confidence: high
+    currentness_status: "REFERENCE / BASELINE"
+    evidence: [{ source_type: paper, tier: 1, title: "Training Compute-Optimal Large Language Models", authors: "Jordan Hoffmann, Sebastian Borgeaud, Arthur Mensch, et al.", year: "2022", url: "https://arxiv.org/abs/2203.15556", section: "Section 2; Appendix B / D.1 (full text)", accessed_at: "2026-10-12" }]
+    limitations: ["Porian et al. (CLM-007) later report that careful LR decay was not essential to the discrepancy in their reproduction; the schedule is one confound among several."]
+    applicability: "Why intermediate checkpoints of a long cosine run are not valid points on a scaling curve."
+    related_claims: [CLM-002, CLM-007, CLM-031]
+    curriculum_usage: { lessons: ["25.1", "25.5"], labs: ["LAB-A", "LAB-D"], assessments: ["Mastery-25"] }
+  - id: CLM-005
+    claim: "Besiroglu et al. (Chinchilla Scaling: A replication attempt, 2024) reconstruct Hoffmann et al.'s Approach 3 data and report that the original fit was affected by rounded parameters, averaging rather than summing the Huber loss, and early optimizer termination; their refit gives E = 1.8172, A = 482.01, B = 2085.43, α = 0.3478, β = 0.3658 (a ≈ 0.51), consistent with about 20 tokens per parameter, and they report the original confidence intervals are implausibly narrow (would require over 600,000 experiments versus likely fewer than 500)."
+    provenance: VERIFIED_FACT
+    domain: scaling_law_fitting
+    concepts: [parametric_loss, fit_reliability, confidence_interval]
+    confidence: medium
+    currentness_status: "REFERENCE / BASELINE"
+    evidence: [{ source_type: paper, tier: 1, title: "Chinchilla Scaling: A replication attempt", authors: "Tamay Besiroglu, Ege Erdil, Matthew Barnett, Josh You", year: "2024", url: "https://arxiv.org/abs/2404.10102", section: "Abstract; Sections 3.1-3.3; Table 1 (HTML render, v2; PDF not re-checked)", accessed_at: "2026-10-12" }]
+    limitations: ["Data were reconstructed from published figures, not the original runs.", "Standard errors on A and B are large (124.58 and 1293.23)."]
+    applicability: "Fit-procedure sensitivity of scaling-law parameters."
+    related_claims: [CLM-003, CLM-011]
+    curriculum_usage: { lessons: ["25.1", "25.2"], labs: ["LAB-A"], assessments: ["Mastery-25"] }
+  - id: CLM-006
+    claim: "Pearce and Song (Reconciling Kaplan and Chinchilla Scaling Laws, TMLR 2024) attribute much of the discrepancy to Kaplan counting non-embedding rather than total parameters combined with small-scale analysis; simulating the Chinchilla study under those conditions yields a local coefficient of 0.74-0.78, close to Kaplan's 0.73, and they recommend using total parameters and compute."
+    provenance: VERIFIED_FACT
+    domain: compute_optimal
+    concepts: [non_embedding_params, compute_optimal_allocation]
+    confidence: medium
+    currentness_status: "REFERENCE / BASELINE"
+    evidence: [{ source_type: paper, tier: 1, title: "Reconciling Kaplan and Chinchilla Scaling Laws", authors: "Tim Pearce, Jinyeop Song", year: "2024", url: "https://arxiv.org/abs/2406.12907", section: "Abstract; Section 3; Section 7 limitations (HTML render, v3)", accessed_at: "2026-10-12" }]
+    limitations: ["Analytical/simulation reconciliation; the authors do not model dataset, warmup, or full FLOP-counting differences."]
+    applicability: "Parameter-counting convention as a confound in scaling fits."
+    related_claims: [CLM-002, CLM-007]
+    curriculum_usage: { lessons: ["25.1"], labs: ["LAB-A"], assessments: ["Mastery-25"] }
+  - id: CLM-007
+    claim: "Porian et al. (Resolving Discrepancies in Compute-Optimal Scaling of Language Models, NeurIPS 2024) identify last-layer computational cost, warmup duration, and scale-dependent optimizer tuning as the factors behind the Kaplan/Chinchilla difference; correcting them in sequence moved their fitted exponent from about 0.86 to about 0.50-0.52, they report that careful learning-rate decay was not essential, and that AdamW β2 = 0.95 is suboptimal at batch sizes of 128 and below."
+    provenance: VERIFIED_FACT
+    domain: compute_optimal
+    concepts: [compute_optimal_allocation, warmup, optimizer_tuning]
+    confidence: medium
+    currentness_status: "REFERENCE / BASELINE"
+    evidence: [{ source_type: paper, tier: 1, title: "Resolving Discrepancies in Compute-Optimal Scaling of Language Models", authors: "Tomer Porian, Mitchell Wortsman, Jenia Jitsev, Ludwig Schmidt, Yair Carmon", year: "2024", url: "https://arxiv.org/abs/2406.19146", section: "Abstract; Section 1; Sections 3.1-3.5 (HTML render, v4, first ~100k characters)", accessed_at: "2026-10-12" }]
+    limitations: ["The paper's Kaplan reference exponent (0.88) differs from Kaplan's 0.73; the basis of that figure was not checked (TODO_VERIFY in the knowledge model).", "Exponents are for OpenWebText2 and RefinedWeb at the paper's scales."]
+    applicability: "Multiple interacting confounds in scaling-law experiments."
+    related_claims: [CLM-004, CLM-006]
+    curriculum_usage: { lessons: ["25.1", "25.5"], labs: ["LAB-A"], assessments: ["Mastery-25"] }
+  - id: CLM-008
+    claim: "Under C = 6ND and L(N,D) = E + A/N^α + B/D^β, the compute-optimal allocation is N_opt = G(C/6)^a and D_opt = G^-1(C/6)^b with G = (αA/(βB))^(1/(α+β)), a = β/(α+β), b = α/(α+β); at C = 10^21 FLOPs the rounded Hoffmann Approach-3 parameters give N ≈ 1.82×10^9 and D ≈ 9.1×10^10 (≈50 tokens/parameter), while the Besiroglu refit gives N ≈ 2.78×10^9 and D ≈ 6.0×10^10 (≈22 tokens/parameter)."
+    provenance: DERIVED
+    domain: compute_optimal
+    concepts: [compute_optimal_allocation, six_nd_rule, parametric_loss]
+    confidence: high
+    currentness_status: "REFERENCE / BASELINE"
+    assumptions: ["C = 6ND exactly (no attention or embedding FLOPs).", "The parametric form holds at the target scale and data are unconstrained (single epoch).", "Parameter values are those in CLM-003 and CLM-005."]
+    derivation: "Minimize E + A N^-α + B (C/6N)^-β over N: setting the derivative to zero gives αA N^-α = βB D^-β with D = C/(6N), which yields the stated G, a, b (Hoffmann et al. Eq. 4). Numerically, with α=0.34, β=0.28: a = 0.4516, G = (0.34·406.4/(0.28·410.7))^(1/0.62); C/6 = 1.667×10^20 gives N ≈ 1.82×10^9, D ≈ 9.14×10^10. With α=0.3478, β=0.3658, A=482.01, B=2085.43: a ≈ 0.5126, N ≈ 2.78×10^9, D ≈ 6.0×10^10. At C = 5.88×10^23 (6·70e9·1.4e12) the two fits give ≈32.5B/3.0T and ≈73B/1.34T respectively."
+    limitations: ["The difference between the two parameter sets is a fit-procedure effect, not new data.", "Inference demand and data limits change the optimum (CLM-009, CLM-010)."]
+    applicability: "Compute budget planning in Lesson 25.1 and Mastery Deliverable 1."
+    related_claims: [CLM-003, CLM-005]
+    curriculum_usage: { lessons: ["25.1"], labs: ["LAB-A"], assessments: ["Mastery-25"] }
+  - id: CLM-010
+    claim: "Sardana et al. (Beyond Chinchilla-Optimal, ICML 2024) add inference cost (2N FLOPs per inference token) to the scaling objective and conclude that with reasonably large inference demand (~1B requests) models should be trained smaller and longer than Chinchilla-optimal; their example replaces a 30B-Chinchilla-quality model at 1.5B requests with a 16B model on 3.35T tokens for 17% lower cost, and they report loss had not plateaued at 10,000 tokens per parameter for a 150M model."
+    provenance: VERIFIED_FACT
+    domain: compute_optimal
+    concepts: [inference_aware_scaling, compute_optimal_allocation]
+    confidence: medium
+    currentness_status: "CURRENT DEFAULT"
+    evidence: [{ source_type: paper, tier: 1, title: "Beyond Chinchilla-Optimal: Accounting for Inference in Language Model Scaling Laws", authors: "Nikhil Sardana, Jacob Portes, Sasha Doubov, Jonathan Frankle", year: "2023", url: "https://arxiv.org/abs/2401.00448", section: "Abstract; Sections 2, 4, 6 (HTML render, v3)", accessed_at: "2026-10-12" }]
+    limitations: ["Cost model and request-length assumptions are the paper's; the 17% figure is one worked case.", "CURRENT DEFAULT here means the decision framing (train past compute-optimal when inference dominates), not a specific token ratio."]
+    applicability: "Total-cost model allocation in Lesson 25.1 and the Mastery problem."
+    related_claims: [CLM-008]
+    curriculum_usage: { lessons: ["25.1"], labs: [], assessments: ["Mastery-25"] }
+  # ---------------- Lesson 25.2: fitting and failure ----------------
+  - id: CLM-009
+    claim: "Muennighoff et al. (Scaling Data-Constrained Language Models, NeurIPS 2023) report that up to 4 epochs of repeated data yields negligible change in loss versus unique data and that with more repetition the value of added compute decays toward zero; they model effective data as D' = U_D + U_D·R*_D·(1 − e^(−R_D/R*_D)) (and similarly N'), inserted into the Chinchilla form, with fitted R*_D ≈ 15.39 (about 16 epochs) beyond which returns diminish extremely fast."
+    provenance: VERIFIED_FACT
+    domain: scaling_law_fitting
+    concepts: [data_constrained_scaling, repetition, effective_data]
+    confidence: high
+    currentness_status: "CURRENT DEFAULT"
+    evidence: [{ source_type: paper, tier: 1, title: "Scaling Data-Constrained Language Models", authors: "Niklas Muennighoff, Alexander M. Rush, Boaz Barak, Teven Le Scao, Aleksandra Piktus, Nouamane Tazi, Sampo Pyysalo, Thomas Wolf, Colin Raffel", year: "2023", url: "https://arxiv.org/abs/2305.16264", section: "Abstract; Section 3 Eqs. 5-6; Section 6; Appendix A (R*_D = 15.387756) (full text, v4 PDF)", accessed_at: "2026-10-12" }]
+    limitations: ["R*_D is a decay constant (value lost to 1/e), not the point where repeated data becomes worthless.", "Fitted on the paper's data and model range; filtering and data quality change repetition value."]
+    applicability: "Planning when unique tokens are fewer than the compute-optimal D."
+    related_claims: [CLM-003, CLM-008]
+    curriculum_usage: { lessons: ["25.2"], labs: ["LAB-A"], assessments: ["Mastery-25"] }
+  - id: CLM-011
+    claim: "Choshen, Zhang, and Andreas (A Hitchhiker's Guide to Scaling Law Estimation) report that about 4% absolute relative error (ARE) is the best typically obtained when predicting a larger model's loss, that variation between initializations produces unpredictable loss changes of up to 4%, that fits improve by using intermediate checkpoints and by discarding the first ~10B tokens (ARE above 15% versus 4-10%), and that about 5 models is a safe minimum."
+    provenance: VERIFIED_FACT
+    domain: scaling_law_fitting
+    concepts: [extrapolation_error, fit_reliability, seed_variance]
+    confidence: medium
+    currentness_status: "CURRENT DEFAULT"
+    evidence: [{ source_type: paper, tier: 1, title: "A Hitchhiker's Guide to Scaling Law Estimation", authors: "Leshem Choshen, Yang Zhang, Jacob Andreas", year: "2024", url: "https://arxiv.org/abs/2410.11840", section: "Abstract; Sections 1, 4, 6.1, 8 (HTML render, v2; arXiv comment: ICML)", accessed_at: "2026-10-12" }]
+    limitations: ["Error figures are from the paper's corpus of public model families; transfer to a new family is not guaranteed."]
+    applicability: "Setting a pre-declared prediction tolerance for scaling forecasts."
+    related_claims: [CLM-005, CLM-012, CLM-014]
+    curriculum_usage: { lessons: ["25.2"], labs: ["LAB-A"], assessments: ["Mastery-25", "Incident-25.1"] }
+  - id: CLM-012
+    claim: "Lourie, Hu, and Cho (Scaling Laws Are Unreliable for Downstream Tasks: A Reality Check, EMNLP Findings 2025) report that in their meta-analysis predictable scaling of downstream task performance occurs in a minority of cases, 39% of the time."
+    provenance: VERIFIED_FACT
+    domain: scaling_law_fitting
+    concepts: [downstream_scaling, extrapolation_error]
+    confidence: medium
+    currentness_status: "FRONTIER"
+    evidence: [{ source_type: paper, tier: 1, title: "Scaling Laws Are Unreliable for Downstream Tasks: A Reality Check", authors: "Nicholas Lourie, Michael Y. Hu, Kyunghyun Cho", year: "2025", url: "https://arxiv.org/abs/2507.00885", section: "Abstract (abstract-level inspection), v2", accessed_at: "2026-10-12" }]
+    limitations: ["Abstract-level reading; the definition of 'predictable' is the paper's."]
+    applicability: "Why forecasts are made on validation loss and downstream metrics are checked separately."
+    related_claims: [CLM-011]
+    curriculum_usage: { lessons: ["25.2"], labs: [], assessments: ["Mastery-25"] }
+  - id: CLM-013
+    claim: "Fitting a pure power law L = kN^-p (no irreducible term) to small-scale losses that follow L = E + A/N^α can fit the fitted range closely yet systematically under-predict loss at larger N; with synthetic truth L = 1.8 + 400/N^0.34 over N = 10^7-1.6×10^8, the pure power-law fit has maximum in-range relative residual ≈1.3% but under-predicts by ≈10.5% at N = 10^9 and ≈26.4% at N = 10^10, while fixing E wrong by ±0.1 gives ≈∓2.6-2.9% error at 10^10."
+    provenance: DERIVED
+    domain: scaling_law_fitting
+    concepts: [extrapolation_error, irreducible_loss, power_law]
+    confidence: high
+    currentness_status: "REFERENCE / BASELINE"
+    assumptions: ["Synthetic noiseless losses; data not limiting.", "Least-squares fit in log-log space over five points at N = 1, 2, 4, 8, 16 × 10^7."]
+    derivation: "log L of E + A N^-α is concave in log N, so a straight line fit in log-log space over a short range has a too-steep effective slope (fitted p ≈ 0.125 vs. true local slope decreasing with N) and extrapolates below the asymptote E. Values computed with numpy.polyfit: fitted k ≈ 25.76, p ≈ 0.1252; predictions 1.923 vs. true 2.148 at 10^9 and 1.441 vs. 1.959 at 10^10. With E fixed at 1.7 or 1.9 and A, α refit, predictions at 10^10 are 1.907 and 2.016."
+    limitations: ["Synthetic; real fits also face seed noise (CLM-011) and confounds (CLM-004, CLM-007)."]
+    applicability: "Lesson 25.2 worked example and LAB A break condition."
+    related_claims: [CLM-001, CLM-011]
+    curriculum_usage: { lessons: ["25.2"], labs: ["LAB-A"], assessments: ["Mastery-25"] }
+  - id: CLM-014
+    claim: "A scaling law fitted on at least five proxy runs whose schedules are matched to each run's token budget, using total-parameter accounting, will predict the final validation loss of a held-out run at 4-10× the largest proxy compute within a pre-declared tolerance; the prediction becomes invalid when the target changes data mixture, tokenizer, parametrization, schedule family, or crosses into the repeated-data regime."
+    provenance: HYPOTHESIS
+    domain: scaling_law_fitting
+    concepts: [extrapolation_error, proxy_validity]
+    confidence: medium
+    currentness_status: "WORKLOAD-DEPENDENT"
+    hypothesis:
+      prediction: "|L_pred − L_obs|/L_obs is within the declared tolerance (e.g., 2-4%) at the held-out scale when all listed invariants are held; it exceeds the tolerance when one invariant (e.g., schedule length or mixture) is changed between proxies and target."
+      measurement_target: "Final validation loss of held-out runs (≥3 seeds at the largest proxy to estimate seed spread), fitted parameters with bootstrap intervals, and the prediction interval at target compute."
+      falsifying_observation: "With invariants held, the held-out loss falls outside the bootstrap prediction interval widened by seed spread; or changing an invariant does not move the error beyond tolerance."
+    limitations: ["Tolerances depend on seed variance at the proxy scale (CLM-011)."]
+    applicability: "LAB A pre-registered hypothesis and Mastery Deliverable 2."
+    related_claims: [CLM-011, CLM-013]
+    curriculum_usage: { lessons: ["25.2"], labs: ["LAB-A"], assessments: ["Mastery-25", "Incident-25.1"] }
+  # ---------------- Lesson 25.3: parametrization and HP transfer ----------------
+  - id: CLM-015
+    claim: "Yang et al. (Tensor Programs V, 2022) report that under the Maximal Update Parametrization (muP) the optimal learning rate is stable with width while under standard parametrization it is not; they transfer hyperparameters from a 13M-parameter proxy to outperform published BERT-large (350M) numbers at a tuning cost equivalent to one BERT-large pretraining, and from a 40M proxy (width 256) to outperform published 6.7B GPT-3 numbers at a tuning cost of 7% of pretraining; optimization-related HPs, initialization, and multipliers transfer, regularization HPs such as dropout and weight decay are listed as not transferring."
+    provenance: VERIFIED_FACT
+    domain: parametrization
+    concepts: [mup, standard_parametrization, hp_transfer]
+    confidence: high
+    currentness_status: "CURRENT DEFAULT"
+    evidence: [{ source_type: paper, tier: 1, title: "Tensor Programs V: Tuning Large Neural Networks via Zero-Shot Hyperparameter Transfer", authors: "Greg Yang, Edward J. Hu, Igor Babuschkin, Szymon Sidor, Xiaodong Liu, David Farhi, et al.", year: "2022", url: "https://arxiv.org/abs/2203.03466", section: "Abstract; Section 1 Fig. 1; Table 1; Section 7.4; Appendix E.1 (full text)", accessed_at: "2026-10-12" }]
+    limitations: ["Transfer across depth, batch size, training time, and sequence length was 'empirically validated only on Transformers' (Table 1 footnote).", "CURRENT DEFAULT is scoped to width-wise HP transfer as a practice; adoption by any particular lab is not claimed."]
+    applicability: "Width-wise learning-rate transfer from proxy models."
+    related_claims: [CLM-016, CLM-017, CLM-018]
+    curriculum_usage: { lessons: ["25.3"], labs: ["LAB-B"], assessments: ["Mastery-25"] }
+  - id: CLM-016
+    claim: "Tensor Programs V specifies muP for Adam (Table 3) as Adam LR 1 for input weights and biases and 1/fan_in for hidden and output weights, with init variance 1/fan_in for input and hidden and 1/fan_in^2 for output weights; an equivalent formulation (Table 8) puts a 1/fan_in multiplier on the output layer with init variance 1 and Adam LR 1, and attention logits use q^T k/d instead of q^T k/sqrt(d) (Definition 4.1)."
+    provenance: VERIFIED_FACT
+    domain: parametrization
+    concepts: [mup, attention_scaling]
+    confidence: high
+    currentness_status: "CURRENT DEFAULT"
+    evidence: [{ source_type: paper, tier: 1, title: "Tensor Programs V: Tuning Large Neural Networks via Zero-Shot Hyperparameter Transfer", authors: "Greg Yang, Edward J. Hu, et al.", year: "2022", url: "https://arxiv.org/abs/2203.03466", section: "Table 3; Table 8; Definition 4.1; Appendix B.3 (full text)", accessed_at: "2026-10-12" }]
+    limitations: ["App. B.3: weight decay and Adam epsilon need their own scaling; non-negligible epsilon must be scaled with fan_in."]
+    applicability: "Implementing muP in LAB B."
+    related_claims: [CLM-015]
+    curriculum_usage: { lessons: ["25.3"], labs: ["LAB-B"], assessments: ["Mastery-25"] }
+  - id: CLM-017
+    claim: "Everett et al. (Scaling Exponents Across Parameterizations and Optimizers, ICML 2024), across fourteen model sizes up to 26.8B parameters, report that all parameterizations, not just muP, can achieve hyperparameter transfer with appropriate per-layer learning-rate prescriptions, that their per-layer prescription for standard parameterization outperformed muP, and that Adam's epsilon must be scaled to avoid gradient underflow, proposing Adam-atan2."
+    provenance: VERIFIED_FACT
+    domain: parametrization
+    concepts: [standard_parametrization, hp_transfer, adam_epsilon]
+    confidence: high
+    currentness_status: "FRONTIER"
+    evidence: [{ source_type: paper, tier: 1, title: "Scaling Exponents Across Parameterizations and Optimizers", authors: "Katie Everett, Lechao Xiao, Mitchell Wortsman, Alexander A. Alemi, Roman Novak, Peter J. Liu, et al.", year: "2024", url: "https://arxiv.org/abs/2407.05872", section: "Abstract; Sections 4.2.1, 4.3; Appendix C.5 (full text)", accessed_at: "2026-10-12" }]
+    limitations: ["Results are for the paper's architecture, data, and optimizers."]
+    applicability: "Counterexample to 'only muP transfers'."
+    related_claims: [CLM-015, CLM-021]
+    curriculum_usage: { lessons: ["25.3"], labs: ["LAB-B"], assessments: ["Mastery-25"] }
+  - id: CLM-018
+    claim: "Dey et al. (Don't be lazy: CompleteP enables compute-efficient deep transformers, NeurIPS 2025) parametrize residual branches as h^{l+1} = h^l + L^-α F_l(h^l) and report that only α = 1 (CompleteP) gives depth-wise HP transfer over 2-128 layers, with 1.9B-parameter models saving 11.8% and 34.4% FLOPs over muP for optimally shaped and 179-layer models respectively; LayerNorm/bias learning rates, AdamW weight decay, and epsilon also need depth/width rescaling."
+    provenance: VERIFIED_FACT
+    domain: parametrization
+    concepts: [depth_transfer, mup, hp_transfer]
+    confidence: medium
+    currentness_status: "FRONTIER"
+    evidence: [{ source_type: paper, tier: 1, title: "Don't be lazy: CompleteP enables compute-efficient deep transformers", authors: "Nolan Dey, Bin Claire Zhang, Lorenzo Noci, Mufan Li, Blake Bordelon, Shane Bergsma, et al.", year: "2025", url: "https://arxiv.org/abs/2505.01618", section: "Abstract; Section 1 Eq. 1; Table 1 (intro and abstract read; body not fully read)", accessed_at: "2026-10-12" }]
+    limitations: ["Author-reported on Cerebras CS-3 at 20 tokens/parameter; not independently reproduced here."]
+    applicability: "Depth as a transfer axis that width-only muP does not cover."
+    related_claims: [CLM-015]
+    curriculum_usage: { lessons: ["25.3"], labs: ["LAB-B"], assessments: ["Mastery-25"] }
+  - id: CLM-019
+    claim: "In a width sweep of small decoders (e.g., widths 128-1024 at fixed depth and token budget), the loss-minimizing Adam learning rate will shift by a factor approaching the width ratio under standard parametrization but stay within one grid step under muP, and a learning rate tuned at the smallest width and transferred unchanged will lose more loss at the largest width under SP than under muP."
+    provenance: HYPOTHESIS
+    domain: parametrization
+    concepts: [mup, standard_parametrization, hp_transfer]
+    confidence: medium
+    currentness_status: "WORKLOAD-DEPENDENT"
+    hypothesis:
+      prediction: "argmin-LR(width) slope in log-log space is clearly negative under SP and near zero under muP; transfer loss gap at largest width is larger under SP."
+      measurement_target: "Final validation loss over a log-spaced LR grid (≥7 points, 2 seeds) at each width for SP and muP; fitted argmin by parabolic interpolation in log LR."
+      falsifying_observation: "Under muP the argmin moves by more than one grid step across widths, or under SP it does not move, with seed spread smaller than the observed shift."
+    limitations: ["Tiny models and short budgets may sit outside the asymptotic regime; Everett et al. (CLM-017) show SP with per-layer LRs can also transfer."]
+    applicability: "LAB B pre-registered hypothesis."
+    related_claims: [CLM-015, CLM-017]
+    curriculum_usage: { lessons: ["25.3"], labs: ["LAB-B"], assessments: ["Mastery-25"] }
+  # ---------------- Lesson 25.4: instabilities ----------------
+  - id: CLM-020
+    claim: "Wortsman et al. (Small-scale proxies for large-scale Transformer training instabilities, 2023) report that instabilities seen at large scale also appear in small models trained at high learning rates and that large-scale mitigations are equally effective there: attention-logit growth collapses attention weights to one-hot vectors and is mitigated by qk-layernorm, and output-logit divergence, occurring in models without weight decay regardless of scale, is resolved by z-loss (auxiliary log^2 Z, coefficient 1e-4); they define LR sensitivity as expected deviation from optimal loss across three orders of magnitude of learning rate."
+    provenance: VERIFIED_FACT
+    domain: training_instability
+    concepts: [attention_logit_growth, qk_norm, output_logit_divergence, z_loss, lr_sensitivity]
+    confidence: high
+    currentness_status: "CURRENT DEFAULT"
+    evidence: [{ source_type: paper, tier: 1, title: "Small-scale proxies for large-scale Transformer training instabilities", authors: "Mitchell Wortsman, Peter J. Liu, Lechao Xiao, Katie Everett, Alex Alemi, Ben Adlam, et al.", year: "2023", url: "https://arxiv.org/abs/2309.14322", section: "Abstract; footnote 1; Section 2.2 Fig. 1; Sections 3.1.1-3.1.2 (full text)", accessed_at: "2026-10-12" }]
+    limitations: ["Footnote 1: the paper focuses on slow divergence, not loss spikes.", "CURRENT DEFAULT scoped to QK-norm/z-loss as widely available mitigations, not as universal adoption."]
+    applicability: "Lesson 25.4 mechanisms and LAB C."
+    related_claims: [CLM-021, CLM-022, CLM-023]
+    curriculum_usage: { lessons: ["25.4"], labs: ["LAB-C"], assessments: ["Mastery-25", "Incident-25.1"] }
+  - id: CLM-021
+    claim: "Wortsman et al. also report that longer warm-up reduces LR sensitivity, that parameterizing weight decay independently of learning rate reduces LR sensitivity, that scaling depth increases LR sensitivity faster than scaling width, that muParam stabilizes the optimal LR but does not improve loss or reduce LR sensitivity, and that gradient norms shrink with scale and LR so the default AdamW epsilon (1e-8) becomes too large; lowering it to 1e-15 improved loss for a 4.8B model at LR 0.3 while raising it to 1e-6 diverged."
+    provenance: VERIFIED_FACT
+    domain: training_instability
+    concepts: [warmup, weight_decay, adam_epsilon, lr_sensitivity, mup]
+    confidence: high
+    currentness_status: "CURRENT DEFAULT"
+    evidence: [{ source_type: paper, tier: 1, title: "Small-scale proxies for large-scale Transformer training instabilities", authors: "Mitchell Wortsman, Peter J. Liu, et al.", year: "2023", url: "https://arxiv.org/abs/2309.14322", section: "Sections 3.2.1-3.2.4; Section 3.4 Figs. 11-13 (full text)", accessed_at: "2026-10-12" }]
+    limitations: ["Results are for the paper's model family and C4-style data."]
+    applicability: "Interventions that reduce LR sensitivity."
+    related_claims: [CLM-017, CLM-020]
+    curriculum_usage: { lessons: ["25.3", "25.4"], labs: ["LAB-B", "LAB-C"], assessments: ["Mastery-25"] }
+  - id: CLM-022
+    claim: "Dehghani et al. (Scaling Vision Transformers to 22 Billion Parameters, 2023) report training instability around 8B parameters caused by extremely large attention logits producing almost one-hot, near-zero-entropy attention weights, fixed by applying LayerNorm to queries and keys before the dot product; without normalization attention logits grew to over 50,000 in magnitude."
+    provenance: VERIFIED_FACT
+    domain: training_instability
+    concepts: [attention_logit_growth, qk_norm]
+    confidence: high
+    currentness_status: "REFERENCE / BASELINE"
+    evidence: [{ source_type: paper, tier: 1, title: "Scaling Vision Transformers to 22 Billion Parameters", authors: "Mostafa Dehghani, Josip Djolonga, Basil Mustafa, Piotr Padlewski, Jonathan Heek, Justin Gilmer, et al.", year: "2023", url: "https://arxiv.org/abs/2302.05442", section: "Section 2 (QK Normalization); Appendix B (full text)", accessed_at: "2026-10-12" }]
+    limitations: ["Vision transformer setting; the mechanism, not the threshold scale, transfers."]
+    applicability: "Origin of QK-norm as a large-scale stability fix."
+    related_claims: [CLM-020]
+    curriculum_usage: { lessons: ["25.4"], labs: ["LAB-C"], assessments: ["Mastery-25"] }
+  - id: CLM-023
+    claim: "PaLM (Chowdhery et al., 2022) used an auxiliary loss z_loss = 10^-4 · log^2 Z to keep the softmax normalizer near zero for stability, observed loss spikes roughly 20 times during training of the largest model despite gradient clipping, mitigated them by restarting from a checkpoint roughly 100 steps before the spike and skipping roughly 200-500 data batches, and attributed spikes to the combination of specific data batches with a particular parameter state."
+    provenance: VERIFIED_FACT
+    domain: training_instability
+    concepts: [loss_spike, z_loss, rollback_skip]
+    confidence: high
+    currentness_status: "REFERENCE / BASELINE"
+    evidence: [{ source_type: paper, tier: 1, title: "PaLM: Scaling Language Modeling with Pathways", authors: "Aakanksha Chowdhery, Sharan Narang, Jacob Devlin, Maarten Bosma, Gaurav Mishra, Adam Roberts, et al.", year: "2022", url: "https://arxiv.org/abs/2204.02311", section: "Section 2 (Loss function); Section 5.1 Training Instability (full text, v5)", accessed_at: "2026-10-12" }]
+    limitations: ["One run's operational experience; the batch-state interaction explanation is the authors' inference."]
+    applicability: "Operational spike response in Lesson 25.4 and Incident 25.1."
+    related_claims: [CLM-020, CLM-028]
+    curriculum_usage: { lessons: ["25.4"], labs: ["LAB-C"], assessments: ["Mastery-25", "Incident-25.1"] }
+  - id: CLM-024
+    claim: "OLMo 2 (Team OLMo, 2024-2025) reports stability changes relative to OLMo: RMSNorm on query and key projections, a reordered norm placing RMSNorm on sublayer outputs (h = x + RMSNorm(Attention(x))), z-loss, no weight decay on embeddings, AdamW epsilon lowered from 1e-5 to 1e-8, initialization from N(0, 0.02), and filtering documents with 32 or more repeated n-grams, which it says eliminates many spikes; the z-loss weight is given as 10^-5 in Table 1 but 10^-4 in Section 3.3.3."
+    provenance: VERIFIED_FACT
+    domain: training_instability
+    concepts: [qk_norm, z_loss, loss_spike, data_quality_spikes]
+    confidence: high
+    currentness_status: "CURRENT DEFAULT"
+    evidence: [{ source_type: paper, tier: 1, title: "2 OLMo 2 Furious", authors: "Team OLMo: Pete Walsh, Luca Soldaini, Dirk Groeneveld, Kyle Lo, Shane Arora, Akshita Bhagia, et al.", year: "2024", url: "https://arxiv.org/abs/2501.00656", section: "Table 1; Sections 3, 3.1, 3.2, 3.3.2, 3.3.3, 3.4.2 (full text, v3; COLM 2025 short version)", accessed_at: "2026-10-12" }]
+    limitations: ["Changes were introduced together; the paper's ablations are for its own scale.", "The relationship between repeated n-grams and spikes is described as not deterministic."]
+    applicability: "A documented open stability recipe used as the source-trace target."
+    related_claims: [CLM-020, CLM-028]
+    curriculum_usage: { lessons: ["25.4"], labs: ["LAB-C"], assessments: ["Mastery-25", "Incident-25.1", "Production-Source-Trace"] }
+  - id: CLM-025
+    claim: "Takase et al. (Spike No More, COLM 2025) argue that stable pre-training requires small sub-layers and a large shortcut, implemented by initializing sub-layer parameters with small values and making each embedding's standard deviation close to 1 (e.g., scaling embeddings by sqrt(d)); in their experiments Scaled Embed and Embed LN did not show the loss and gradient spikes that the vanilla configuration did."
+    provenance: VERIFIED_FACT
+    domain: training_instability
+    concepts: [loss_spike, embedding_scale]
+    confidence: medium
+    currentness_status: "WORKLOAD-DEPENDENT"
+    evidence: [{ source_type: paper, tier: 1, title: "Spike No More: Stabilizing the Pre-training of Large Language Models", authors: "Sho Takase, Shun Kiyono, Sosuke Kobayashi, Jun Suzuki", year: "2023", url: "https://arxiv.org/abs/2312.16903", section: "Abstract; Section 1; Section 5.3 (full text, v4)", accessed_at: "2026-10-12" }]
+    limitations: ["Pre-LN Transformers at the paper's scales; interaction with QK-norm and muP was not checked here."]
+    applicability: "An initialization/embedding-scale hypothesis for spikes."
+    related_claims: [CLM-024]
+    curriculum_usage: { lessons: ["25.4"], labs: ["LAB-C"], assessments: ["Mastery-25"] }
+  - id: CLM-026
+    claim: "Gemma 2 (Gemma Team, 2024) applies logit soft-capping, logits ← soft_cap · tanh(logits/soft_cap), with soft_cap 50.0 for self-attention layers and 30.0 for the final layer."
+    provenance: VERIFIED_FACT
+    domain: training_instability
+    concepts: [logit_softcap]
+    confidence: high
+    currentness_status: "WORKLOAD-DEPENDENT"
+    evidence: [{ source_type: paper, tier: 1, title: "Gemma 2: Improving Open Language Models at a Practical Size", authors: "Gemma Team: Morgane Riviere, Shreya Pathak, Pier Giuseppe Sessa, Cassidy Hardin, Surya Bhupatiraju, Léonard Hussenot, et al.", year: "2024", url: "https://arxiv.org/abs/2408.00118", section: "Section 2 (Logit soft-capping) (full text)", accessed_at: "2026-10-12" }]
+    limitations: ["Soft-capping bounds the output but not the growth of q·k before capping (see CLM-027)."]
+    applicability: "Alternative to normalization for bounding logits."
+    related_claims: [CLM-027]
+    curriculum_usage: { lessons: ["25.4"], labs: ["LAB-C"], assessments: ["Mastery-25"] }
+  - id: CLM-027
+    claim: "Kimi K2 (Kimi Team, 2025) reports exploding attention logits as a training instability that occurred more often with the Muon optimizer than with AdamW, notes that soft-capping lets q·k grow before capping and that QK-Norm is not applicable to multi-head latent attention because keys are not fully materialized at inference, and introduces QK-Clip, which rescales query and key projection weights per head after an update (threshold τ = 100); the paper reports pretraining on 15.5T tokens with zero loss spike."
+    provenance: VERIFIED_FACT
+    domain: training_instability
+    concepts: [attention_logit_growth, qk_clip, qk_norm]
+    confidence: medium
+    currentness_status: "FRONTIER"
+    evidence: [{ source_type: paper, tier: 1, title: "Kimi K2: Open Agentic Intelligence", authors: "Kimi Team: Yifan Bai, Yiping Bao, Y. Charles, Cheng Chen, Guanduo Chen, Haiting Chen, et al.", year: "2025", url: "https://arxiv.org/abs/2507.20534", section: "Abstract; Section 2.1; Fig. 2; Appendix D (full text, v2)", accessed_at: "2026-10-12" }]
+    limitations: ["Author-reported from one production run; not independently reproduced."]
+    applicability: "Architecture-dependent choice of logit-growth mitigation (MLA vs. standard attention)."
+    related_claims: [CLM-020, CLM-026]
+    curriculum_usage: { lessons: ["25.4"], labs: ["LAB-C"], assessments: ["Mastery-25"] }
+  - id: CLM-028
+    claim: "At OLMo-core commit 5f6f58a133e7ef577d596295f2c8db4651c27857, cross_entropy_loss casts logits to float32 and, when compute_z_loss is set, adds z_loss_multiplier · logsumexp(logits)^2 averaged over non-ignored labels (default multiplier 1e-4); SkipStepOptimizer.get_step_factor skips an update when the latest loss (and grad norm, if tracked) exceeds the rolling mean by more than sigma_factor (default 6) standard deviations over a rolling window (default 128, active after 64 entries); TransformerConfig.olmo2_7B defaults to qk_norm=True with the reordered_norm block, and the OLMo2-7B training script sets z_loss_multiplier=1e-5."
+    provenance: VERIFIED_FACT
+    domain: training_runtime
+    concepts: [z_loss, qk_norm, rollback_skip]
+    confidence: high
+    currentness_status: "CURRENT DEFAULT"
+    evidence:
+      - { source_type: source_code, tier: 1, title: "OLMo-core cross-entropy with z-loss", repository: "https://github.com/allenai/OLMo-core", commit: "5f6f58a133e7ef577d596295f2c8db4651c27857", verification_date: "2026-10-12", file: "src/olmo_core/nn/functional/cross_entropy_loss.py", symbol: "cross_entropy_loss", entry_point: "Transformer train module loss computation with compute_z_loss enabled", execution_path: "logits.float() -> F.cross_entropy -> z_squared = logits.logsumexp(-1).pow(2) -> masked mean over labels != ignore_index -> z_loss = z_loss_multiplier * z_squared", url: "https://github.com/allenai/OLMo-core/blob/5f6f58a133e7ef577d596295f2c8db4651c27857/src/olmo_core/nn/functional/cross_entropy_loss.py", accessed_at: "2026-10-12" }
+      - { source_type: source_code, tier: 1, title: "OLMo-core skip-step optimizer", repository: "https://github.com/allenai/OLMo-core", commit: "5f6f58a133e7ef577d596295f2c8db4651c27857", verification_date: "2026-10-12", file: "src/olmo_core/optim/skip_step_optimizer.py", symbol: "SkipStepOptimizer.get_step_factor", entry_point: "SkipStepAdamW step() after train module sets latest_loss and latest_grad_norm", execution_path: "if history < max(2, rolling_interval_length // 2): factor 1.0; else std_mean over history excluding latest; factor = (latest_loss - mean <= sigma_factor*std) AND same for grad norm; returned as float tensor to avoid host sync", url: "https://github.com/allenai/OLMo-core/blob/5f6f58a133e7ef577d596295f2c8db4651c27857/src/olmo_core/optim/skip_step_optimizer.py", accessed_at: "2026-10-12" }
+      - { source_type: source_code, tier: 1, title: "OLMo-core OLMo 2 model config and training script", repository: "https://github.com/allenai/OLMo-core", commit: "5f6f58a133e7ef577d596295f2c8db4651c27857", verification_date: "2026-10-12", file: "src/olmo_core/nn/transformer/config.py; src/scripts/train/OLMo2/OLMo2-7B.py", symbol: "TransformerConfig.olmo2_7B; build_train_module_config", entry_point: "OLMo2-7B.py main(config_builder)", execution_path: "olmo2_7B -> llama2_7B(block_name=reordered_norm, qk_norm=True, rope_theta=500000); build_train_module_config -> SkipStepAdamWConfig(lr=3e-4, weight_decay=0.1, betas=(0.9,0.95), embeddings weight_decay=0.0), z_loss_multiplier=1e-5, max_grad_norm=1.0, CosWithWarmup(warmup_steps=2000)", url: "https://github.com/allenai/OLMo-core/blob/5f6f58a133e7ef577d596295f2c8db4651c27857/src/scripts/train/OLMo2/OLMo2-7B.py", accessed_at: "2026-10-12" }
+    limitations: ["Static inspection only; the attention module's use of qk_norm and the train-module call path into cross_entropy_loss were not traced.", "The script in this repository snapshot is not proven to be the exact configuration of the published OLMo 2 run; it matches the paper's Table 1 z-loss value (10^-5), not Section 3.3.3 (10^-4).", "One library snapshot, not an industry default."]
+    applicability: "Lesson 25.4 source trace and Section 09 required artifact."
+    related_claims: [CLM-023, CLM-024, CLM-029]
+    curriculum_usage: { lessons: ["25.4"], labs: ["LAB-C"], assessments: ["Production-Source-Trace"] }
+  - id: CLM-029
+    claim: "Cross-entropy is invariant to adding a constant c to all logits while log Z shifts by c, so output logits can drift without changing the training loss; z-loss k·(log Z)^2 adds gradient 2k·log Z·softmax(z) to the logits, a total downward push of 2k·log Z per position that pins the free shift; attention softmax over two keys with logit gap Δ gives weight 1/(1+e^-Δ), so if query and key norms each grow by g the gap grows by g^2 and attention approaches one-hot."
+    provenance: DERIVED
+    domain: training_instability
+    concepts: [z_loss, output_logit_divergence, attention_logit_growth]
+    confidence: high
+    currentness_status: "REFERENCE / BASELINE"
+    assumptions: ["Standard softmax cross-entropy; logits z in R^V; Z = Σ exp(z_j).", "Two-key attention example with logits q·k_i/sqrt(d_h) and fixed directions."]
+    derivation: "CE = log Z − z_y; replacing z by z + c gives log Z + c − (z_y + c) = CE. d(log Z)/dz_j = p_j, so d(k (log Z)^2)/dz_j = 2k log Z p_j and Σ_j = 2k log Z. With k = 1e-4 and log Z = 30, z-loss = 0.09 and the summed gradient is 0.006. Logit q·k scales with |q||k|, so scaling both by g multiplies Δ by g^2: Δ = 2 gives weight 0.881; with g = 3, Δ = 18 gives 1 − 1.52×10^-8."
+    limitations: ["Explains why logits can drift and why z-loss/QK-norm bound them; does not predict when a given run diverges."]
+    applicability: "Lesson 25.4 worked example."
+    related_claims: [CLM-020, CLM-023, CLM-028]
+    curriculum_usage: { lessons: ["25.4"], labs: ["LAB-C"], assessments: ["Mastery-25"] }
+  - id: CLM-030
+    claim: "In a small decoder trained without weight decay at a learning rate roughly 3-10× above its stable optimum, max attention logit and |log Z| will grow and loss will diverge or plateau above the stable baseline; adding QK-norm will remove the attention-logit growth and adding z-loss will bound |log Z|, each widening the range of learning rates within a fixed loss tolerance of the optimum (lower LR sensitivity)."
+    provenance: HYPOTHESIS
+    domain: training_instability
+    concepts: [attention_logit_growth, output_logit_divergence, qk_norm, z_loss, lr_sensitivity]
+    confidence: medium
+    currentness_status: "WORKLOAD-DEPENDENT"
+    hypothesis:
+      prediction: "Baseline: max attention logit and mean |log Z| increase monotonically before divergence at high LR; QK-norm variant: max attention logit stays bounded; z-loss variant: |log Z| stays near 0; LR sensitivity ordering baseline > single fix > both fixes."
+      measurement_target: "Per-step max |q·k|/scale per layer, mean log Z, attention entropy, loss, grad norm, across an LR grid spanning three orders of magnitude, 2 seeds."
+      falsifying_observation: "Baseline diverges without logit or log Z growth preceding it (a different cause), or a mitigation does not reduce LR sensitivity beyond seed spread."
+    limitations: ["Small-scale proxies may not reproduce every large-scale failure (Wortsman et al. footnote 1 excludes spikes)."]
+    applicability: "LAB C pre-registered hypothesis."
+    related_claims: [CLM-020, CLM-021, CLM-029]
+    curriculum_usage: { lessons: ["25.4"], labs: ["LAB-C"], assessments: ["Mastery-25"] }
+  # ---------------- Lesson 25.5: LR schedules ----------------
+  - id: CLM-031
+    claim: "Hägele et al. (Scaling Laws and Compute-Optimal Training Beyond Fixed Training Durations, NeurIPS 2024) report that a constant learning rate followed by a cooldown matches cosine performance, that benefits of longer cooldowns plateau around 20% of training, that a (1-sqrt) cooldown outperformed linear, and that reusing a constant-LR run with cooldowns for scaling-law experiments cuts the number of necessary training runs by about an order of magnitude."
+    provenance: VERIFIED_FACT
+    domain: lr_schedule
+    concepts: [wsd_schedule, cooldown, scaling_law_reuse]
+    confidence: medium
+    currentness_status: "CURRENT DEFAULT"
+    evidence: [{ source_type: paper, tier: 1, title: "Scaling Laws and Compute-Optimal Training Beyond Fixed Training Durations", authors: "Alexander Hägele, Elie Bakouch, Atli Kosson, Loubna Ben Allal, Leandro Von Werra, Martin Jaggi", year: "2024", url: "https://arxiv.org/abs/2405.18392", section: "Section 1; Section 3.2; Section 5 (HTML render, v3)", accessed_at: "2026-10-12" }]
+    limitations: ["Evaluated at the paper's model sizes (up to ~1B-class); savings depend on how many token budgets are needed."]
+    applicability: "WSD as an enabler of budget-agnostic training and cheap scaling sweeps."
+    related_claims: [CLM-004, CLM-032]
+    curriculum_usage: { lessons: ["25.5"], labs: ["LAB-D"], assessments: ["Mastery-25"] }
+  - id: CLM-032
+    claim: "MiniCPM (Hu et al., 2024) defines the Warmup-Stable-Decay (WSD) scheduler as linear warmup to η, a constant η stable phase, and a decreasing decay function f; reports that a decay of 10% of total tokens was sufficient for best results in its setup; and states WSD makes intermediate checkpoints reusable for continuous training and data-model scaling-law study without extensive retraining."
+    provenance: VERIFIED_FACT
+    domain: lr_schedule
+    concepts: [wsd_schedule]
+    confidence: medium
+    currentness_status: "CURRENT DEFAULT"
+    evidence: [{ source_type: paper, tier: 1, title: "MiniCPM: Unveiling the Potential of Small Language Models with Scalable Training Strategies", authors: "Shengding Hu, Yuge Tu, Xu Han, Chaoqun He, Ganqu Cui, Xiang Long, et al.", year: "2024", url: "https://arxiv.org/abs/2404.06395", section: "Abstract; Section 1; Sections 4.2-4.3 (HTML render, v3)", accessed_at: "2026-10-12" }]
+    limitations: ["The paper's 192 data/model ratio is setup-specific and not used here as a rule."]
+    applicability: "WSD definition."
+    related_claims: [CLM-031, CLM-037]
+    curriculum_usage: { lessons: ["25.5"], labs: ["LAB-D"], assessments: ["Mastery-25"] }
+  - id: CLM-033
+    claim: "Wen et al. (Understanding Warmup-Stable-Decay Learning Rates: A River Valley Loss Landscape Perspective, 2024) conjecture a river-valley loss landscape in which the high-LR stable phase makes fast progress along the river while oscillating in the mountain directions, so loss stays elevated, and the decay phase reduces the oscillation, revealing the progress as a sharp loss drop."
+    provenance: VERIFIED_FACT
+    domain: lr_schedule
+    concepts: [wsd_schedule, river_valley]
+    confidence: medium
+    currentness_status: "FRONTIER"
+    evidence: [{ source_type: paper, tier: 1, title: "Understanding Warmup-Stable-Decay Learning Rates: A River Valley Loss Landscape Perspective", authors: "Kaiyue Wen, Zhiyuan Li, Jason Wang, David Hall, Percy Liang, Tengyu Ma", year: "2024", url: "https://arxiv.org/abs/2410.05192", section: "Abstract; Section 1; Section 3.1 (HTML render, v3, partial)", accessed_at: "2026-10-12" }]
+    limitations: ["Stated as a conjecture with supporting theory and 0.1B-1.2B experiments."]
+    applicability: "Mechanistic intuition for why loss drops during decay and why checkpoint averaging can substitute for decay."
+    related_claims: [CLM-031, CLM-044]
+    curriculum_usage: { lessons: ["25.5", "25.6"], labs: ["LAB-D"], assessments: ["Mastery-25"] }
+  - id: CLM-034
+    claim: "Bergsma et al. (Straight to Zero, ICLR 2025) report that under an optimal peak learning rate a linear decay-to-zero (D2Z) schedule consistently outperformed other schedules at compute-optimal dataset sizes, including cosine decay to 10% of peak; a 610M model trained at 80 tokens per parameter with D2Z reached lower loss than at 200 tokens per parameter with 10× decay (reported as 60% compute savings), with benefits increasing with dataset size."
+    provenance: VERIFIED_FACT
+    domain: lr_schedule
+    concepts: [decay_to_zero, cosine_schedule]
+    confidence: medium
+    currentness_status: "FRONTIER"
+    evidence: [{ source_type: paper, tier: 1, title: "Straight to Zero: Why Linearly Decaying the Learning Rate to Zero Works Best for LLMs", authors: "Shane Bergsma, Nolan Dey, Gurpreet Gosal, Gavia Gray, Daria Soboleva, Joel Hestness", year: "2025", url: "https://arxiv.org/abs/2502.15938", section: "Abstract (abstract-level inspection), v2", accessed_at: "2026-10-12" }]
+    limitations: ["Abstract-level; the authors' extrapolation to larger public models is hedged and is not used here."]
+    applicability: "Choosing the final LR of a decay (to zero vs. 10% of peak)."
+    related_claims: [CLM-031, CLM-037]
+    curriculum_usage: { lessons: ["25.5"], labs: ["LAB-D"], assessments: ["Mastery-25"] }
+  - id: CLM-035
+    claim: "Tissue et al. (Scaling Law with Learning Rate Annealing, 2024) model loss at step s as L(s) = L_0 + A·S_1^-α − C·S_2, where S_1 is the area under the LR curve and S_2 an annealing area accumulated with momentum λ (0.999 in their experiments), and report that fitting one or two training curves predicts loss at any step under other LR schedules."
+    provenance: VERIFIED_FACT
+    domain: lr_schedule
+    concepts: [lr_annealing_law, schedule_prediction]
+    confidence: medium
+    currentness_status: "FRONTIER"
+    evidence: [{ source_type: paper, tier: 1, title: "Scaling Law with Learning Rate Annealing", authors: "Howe Tissue, Venus Wang, Lu Wang", year: "2024", url: "https://arxiv.org/abs/2408.11029", section: "Abstract; Eq. 1; Section 3.2 Eq. 5; Section 3.4; Fig. 2 (HTML render, v2)", accessed_at: "2026-10-12" }]
+    limitations: ["Fitted constants (e.g., Fig. 2) are setup-specific; generality across architectures is the authors' claim."]
+    applicability: "Predicting schedule effects before running them."
+    related_claims: [CLM-031]
+    curriculum_usage: { lessons: ["25.5"], labs: ["LAB-D"], assessments: ["Mastery-25"] }
+  - id: CLM-036
+    claim: "Schaipp et al. (2025) report that learning-rate schedules for large model training behave surprisingly similarly to a performance bound from non-smooth convex optimization, give a bound for constant LR with linear cooldown that reflects the cooldown benefit, and use it to extend schedules for continued training and transfer the optimal learning rate across schedules on 124M and 210M Llama-type models."
+    provenance: VERIFIED_FACT
+    domain: lr_schedule
+    concepts: [cooldown, schedule_theory]
+    confidence: medium
+    currentness_status: "FRONTIER"
+    evidence: [{ source_type: paper, tier: 1, title: "The Surprising Agreement Between Convex Optimization Theory and Learning-Rate Scheduling for Large Model Training", authors: "Fabian Schaipp, Alexander Hägele, Adrien Taylor, Umut Simsekli, Francis Bach", year: "2025", url: "https://arxiv.org/abs/2501.18965", section: "Abstract (abstract-level inspection), v2", accessed_at: "2026-10-12" }]
+    limitations: ["Abstract-level; small models only."]
+    applicability: "A second, independent account of why cooldown helps."
+    related_claims: [CLM-033]
+    curriculum_usage: { lessons: ["25.5"], labs: [], assessments: ["Mastery-25"] }
+  - id: CLM-037
+    claim: "At OLMo-core commit 5f6f58a133e7ef577d596295f2c8db4651c27857, WSD.get_lr linearly warms up to the initial LR, holds it constant, and linearly decays to decay_min_lr (default 0.0) over the last decay steps (default decay_fraction 0.1); CosWithWarmup.get_lr warms up linearly and then follows eta_min + (lr − eta_min)(1 + cos(π·t/T))/2 with eta_min = alpha_f·lr and alpha_f defaulting to 0.1."
+    provenance: VERIFIED_FACT
+    domain: training_runtime
+    concepts: [wsd_schedule, cosine_schedule]
+    confidence: high
+    currentness_status: "CURRENT DEFAULT"
+    evidence:
+      - { source_type: source_code, tier: 1, title: "OLMo-core LR schedulers", repository: "https://github.com/allenai/OLMo-core", commit: "5f6f58a133e7ef577d596295f2c8db4651c27857", verification_date: "2026-10-12", file: "src/olmo_core/optim/scheduler.py", symbol: "WSD.get_lr; CosWithWarmup.get_lr; _linear_warmup; _linear_decay", entry_point: "Scheduler.get_lr(initial_lr, current, t_max) called by the trainer each step", execution_path: "WSD: current <= warmup -> _linear_warmup; current >= t_max - decay -> _linear_decay(initial_lr, t_max - current, decay, decay_min_lr); else initial_lr. CosWithWarmup: current < warmup -> _linear_warmup; current >= t_max -> eta_min; else cosine between initial_lr and eta_min = initial_lr * alpha_f over (t_max - warmup)", url: "https://github.com/allenai/OLMo-core/blob/5f6f58a133e7ef577d596295f2c8db4651c27857/src/olmo_core/optim/scheduler.py", accessed_at: "2026-10-12" }
+    limitations: ["Static inspection; library defaults are not industry defaults and the trainer's units (steps vs. tokens) were not traced."]
+    applicability: "Lesson 25.5 source trace and LAB D schedule implementation."
+    related_claims: [CLM-032, CLM-034]
+    curriculum_usage: { lessons: ["25.5"], labs: ["LAB-D"], assessments: ["Production-Source-Trace"] }
+  - id: CLM-038
+    claim: "For a run with peak LR 3×10^-4, 2,000 linear warmup steps and 100,000 total steps, cosine decay to 10% of peak gives LR ≈1.69×10^-4 at step 50,000 while WSD with a 10% linear decay holds 3×10^-4, and the summed LR (S_1) is ≈16.5 for cosine versus ≈28.2 for WSD; serving three budgets of 20k, 60k and 100k steps costs 180k steps with three cosine runs versus 108k steps with one WSD trunk branched into three 10% decays."
+    provenance: DERIVED
+    domain: lr_schedule
+    concepts: [wsd_schedule, cosine_schedule, scaling_law_reuse]
+    confidence: high
+    currentness_status: "REFERENCE / BASELINE"
+    assumptions: ["Schedule formulas as implemented in CLM-037 (cosine floor 0.1·peak; WSD linear decay to 0).", "Each budget's WSD decay is 10% of that budget and branches from the shared stable trunk; warmup counted once."]
+    derivation: "Cosine at s = 50,000: 3e-5 + 2.7e-4·(1 + cos(π·48,000/98,000))/2 ≈ 1.693e-4. Summing η over steps 1..100,000 numerically gives 16.47 (cosine) and 28.20 (WSD). Branch cost: trunk to step 90,000 plus decays of 2k (from 18k), 6k (from 54k), and 10k (from 90k) = 90k + 18k = 108k steps versus 20k + 60k + 100k = 180k."
+    limitations: ["Equal S_1 does not mean equal loss (CLM-035 adds an annealing term); savings ratio depends on the set of budgets."]
+    applicability: "Lesson 25.5 worked example and LAB D design."
+    related_claims: [CLM-031, CLM-035, CLM-037]
+    curriculum_usage: { lessons: ["25.5"], labs: ["LAB-D"], assessments: ["Mastery-25"] }
+  # ---------------- Lesson 25.6: data mixtures and checkpoint averaging ----------------
+  - id: CLM-039
+    claim: "DoReMi (Xie et al., NeurIPS 2023) trains a 280M-parameter proxy with Group DRO over domains, without knowledge of downstream tasks, to produce domain weights for an 8B model; on The Pile it reports +6.5 percentage points average few-shot accuracy over default weights and reaching baseline accuracy with 2.6× fewer training steps."
+    provenance: VERIFIED_FACT
+    domain: data_mixture
+    concepts: [data_mixture, proxy_model, domain_weights]
+    confidence: high
+    currentness_status: "REFERENCE / BASELINE"
+    evidence: [{ source_type: paper, tier: 1, title: "DoReMi: Optimizing Data Mixtures Speeds Up Language Model Pretraining", authors: "Sang Michael Xie, Hieu Pham, Xuanyi Dong, Nan Du, Hanxiao Liu, Yifeng Lu, et al.", year: "2023", url: "https://arxiv.org/abs/2305.10429", section: "Abstract (abstract-level inspection), v4", accessed_at: "2026-10-12" }]
+    limitations: ["Gains are relative to The Pile's default weights for the evaluated tasks."]
+    applicability: "Proxy-based mixture optimization."
+    related_claims: [CLM-040, CLM-041, CLM-043]
+    curriculum_usage: { lessons: ["25.6"], labs: ["LAB-D"], assessments: ["Mastery-25"] }
+  - id: CLM-040
+    claim: "Ye et al. (Data Mixing Laws, ICLR 2025) propose a data mixing law that predicts language-modeling performance from mixture proportions and nest it with scaling laws of training steps and model size; optimizing a 1B model trained on 100B RedPajama tokens with it reached performance comparable to training 48% more steps on the default mixture."
+    provenance: VERIFIED_FACT
+    domain: data_mixture
+    concepts: [data_mixture, mixing_law]
+    confidence: medium
+    currentness_status: "FRONTIER"
+    evidence: [{ source_type: paper, tier: 1, title: "Data Mixing Laws: Optimizing Data Mixtures by Predicting Language Modeling Performance", authors: "Jiasheng Ye, Peiju Liu, Tianxiang Sun, Jun Zhan, Yunhua Zhou, Xipeng Qiu", year: "2024", url: "https://arxiv.org/abs/2403.16952", section: "Abstract (abstract-level inspection), v2", accessed_at: "2026-10-12" }]
+    limitations: ["The functional form of the mixing law was not read (TODO_VERIFY in the knowledge model)."]
+    applicability: "Fitting a mixture-to-loss model instead of grid search."
+    related_claims: [CLM-039, CLM-041, CLM-042]
+    curriculum_usage: { lessons: ["25.6"], labs: ["LAB-D"], assessments: ["Mastery-25"] }
+  - id: CLM-041
+    claim: "RegMix (Liu et al., ICLR 2025) trains 512 models of 1M parameters for 1B tokens, fits a regression from mixture to performance, and uses the predicted mixture to train a 1B model for 25B tokens that performed best among 64 candidate 1B models, matching or exceeding DoReMi with 10% of the compute; the authors state that data mixture effects transcend scaling laws."
+    provenance: VERIFIED_FACT
+    domain: data_mixture
+    concepts: [data_mixture, proxy_model]
+    confidence: medium
+    currentness_status: "FRONTIER"
+    evidence: [{ source_type: paper, tier: 1, title: "RegMix: Data Mixture as Regression for Language Model Pre-training", authors: "Qian Liu, Xiaosen Zheng, Niklas Muennighoff, Guangtao Zeng, Longxu Dou, Tianyu Pang, et al.", year: "2024", url: "https://arxiv.org/abs/2407.01492", section: "Abstract (abstract-level inspection), v2", accessed_at: "2026-10-12" }]
+    limitations: ["Transfer validated to 1B/25B tokens; not shown here for larger targets."]
+    applicability: "Regression-based mixture search."
+    related_claims: [CLM-039, CLM-043]
+    curriculum_usage: { lessons: ["25.6"], labs: ["LAB-D"], assessments: ["Mastery-25"] }
+  - id: CLM-042
+    claim: "Shukor et al. (Scaling Laws for Optimal Data Mixtures, 2025) propose scaling laws that predict the loss of a model of size N trained on D tokens with domain weight vector h, validated in LLM, native multimodal, and large vision model settings, and report that parameters estimated from a few small-scale runs extrapolate to new mixtures and scales."
+    provenance: VERIFIED_FACT
+    domain: data_mixture
+    concepts: [data_mixture, mixing_law]
+    confidence: medium
+    currentness_status: "FRONTIER"
+    evidence: [{ source_type: paper, tier: 1, title: "Scaling Laws for Optimal Data Mixtures", authors: "Mustafa Shukor, Louis Bethune, Dan Busbridge, David Grangier, Enrico Fini, Alaaeldin El-Nouby, Pierre Ablin", year: "2025", url: "https://arxiv.org/abs/2507.09404", section: "Abstract (abstract-level inspection), v2", accessed_at: "2026-10-12" }]
+    limitations: ["Law form not read (TODO_VERIFY in the knowledge model)."]
+    applicability: "Joint (N, D, h) scaling as an alternative to fixed-scale mixture search."
+    related_claims: [CLM-040, CLM-043]
+    curriculum_usage: { lessons: ["25.6"], labs: [], assessments: ["Mastery-25"] }
+  - id: CLM-043
+    claim: "Kang et al. (AutoScale, COLM 2025) report that data mixtures that perform well at smaller scales may not retain their advantage at larger scales, challenging the practice of choosing mixtures in small-scale experiments and applying them directly at much larger scale."
+    provenance: VERIFIED_FACT
+    domain: data_mixture
+    concepts: [data_mixture, proxy_validity]
+    confidence: medium
+    currentness_status: "FRONTIER"
+    evidence: [{ source_type: paper, tier: 1, title: "AutoScale: Scale-Aware Data Mixing for Pre-Training LLMs", authors: "Feiyang Kang, Yifan Sun, Bingbing Wen, Si Chen, Dawn Song, Rafid Mahmood, et al.", year: "2024", url: "https://arxiv.org/abs/2407.20177", section: "Abstract (abstract-level inspection), v5", accessed_at: "2026-10-12" }]
+    limitations: ["Abstract-level; its speedup figures are for GPT-2 Large and not used here."]
+    applicability: "Counterexample to scale-invariant mixture transfer; contrasts with CLM-039 and CLM-041."
+    contradicts: [CLM-041]
+    related_claims: [CLM-039, CLM-042]
+    curriculum_usage: { lessons: ["25.6"], labs: ["LAB-D"], assessments: ["Mastery-25", "Incident-25.1"] }
+  - id: CLM-044
+    claim: "Li et al. (Model Merging in Pre-training of Large Language Models, 2025) report, for dense and MoE models from millions to over 100B parameters trained with a WSD schedule, that averaging checkpoints from the constant-learning-rate phase (Pre-trained Model Averaging, PMA) can match the performance of an annealed model and predict annealing behavior, with the optimal merge interval scaling with model size."
+    provenance: VERIFIED_FACT
+    domain: checkpoint_averaging
+    concepts: [checkpoint_averaging, wsd_schedule]
+    confidence: medium
+    currentness_status: "FRONTIER"
+    evidence: [{ source_type: paper, tier: 1, title: "Model Merging in Pre-training of Large Language Models", authors: "Yunshui Li, Yiyuan Ma, Shen Yan, Chaoyi Zhang, Jing Liu, Jianqiao Lu, et al.", year: "2025", url: "https://arxiv.org/abs/2505.12082", section: "Abstract; Sections 1, 4.1, 4.3; Appendix C (HTML render, v3)", accessed_at: "2026-10-12" }]
+    limitations: ["The authors note the effect of learning rate on merging was not quantified and post-training was not studied."]
+    applicability: "Checkpoint averaging as a cheap annealing proxy."
+    related_claims: [CLM-033, CLM-045, CLM-046]
+    curriculum_usage: { lessons: ["25.6"], labs: ["LAB-D"], assessments: ["Mastery-25"] }
+  - id: CLM-045
+    claim: "Sanyal et al. (Early Weight Averaging meets High Learning Rates for LLM Pre-training, NeurIPS 2023 WANT workshop) report that averaging checkpoints along the training trajectory (LAWA) improves convergence and generalization early in training, with larger gains for models trained at high learning rates and when averaged checkpoints are spaced far apart in steps."
+    provenance: VERIFIED_FACT
+    domain: checkpoint_averaging
+    concepts: [checkpoint_averaging]
+    confidence: medium
+    currentness_status: "WORKLOAD-DEPENDENT"
+    evidence: [{ source_type: paper, tier: 1, title: "Early Weight Averaging meets High Learning Rates for LLM Pre-training", authors: "Sunny Sanyal, Atula Neerkaje, Jean Kaddour, Abhishek Kumar, Sujay Sanghavi", year: "2023", url: "https://arxiv.org/abs/2306.03241", section: "Abstract (abstract-level inspection), v2", accessed_at: "2026-10-12" }]
+    limitations: ["Workshop paper; no quantitative gain is quoted here."]
+    applicability: "Averaging spacing and LR interaction."
+    related_claims: [CLM-044]
+    curriculum_usage: { lessons: ["25.6"], labs: ["LAB-D"], assessments: ["Mastery-25"] }
+  - id: CLM-046
+    claim: "OLMo 2 stops its pretraining schedule at 4T tokens and switches to mid-training with a learning rate decayed linearly to zero, reports that decaying over 50B or 100B tokens gave equivalent training loss, and reports that averaging ('souping') checkpoints annealed on different permutations of the same data mix consistently gave equal or better performance than any individual run (three checkpoints for 7B; four for 13B and 32B)."
+    provenance: VERIFIED_FACT
+    domain: checkpoint_averaging
+    concepts: [checkpoint_averaging, decay_to_zero, mid_training]
+    confidence: high
+    currentness_status: "CURRENT DEFAULT"
+    evidence: [{ source_type: paper, tier: 1, title: "2 OLMo 2 Furious", authors: "Team OLMo: Pete Walsh, Luca Soldaini, Dirk Groeneveld, et al.", year: "2024", url: "https://arxiv.org/abs/2501.00656", section: "Section 4.1; Fig. 11; Section 4.5 (full text, v3)", accessed_at: "2026-10-12" }]
+    limitations: ["Souping averages separately annealed runs (different data order), not trajectory checkpoints of one run.", "CURRENT DEFAULT scoped to an open, documented recipe."]
+    applicability: "Annealing plus souping as a late-stage recipe."
+    related_claims: [CLM-044, CLM-047]
+    curriculum_usage: { lessons: ["25.6"], labs: ["LAB-D"], assessments: ["Mastery-25"] }
+  - id: CLM-047
+    claim: "Wortsman et al. (Model soups, ICML 2022) report that averaging the weights of multiple models fine-tuned with different hyperparameters often improves accuracy and robustness without increasing inference time, and that fine-tuned models often lie in a single low-error basin."
+    provenance: VERIFIED_FACT
+    domain: checkpoint_averaging
+    concepts: [checkpoint_averaging, weight_averaging_basin]
+    confidence: high
+    currentness_status: "REFERENCE / BASELINE"
+    evidence: [{ source_type: paper, tier: 1, title: "Model soups: averaging weights of multiple fine-tuned models improves accuracy without increasing inference time", authors: "Mitchell Wortsman, Gabriel Ilharco, Samir Yitzhak Gadre, Rebecca Roelofs, Raphael Gontijo-Lopes, Ari S. Morcos, et al.", year: "2022", url: "https://arxiv.org/abs/2203.05482", section: "Abstract (abstract-level inspection)", accessed_at: "2026-10-12" }]
+    limitations: ["Fine-tuned models sharing a pretrained initialization; averaging unrelated runs from different initializations is not covered."]
+    applicability: "Same-basin precondition for weight averaging."
+    related_claims: [CLM-046]
+    curriculum_usage: { lessons: ["25.6"], labs: [], assessments: ["Mastery-25"] }
+  - id: CLM-048
+    claim: "With a target loss that weights two domains (synthetic per-domain losses L_web(h) = 2.0 + 0.30·h^-0.5 and L_code(h) = 1.2 + 0.10·h^-0.5, target = 0.7·L_web + 0.3·L_code), the optimum code share is about 0.20 (target 2.0619) and shares 0.15-0.30 lie within 0.004 of it, so mixture choices in this flat region cannot be ranked unless seed noise is below that margin; in a two-parameter river-valley toy loss L = f(x) + 5y^2, averaging three checkpoints with y = +0.30, −0.25, +0.20 lowers the y term from 0.20 (last checkpoint) to 0.035 but lags the river coordinate x."
+    provenance: DERIVED
+    domain: data_mixture
+    concepts: [data_mixture, checkpoint_averaging, river_valley]
+    confidence: high
+    currentness_status: "REFERENCE / BASELINE"
+    assumptions: ["Synthetic separable per-domain loss curves with no cross-domain transfer.", "Toy quadratic mountain term and linear river progress; checkpoints in one basin."]
+    derivation: "Grid over code share h_c in steps of 0.05: target(0.15) = 2.0652, target(0.20) = 2.0619, target(0.25) = 2.0625, target(0.30) = 2.0658. Average y = (0.30 − 0.25 + 0.20)/3 = 0.0833; 5·0.0833^2 = 0.0347 versus 5·0.20^2 = 0.20. Average x = 1.10 versus last checkpoint 1.20."
+    limitations: ["Real domains transfer to each other and interact with scale (CLM-043)."]
+    applicability: "Lesson 25.6 worked example."
+    related_claims: [CLM-033, CLM-040, CLM-044]
+    curriculum_usage: { lessons: ["25.6"], labs: ["LAB-D"], assessments: ["Mastery-25"] }
+  - id: CLM-049
+    claim: "In a small decoder trained with WSD, a decay branched from the stable phase will reach final loss within seed spread of a cosine run tuned to the same budget, and a uniform average of stable-phase checkpoints spaced across the last ~10-20% of the trunk will recover part of the decay's loss drop without decaying; a mixture ranked best at the smallest proxy will keep its rank at 8× compute only if the gap exceeds seed spread at both scales."
+    provenance: HYPOTHESIS
+    domain: lr_schedule
+    concepts: [wsd_schedule, checkpoint_averaging, data_mixture, proxy_validity]
+    confidence: medium
+    currentness_status: "WORKLOAD-DEPENDENT"
+    hypothesis:
+      prediction: "|L_WSD − L_cos| ≤ seed spread at each budget; L_avg < L_trunk_last; mixture rank preserved when the proxy gap exceeds 2× seed spread."
+      measurement_target: "Final validation loss (≥2 seeds) for cosine and WSD at three budgets, averaged-checkpoint loss, per-domain losses for three mixtures at two scales."
+      falsifying_observation: "WSD branch is worse than cosine by more than seed spread at a budget; averaging does not improve on the last trunk checkpoint; a mixture gap larger than 2× seed spread reverses between scales."
+    limitations: ["Tiny models; results bound only the tested scales."]
+    applicability: "LAB D pre-registered hypothesis."
+    related_claims: [CLM-031, CLM-043, CLM-044]
+    curriculum_usage: { lessons: ["25.5", "25.6"], labs: ["LAB-D"], assessments: ["Mastery-25"] }
