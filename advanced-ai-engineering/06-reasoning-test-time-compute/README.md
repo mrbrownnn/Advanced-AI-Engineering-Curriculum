@@ -789,6 +789,12 @@ A learner passes when they can:
 
 Test-time reasoning is controlled generation plus selection under resource constraints. Extra work creates opportunities, not guaranteed value. The engineering task is to expose where opportunity becomes quality, measure what selection loses, charge every executed branch, and stop only when evidence supports the utility trade.
 
+### Cost & Telemetry Hook
+
+- [Lesson 22.1](../22-ai-economics/README.md): cost per *correct selected* answer — every sampled branch, verifier call, and cancelled candidate stays in the numerator.
+- [Lesson 22.5](../22-ai-economics/README.md): an adaptive budget is a cascade; cost escalation the same way as routing (escalation rate times added cost).
+- [Lesson 23.1](../23-observability-reliability/README.md) and [Lesson 23.2](../23-observability-reliability/README.md): emit per-candidate spans (tokens, verifier score, stop reason); sampling or dropping candidate spans censors the vote record.
+
 ## 12 Competency Targets
 
 ```yaml

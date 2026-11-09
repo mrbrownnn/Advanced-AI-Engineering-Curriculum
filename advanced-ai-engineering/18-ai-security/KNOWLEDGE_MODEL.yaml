@@ -70,7 +70,7 @@ research_connections:
 todo_verify:
   - { id: "TODO-01", description: "Industry prevalence of recommended Module 18 controls was not surveyed; do not label them current industry defaults.", evidence_ids: [], derived_from: ["PROD-01"] }
   - { id: "TODO-02", description: "The 2025-2026 search was targeted, not a survey; many listed papers on the same channels (multimodal, audio, MCP defenses, memory defenses) were not opened and are not cited.", evidence_ids: [], derived_from: ["RESEARCH-03"] }
-  - { id: "TODO-03", description: "Exact AgentDojo suite version behind CaMeL's 949 attack cases and the meaning of Table 2 plus/minus values remain unresolved.", evidence_ids: ["CLM-011"], derived_from: ["RESEARCH-02"] }
+  - { id: "TODO-03", description: "CaMeL v2 full text (re-searched 2026-11-09) states neither the AgentDojo suite version behind its 949 attack cases nor the meaning of Table 2 plus/minus values; neither is interpreted.", evidence_ids: ["CLM-011"], derived_from: ["RESEARCH-02"] }
   - { id: "TODO-04", description: "Pinned AgentDojo error-pair treatment in published aggregation was not traced beyond runner assignment; no source path was executed.", evidence_ids: ["CLM-014"], derived_from: ["IMPL-03"] }
 
 candidate_capabilities:

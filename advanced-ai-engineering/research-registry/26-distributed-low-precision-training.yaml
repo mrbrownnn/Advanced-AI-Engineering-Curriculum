@@ -241,12 +241,12 @@ claims:
     applicability: "Long-horizon FP8 validation and break tests."
     curriculum_usage: {lessons: ["26.5"], labs: ["LAB-C"], assessments: ["Incident-26.1"]}
   - id: CLM-024
-    claim: "A 2026 NVFP4 pretraining report combines 16-value two-level scaling, random Hadamard transforms, 2D 16x16 weight scaling, stochastic gradient rounding, and selected BF16 layers, reporting a 12B model trained for 10T tokens near an FP8 baseline."
+    claim: "A 2025 NVFP4 pretraining report (v2 2026) combines 16-value two-level scaling, random Hadamard transforms, 2D 16x16 weight scaling, stochastic gradient rounding, and selected BF16 layers, reporting a 12B model trained for 10T tokens near an FP8 baseline."
     provenance: VERIFIED_FACT
     domain: low_precision_frontier
     concepts: [nvfp4, hadamard_transform, stochastic_rounding]
     confidence: medium
-    evidence: [{source_type: paper, tier: 1, title: "Pretraining Large Language Models with NVFP4", authors: "NVIDIA", year: "2026", url: "https://arxiv.org/abs/2509.25149", section: "Abstract; Section 4", accessed_at: "2026-10-12"}]
+    evidence: [{source_type: paper, tier: 1, title: "Pretraining Large Language Models with NVFP4", authors: "NVIDIA", year: "2025 (v2 2026)", url: "https://arxiv.org/abs/2509.25149", section: "Abstract; Section 4", accessed_at: "2026-10-12"}]
     limitations: ["FRONTIER technical report; one model and vendor stack; FP4 is not a drop-in replacement for BF16 or FP8."]
     applicability: "Frontier sub-8-bit training comparison."
     curriculum_usage: {lessons: ["26.5"], labs: ["LAB-C"], assessments: ["Mastery-26"]}
@@ -261,18 +261,6 @@ claims:
     limitations: ["One production run; interruption process is not Poisson, counts include correlated and planned events, and quotient 54 days/419 is only an empirical average interval."]
     applicability: "Failure-aware training economics."
     curriculum_usage: {lessons: ["26.6"], labs: ["LAB-D"], assessments: ["Mastery-26", "Incident-26.1"]}
-  - id: CLM-026
-    claim: "TODO_VERIFY: Young's first-order checkpoint model is commonly stated as useful-work interval tau approximately sqrt(2CM) for blocking checkpoint time C and exponential-failure MTBF M when C is small relative to M; Daly supplies a higher-order restart-dump estimate, but publisher full text was inaccessible and the exact primary-source statements were not verified in this pass."
-    provenance: TODO_VERIFY
-    domain: checkpoint_economics
-    concepts: [young_formula, daly_formula, checkpoint_interval]
-    confidence: low
-    evidence:
-      - {source_type: paper, tier: 1, title: "A first order approximation to the optimum checkpoint interval", authors: "John W. Young", year: "1974", url: "https://doi.org/10.1145/361147.361115", section: "First-order model", accessed_at: "2026-10-12"}
-      - {source_type: paper, tier: 1, title: "A higher order estimate of the optimum checkpoint interval for restart dumps", authors: "John T. Daly", year: "2006", url: "https://doi.org/10.1016/j.future.2004.11.016", section: "Higher-order restart-dump model", accessed_at: "2026-10-12"}
-    limitations: ["Publisher full text was inaccessible in this environment; metadata and first-order formula were cross-checked, but exact Daly closed-form variants remain TODO_VERIFY before quoting one.", "Correlated failures, asynchronous checkpoints, queue delays, and non-exponential hazards violate assumptions."]
-    applicability: "First-pass checkpoint interval planning."
-    curriculum_usage: {lessons: ["26.6"], labs: ["LAB-D"], assessments: ["Mastery-26"]}
   - id: CLM-027
     claim: "CheckFreq splits checkpointing into an in-memory snapshot pipelined with compute and an asynchronous persistence phase, and reports recovery-time reduction from hours to seconds while bounding runtime overhead within 3.5% on its evaluated workloads."
     provenance: VERIFIED_FACT
@@ -304,7 +292,7 @@ claims:
     applicability: "Evidence that asynchronous checkpointing can reduce exposed stalls."
     curriculum_usage: {lessons: ["26.6"], labs: ["LAB-D"], assessments: ["Mastery-26"]}
   - id: CLM-030
-    claim: "For blocking checkpoints under Young's assumptions, expected fractional overhead is approximately C/tau + tau/(2M) + R/M, where R is fixed restart time; reducing exposed checkpoint time changes the optimum interval, while reducing restart time lowers waste without changing the first-order sqrt(2CM) stationary point."
+    claim: "For blocking checkpoints under first-order assumptions, expected fractional overhead is approximately C/tau + tau/(2M) + R/M, where R is fixed restart time; reducing exposed checkpoint time changes the optimum interval, while reducing restart time lowers waste without changing the first-order sqrt(2CM) stationary point."
     provenance: DERIVED
     domain: checkpoint_economics
     concepts: [checkpoint_waste, restart_cost]
@@ -313,5 +301,5 @@ claims:
     derivation: "Checkpoint overhead per useful interval is C/tau. Mean lost useful work per failure is tau/2, contributing tau/(2M); restart contributes R/M. Differentiating C/tau+tau/(2M) gives -C/tau^2+1/(2M)=0, hence tau=sqrt(2CM)."
     limitations: ["Does not model checkpoint failure, correlated faults, asynchronous staging interference, queue delays, or minimum interval constraints."]
     applicability: "Synthetic restart-economics exercises."
-    related_claims: [CLM-026, CLM-027, CLM-029]
+    related_claims: [CLM-027, CLM-029]
     curriculum_usage: {lessons: ["26.6"], labs: ["LAB-D"], assessments: ["Mastery-26"]}

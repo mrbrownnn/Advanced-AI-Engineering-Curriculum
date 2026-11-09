@@ -650,7 +650,8 @@ Each entry states what was read on 2026-10-01 and what the module uses it for. "
 
 - [AWQ](https://arxiv.org/abs/2306.00978) — Lin et al. (MLSys 2024; arXiv v6). *Read*: abstract and the scaling-search passage. *Scope*: activation-aware per-channel scaling, with system results that include its own runtime (CLM-007).
 - [Medusa](https://arxiv.org/abs/2401.10774) — Cai et al. (ICML 2024; arXiv v3). *Read*: abstract, Section 2 overview, Section 2.3.1 (typical acceptance). *Scope*: heads plus tree verification; Medusa-1 versus Medusa-2; typical acceptance does not target the original distribution (CLM-012, CLM-021).
-- [EAGLE](https://arxiv.org/abs/2401.15077) — Li et al. (arXiv v3, March 2025). *Read*: abstract and the passages stating that it keeps the speculative-sampling rule, including for its draft tree. *Scope*: feature-level drafting and the paper's own distribution statement (CLM-012, CLM-021). The tree-verification proof it cites was not opened: `TODO_VERIFY`.
+- [EAGLE](https://arxiv.org/abs/2401.15077) — Li et al. (arXiv v3, March 2025). *Read*: abstract and the passages stating that it keeps the speculative-sampling rule, including for its draft tree. *Scope*: feature-level drafting and the paper's own distribution statement (CLM-012, CLM-021). EAGLE attributes its tree verifier to SpecInfer (below).
+- [SpecInfer: Accelerating Generative Large Language Model Serving with Tree-based Speculative Inference and Verification](https://arxiv.org/abs/2305.09781) — Miao et al. (arXiv v4; proof in v3). *Read*: Theorem 4.2 statement (multi-step speculative sampling equals the LLM's sampling distribution) and its proof in Appendix A.3 of [arXiv v3](https://arxiv.org/abs/2305.09781v3). *Scope*: the cited proof exists and covers SpecInfer's `VerifyStochastic`; not re-derived here and not evidence about any runtime's tree verifier (CLM-021).
 - [Triton documentation](https://triton-lang.org/main/index.html) — project landing page and the vector-addition tutorial, unversioned `main` docs as served on 2026-10-01. *Scope*: the program-instance, masked load/store, and `constexpr` block-size model in Lesson 5.2 (CLM-013). The docs are not pinned to a release.
 - [PyTorch compiler FAQ](https://docs.pytorch.org/docs/main/user_guide/torch_compiler/torch.compiler_faq.html) — `main` docs as served on 2026-10-01. *Read*: the sections on how compilation speeds up code (vertical and horizontal fusion), graph breaks, and guard-triggered recompilation. *Scope*: the fusion vocabulary and failure conditions in Lesson 5.2 (CLM-003). The `torch.compile` API page cited in the registry was not re-read in this pass.
 - Triton and compiler fusion are tool/mechanism families. No claim is made here that either is a default in any runtime; an implementation is selected only after correctness and workload-specific measurement.
@@ -858,6 +859,12 @@ A learner passes when they can:
 ### Module Wrap-Up (Final Mental Model Reconstruction)
 
 Inference optimization is constrained resource transformation. It changes bytes, operations, launch structure, precision, or serial target calls, then hands a new workload to the rest of the system. Validate semantics and quality first; measure the transformed bottleneck at the end-to-end boundary; retain the optimization only where its full cost ledger improves the declared objective.
+
+### Cost & Telemetry Hook
+
+- [Lesson 22.2](../22-ai-economics/README.md): an optimization's cost ledger includes calibration, kernel build, draft-model training/memory, and rollback, not only per-token savings.
+- [Lesson 22.6](../22-ai-economics/README.md): report the speedup flip point — batch size or acceptance rate below which a speculative or quantized path stops paying.
+- [Lesson 23.1](../23-observability-reliability/README.md) and [Lesson 23.5](../23-observability-reliability/README.md): emit backend/kernel path, precision, and acceptance length per request; treat offline quality deltas as proxy quality until labeled traffic confirms them.
 
 ## 12 Competency Targets
 

@@ -85,11 +85,10 @@ production_connections:
   - { id: "PROD-02", description: "Training throughput depends on EP all-to-all overlap, node-limited routing, and low-precision dispatch, so balance is a throughput control as well as a quality control (inference placement in Modules 20 and 24).", evidence_ids: ["CLM-035", "CLM-036"], derived_from: ["MECH-07"] }
 
 research_connections:
-  - { id: "RESEARCH-01", description: "Control-theoretic and primal-dual analyses of bias balancing (ALF-LB theory, ID Balancing) and quantile balancing are active work at extreme sparsity.", evidence_ids: ["CLM-022", "CLM-023"], derived_from: ["MECH-04"] }
+  - { id: "RESEARCH-01", description: "Control-theoretic and primal-dual analyses of bias balancing (ALF-LB theory, ID Balancing) and quantile balancing are active work at extreme sparsity.", evidence_ids: ["CLM-022", "CLM-023", "CLM-053"], derived_from: ["MECH-04"] }
   - { id: "RESEARCH-02", description: "Post-training of MoE (routing replay, sequence-level RL objectives, router anchoring) and the cost of over-dispersed routing for pruning are 2025-2026 frontier topics.", evidence_ids: ["CLM-043", "CLM-045", "CLM-046"], derived_from: ["MECH-11"] }
 
-todo_verify:
-  - { id: "TODO-01", description: "Kimi K3 Quantile Balancing primary source and the Megatron-Core quantile_balancing algorithm were not traced.", evidence_ids: ["CLM-053"], derived_from: ["MECH-04"] }
+todo_verify: []
 
 candidate_capabilities:
   - { capability: "Explain and compute router outputs and gradients for softmax and sigmoid top-k and choose token- versus expert-choice for causal LM training.", mapped_mechanisms: ["MECH-01", "FAIL-07"] }

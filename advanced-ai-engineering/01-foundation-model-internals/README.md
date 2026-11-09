@@ -637,8 +637,8 @@ Examples of discriminating tests:
 
 **REFERENCE / BASELINE**
 
-- Vaswani et al. (2017), [*Attention Is All You Need*](https://proceedings.neurips.cc/paper/2017/hash/3f5ee243547dee91fbd053c1c4a845aa-Abstract.html) — scaled dot-product and multi-head attention (CLM-001).
-- Zhang and Sennrich (2019), [*Root Mean Square Layer Normalization*](https://proceedings.neurips.cc/paper/2019/hash/1e8a19426224ca89e83cef47f1e7f53b-Abstract.html) — RMSNorm mechanism (CLM-002).
+- Vaswani et al. (2017), [*Attention Is All You Need*](https://arxiv.org/abs/1706.03762) — scaled dot-product and multi-head attention (CLM-001).
+- Zhang and Sennrich (2019), [*Root Mean Square Layer Normalization*](https://arxiv.org/abs/1910.07467) — RMSNorm mechanism (CLM-002).
 - Shazeer (2020), [*GLU Variants Improve Transformer*](https://arxiv.org/abs/2002.05202) — SwiGLU family (CLM-004).
 - Su et al. (2021), [*RoFormer*](https://arxiv.org/abs/2104.09864) — rotary position embedding (CLM-003).
 - Holtzman et al. (ICLR 2020), [*The Curious Case of Neural Text Degeneration*](https://arxiv.org/abs/1904.09751) — left-to-right factorization (Section 2), nucleus, top-k, and temperature sampling definitions (Sections 3.1–3.3); read 2026-09-30 (CLM-013). Its quality findings are specific to its models and tasks.
@@ -813,6 +813,11 @@ A learner can exit Module 01 when they can:
 ### Module Wrap-Up (Final Mental Model Reconstruction)
 
 The final invariant: **model architecture is an executable tensor contract, and generation is that contract plus a recorded sampling contract—not a bag of component names and a temperature.**
+
+### Cost & Telemetry Hook
+
+- [Lesson 22.2](../22-ai-economics/README.md): carry the module's parameter, FLOP, and retained-state accounting into marginal cost per token; state the same exclusions.
+- [Lesson 23.1](../23-observability-reliability/README.md): emit model revision, attention variant, dtype, backend, and effective sampling processor list per request as pinned signal attributes.
 
 ## 12 Competency Targets
 

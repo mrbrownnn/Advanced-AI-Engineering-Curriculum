@@ -487,7 +487,7 @@ Observed behavior at that revision:
 
 **REFERENCE / BASELINE**
 
-- Williams, Waterman, and Patterson (2009), [*Roofline: An Insightful Visual Performance Model for Multicore Architectures*](https://escholarship.org/uc/item/78h8v7mr) — original bound and optimization model (CLM-004).
+- Williams, Waterman, and Patterson (2009), [*Roofline: An Insightful Visual Performance Model for Multicore Architectures*](https://doi.org/10.1145/1498765.1498785) — original bound and optimization model (CLM-004).
 - NVIDIA, [*CUDA Programming Guide*](https://docs.nvidia.com/cuda/cuda-programming-guide/) — execution, synchronization, and architecture semantics (CLM-001, CLM-003, CLM-007; accessed 2026-09-25).
 - NVIDIA, [*CUDA C++ Best Practices Guide*](https://docs.nvidia.com/cuda/cuda-c-best-practices-guide/) — correctness, timing, bandwidth, coalescing, and execution-configuration guidance (CLM-002, CLM-007, CLM-013; accessed 2026-09-25).
 
@@ -692,6 +692,12 @@ A learner can exit Module 02 when they can:
 ### Module Wrap-Up (Final Mental Model Reconstruction)
 
 The final invariant: **a GPU bottleneck is a scoped causal claim supported by aligned work, byte, time, timeline, and intervention evidence—not a label read from one counter.**
+
+### Cost & Telemetry Hook
+
+- [Lesson 22.2](../22-ai-economics/README.md): convert measured kernel time and achieved bandwidth into GPU-seconds per unit of work; idle and profiling time are fixed cost, not free.
+- [Lesson 22.6](../22-ai-economics/README.md): report the batch/shape flip point where a kernel change stops reducing cost per unit of work.
+- [Lesson 23.1](../23-observability-reliability/README.md): emit device, driver, timing boundary, and profiler-on/off state with every timing so replay overhead is not read as production latency.
 
 ## 12 Competency Targets
 

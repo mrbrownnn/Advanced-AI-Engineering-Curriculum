@@ -156,7 +156,7 @@ claims:
     confidence: high
     currentness_status: "FRONTIER (reported architecture)"
     evidence:
-      - { source_type: paper, tier: 1, title: "Qwen2.5-Omni Technical Report", authors: "Qwen Team", year: "2025", url: "https://arxiv.org/abs/2503.20215", version: "v1", section: "Sections 2.2 and 2.4", accessed_at: "2026-09-30" }
+      - { source_type: paper, tier: 1, title: "Qwen2.5-Omni Technical Report", authors: "Jin Xu et al.", year: "2025", url: "https://arxiv.org/abs/2503.20215", version: "v1", section: "Sections 2.2 and 2.4", accessed_at: "2026-09-30" }
     limitations: ["Architecture report, not a universal stream contract or reproduced latency result."]
     applicability: "Native audio-video-text streaming architecture."
     curriculum_usage: { lessons: ["21.4"], labs: ["LAB-C"], assessments: ["Mastery-21"] }
@@ -305,7 +305,7 @@ claims:
     confidence: medium
     currentness_status: "FRONTIER (abstract-only inspection)"
     evidence:
-      - { source_type: paper, tier: 1, title: "TCM-Serve: Modality-aware Scheduling for Multimodal Large Language Model Inference", authors: "Konstantinos Papaioannou, Thaleia Dimitra Doudali", year: "2026", url: "https://arxiv.org/abs/2603.26498", section: "Abstract only", accessed_at: "2026-09-30" }
+      - { source_type: paper, tier: 1, title: "TCM-Serve: Modality-aware Scheduling for Multimodal Large Language Model Inference", authors: "Konstantinos Papaioannou, Thaleia Dimitra Doudali", year: "2026", url: "https://arxiv.org/abs/2603.26498v2", version: "v2 (v3 retitled 'Rocks, Pebbles and Sand', system RPS-Serve)", section: "Abstract only", accessed_at: "2026-09-30" }
     limitations: ["Abstract-only inspection.", "Reported 54% and 78.5% TTFT reductions are omitted from instructional claims because full experimental context was not inspected."]
     applicability: "Frontier comparison for heterogeneous multimodal scheduling."
     curriculum_usage: { lessons: ["21.3"], labs: ["LAB-B"], assessments: ["Mastery-21"] }

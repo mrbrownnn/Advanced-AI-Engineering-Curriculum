@@ -78,9 +78,9 @@ claims:
         title: "Splitwise: Efficient Generative LLM Inference Using Phase Splitting"
         authors: "Pratyush Patel, Esha Choukse, Chaojie Zhang, Aashaka Shah, Inigo Goiri, Saeed Maleki, Ricardo Bianchini"
         year: "2024"
-        url: "https://www.microsoft.com/en-us/research/publication/splitwise-efficient-generative-llm-inference-using-phase-splitting/"
-        section: "Section II (Background) & Section III (Characterization); ISCA 2024 per Microsoft Research page; arXiv v2 re-checked 2026-09-30"
-        accessed_at: "2026-09"
+        url: "https://doi.org/10.1109/ISCA59077.2024.00019"
+        section: "Section II (Background) & Section III (Characterization); ISCA 2024 per Crossref DOI metadata (checked 2026-11-09); arXiv v2 re-checked 2026-09-30"
+        accessed_at: "2026-11-09"
     limitations:
       - "The realized bottleneck depends on hardware, model architecture, precision, kernels, batch size, prompt length, output length, and cache behavior."
       - "A Roofline prediction must be checked with counters for the actual workload."

@@ -424,7 +424,7 @@ Static long-context recall is not a complete memory test. Include:
 - downstream task outcome, calibration/abstention, privacy leakage, latency, and cost;
 - long-range understanding, test-time experience reuse, and selective forgetting.
 
-MemoryAgentBench explicitly expands evaluation toward incremental interaction and four competencies. IFCMemoryBench (2026, one professional domain) separates ingestion, retrieval, and utilization and reports that the evaluated general-purpose memory systems performed poorly in its setup. The registry's characterization of the retrieved records as "incomplete or fragmented" comes from an earlier reading; only the abstract was re-read on 2026-09-30. Do not turn either benchmark into a universal leaderboard.
+MemoryAgentBench explicitly expands evaluation toward incremental interaction and four competencies. IFCMemoryBench (2026, one professional domain) separates ingestion, retrieval, and utilization and reports that the evaluated general-purpose memory systems performed poorly in its setup. Its abstract (re-read 2026-11-09) says those systems often retrieve topically relevant context but store project knowledge as incomplete or fragmented facts; full methods and results were not re-audited. Do not turn either benchmark into a universal leaderboard.
 
 Diagnosis follows the earliest discriminated boundary:
 
@@ -667,6 +667,12 @@ A learner passes when they can account for serialized context and output reserve
 ### Module Wrap-Up (Final Mental Model Reconstruction)
 
 Context is scarce execution input; memory is a governed state system. Reliability comes from budgeting, typed/versioned records, explicit conflict and deletion convergence, selective authorized movement into context, recoverable compaction, and stage-level falsification—not from replaying more text.
+
+### Cost & Telemetry Hook
+
+- [Lesson 22.3](../22-ai-economics/README.md): record per-call input tokens from the provider count, not the approximate counter; reconcile against the context-budget ledger.
+- [Lesson 22.2](../22-ai-economics/README.md): price compaction/summarization calls and memory storage as fixed plus marginal cost against the replayed-context cost they replace.
+- [Lesson 23.1](../23-observability-reliability/README.md): emit budget, reserved output, trimmed count, and memory record IDs/versions selected per call; [Lesson 23.6](../23-observability-reliability/README.md) governs retention and redaction of memory content in telemetry.
 
 ## 12 Competency Targets
 

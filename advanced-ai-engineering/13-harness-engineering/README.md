@@ -833,6 +833,12 @@ A learner successfully completing Module 13 must be able to:
 - **The Data Path**: `application contract → canonical request → capability check → effective payload → raw events → assembly/normalization → validation → typed outcome`.
 - Reliability comes from explicit capabilities, reversible transformations, staged validation, stateful streaming, bounded recovery, and complete attempt lineage.
 
+### Cost & Telemetry Hook
+
+- [Lesson 22.3](../22-ai-economics/README.md): record attempt-level usage, including retried, repaired, and rejected attempts, not only the accepted response.
+- [Lesson 22.5](../22-ai-economics/README.md): a fallback or repair path is a cascade; cost each escalation step against the shared retry budget.
+- [Lesson 23.1](../23-observability-reliability/README.md): emit canonical-vs-effective request diff, capability-check result, validation stage reached, and typed error per attempt; [Lesson 23.2](../23-observability-reliability/README.md) applies to partial or aborted streams.
+
 ## 12 Competency Targets
 
 ```yaml

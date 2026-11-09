@@ -538,13 +538,13 @@ Trace a current allocator/cache implementation without generalizing its objects 
 **REFERENCE / BASELINE**
 
 - Kwon et al. (SOSP 2023), [*Efficient Memory Management for Large Language Model Serving with PagedAttention*](https://doi.org/10.1145/3600006.3613165) — block tables, non-contiguous physical blocks, sharing, and paper-era evaluation (CLM-003).
-- Zheng et al. (NeurIPS 2024), [*SGLang: Efficient Execution of Structured Language Model Programs*](https://proceedings.neurips.cc/paper_files/paper/2024/file/724be4472168f31ba1c9ac630f15dec8-Paper-Conference.pdf) — RadixAttention and structured-program prefix reuse (CLM-008).
+- Zheng et al. (NeurIPS 2024), [*SGLang: Efficient Execution of Structured Language Model Programs*](https://arxiv.org/abs/2312.07104) — RadixAttention and structured-program prefix reuse (CLM-008).
 - DeepSeek-AI (2024), [*DeepSeek-V2*](https://arxiv.org/abs/2405.04434) v5, Sections 2.1.2–2.1.4, and the released [`config.json`](https://huggingface.co/deepseek-ai/DeepSeek-V2/blob/4461458f186c35188585855f28f77af5661ad489/config.json) — MLA retained state used for Lesson 3.1 sizing; read 2026-09-30 (CLM-014).
 
 **WORKLOAD-DEPENDENT EXTENSIONS**
 
-- Liu et al. (ICML 2024), [*KIVI*](https://openreview.net/pdf?id=L057s2Rq8O) — asymmetric low-bit KV quantization; empirical results are configuration-specific (CLM-009).
-- Zhang et al. (NeurIPS 2023), [*H2O*](https://openreview.net/pdf?id=ctPizehA9D) — lossy attention-state retention based on recent/heavy-hitter tokens (CLM-010).
+- Liu et al. (ICML 2024), [*KIVI*](https://arxiv.org/abs/2402.02750) — asymmetric low-bit KV quantization; empirical results are configuration-specific (CLM-009).
+- Zhang et al. (NeurIPS 2023), [*H2O*](https://arxiv.org/abs/2306.14048) — lossy attention-state retention based on recent/heavy-hitter tokens (CLM-010).
 - TensorRT-LLM [KV Cache System](https://nvidia.github.io/TensorRT-LLM/features/kvcache.html) documentation (accessed 2026-09-25) — paged/contiguous caches, reuse, prioritized eviction, offload, events, and distinct managers for hybrid layouts (CLM-012).
 
 **CURRENT SOURCE SNAPSHOT**
@@ -701,6 +701,12 @@ A learner completing Module 03 should be able to derive KV memory footprint, exp
 - MODEL ARCHITECTURE → KV BYTES PER TOKEN → REQUEST LENGTH / CONCURRENCY → LOGICAL KV DEMAND → PHYSICAL KV MANAGEMENT → ALLOCATOR / SHARING / CACHE → SCHEDULER → ROUTING / LOCALITY → HARDWARE CAPACITY & BANDWIDTH → LATENCY / GOODPUT / COST.
 - When KV becomes limiting, possible interventions may include: admission/scheduling changes, block-size/allocation policy changes, prefix reuse, eviction changes, routing/locality, KV representation/quantization, tiering/offloading, or placement/disaggregation.
 - The correct intervention depends entirely on evidence. The final mental model is: PREDICT → OBSERVE → DIAGNOSE → INTERVENE → FALSIFY.
+
+### Cost & Telemetry Hook
+
+- [Lesson 22.4](../22-ai-economics/README.md): price prefix reuse from measured hit rate in reusable tokens, net of eviction, recompute, and memory reserved for cached blocks.
+- [Lesson 22.2](../22-ai-economics/README.md): charge KV memory (HBM and offload tier) as capacity cost per resident token-second, not only per request.
+- [Lesson 23.1](../23-observability-reliability/README.md) and [Lesson 23.2](../23-observability-reliability/README.md): emit per-request cached/computed token counts, allocation refusals, and preemptions; report sampled or dropped cache events as telemetry loss.
 
 ## 12 Competency Targets
 ```yaml

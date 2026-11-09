@@ -824,6 +824,11 @@ A learner successfully completing Module 16 must be able to:
 - **The Search Path**: claim/domain/oracle → generated transformations/faults → candidate failure → validate/adjudicate/minimize → fix or accept risk → regression.
 - Its output is not a giant test count but a trustworthy counterexample—or a precisely bounded statement about where none was found.
 
+### Cost & Telemetry Hook
+- [Lesson 22.1](../22-ai-economics/README.md): report campaign cost per validated counterexample, not per generated case.
+- [Lesson 22.6](../22-ai-economics/README.md): choose search budget by declared objective; record where yield or escape cost flips the decision.
+- [Lesson 23.6](../23-observability-reliability/README.md): tag fault-injection and red-team traffic so incident triage does not count it as production failure.
+
 ## 12 Competency Targets
 
 ```yaml

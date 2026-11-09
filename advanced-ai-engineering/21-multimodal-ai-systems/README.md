@@ -501,7 +501,7 @@ Select representation budgets inside a measured, slice-level quality–latency�
 **FRONTIER**
 - [ModServe](https://arxiv.org/abs/2502.00937) (2025, v3; §§2–3 read) — stage-aware disaggregation (CLM-016). Placement detail is Module 20.
 - [Qwen2.5-Omni Technical Report](https://arxiv.org/abs/2503.20215) (2025; §§2.2, 2.4 read) — time-aligned positions and block-wise streaming encoders (CLM-009).
-- [TCM-Serve](https://arxiv.org/abs/2603.26498) (Papaioannou and Doudali, 2026; abstract only) — modality-aware scheduling (CLM-020).
+- [TCM-Serve](https://arxiv.org/abs/2603.26498v2) (Papaioannou and Doudali, 2026, v2; v3 retitled *Rocks, Pebbles and Sand* (RPS-Serve); abstract only) — modality-aware scheduling (CLM-020).
 - [VLCache](https://arxiv.org/abs/2512.12977) (Qin et al., 2025; abstract only) — approximate encoder/KV reuse (CLM-021).
 - [Why and When Visual Token Pruning Fails?](https://arxiv.org/abs/2604.12358) (Kim et al., 2026; abstract only) — information shift during decoding (CLM-019).
 - [FastVLM](https://arxiv.org/abs/2412.13303) (2024, v2; introduction read) — hybrid encoder reducing tokens and encoding latency; discovery only, no claim.
@@ -699,6 +699,12 @@ A learner successfully completing Module 21 must be able to:
 - **The Path**: media bytes → modality contract → encoder → bridge → decoder-visible length → KV and prefill → batching and caches → stream alignment → output. Each arrow has its own counter and its own failure modes.
 - When a multimodal system regresses, write the stage ledger and token counts first, list competing hypotheses, and run the experiment that separates them. "Fragmentation" is one hypothesis, not a default.
 - Next: Module 22 prices this work; Module 23 turns the ledger into telemetry; the satellite tracks go deeper on each model family.
+
+### Cost & Telemetry Hook
+- [Lesson 22.1](../22-ai-economics/README.md): price the stage ledger per offered multimodal task; failed preprocessing and timed-out encodes stay in the denominator.
+- [Lesson 22.4](../22-ai-economics/README.md): value encoder and processor caches from measured hit rate on content-hash keys, net of storage and invalidation cost.
+- [Lesson 23.1](../23-observability-reliability/README.md): emit one span per stage (preprocess, encode, bridge, prefill, decode) with decoder-visible token counts as attributes, not media size alone.
+- [Lesson 23.5](../23-observability-reliability/README.md): monitor representation-budget changes with a calibrated proxy per slice; delayed labels gate any compression rollout.
 
 ## 12 Competency Targets
 

@@ -6,7 +6,6 @@ out_of_scope_candidates:
   - "Inference expert placement, redundant experts, and EP serving layouts (Module 20, Module 24)."
   - "General ZeRO/FSDP/TP/PP training parallelism and FP8 training recipes (Module 26)."
   - "RL post-training estimators beyond the MoE routing-volatility issue (Module 27)."
-  - "Kimi K3 Quantile Balancing primary source (not opened; see CLM-053)."
 claims:
   - id: CLM-001
     claim: "Shazeer et al. introduce the sparsely-gated MoE layer with noisy top-k gating G(x)=Softmax(KeepTopK(H(x),k)); they observe that the gating network tends to converge to always producing large weights for the same few experts, an imbalance that is self-reinforcing because favored experts train faster and are selected more; they add an importance loss w_importance*CV(Importance(X))^2."
@@ -631,12 +630,15 @@ claims:
     curriculum_usage: { lessons: ["28.5"], labs: ["LAB-B"], assessments: ["Mastery-28"] }
   - id: CLM-053
     claim: "Kimi K3's Quantile Balancing is an auxiliary-loss-free balancing method that sets a per-expert bias from quantiles of routing scores rather than fixed-step sign updates; Megatron-Core exposes a quantile_balancing routing type at the pinned commit."
-    provenance: TODO_VERIFY
+    provenance: VERIFIED_FACT
     domain: aux_loss_free_balancing
     concepts: [expert_bias, control_view_of_balancing]
-    confidence: low
+    confidence: medium
     currentness_status: "FRONTIER"
-    limitations: ["Primary Kimi K3 source not opened; the method is known here only through the ID Balancing abstract (CLM-022) and a Megatron-Core code path (TopKRouter.quantile_balancing) whose algorithm was not traced."]
+    evidence:
+      - { source_type: paper, tier: 1, title: "Kimi K3: Open Frontier Intelligence", authors: "Kimi Team", year: "2026", url: "https://arxiv.org/abs/2607.24653", section: "Section 2.3.3 Quantile Balancing; Appendix C (relation to sign-based loss-free updates); Appendix D, v2", accessed_at: "2026-11-09" }
+      - { source_type: source_code, tier: 1, title: "Megatron-Core MoE router", repository: "https://github.com/NVIDIA/Megatron-LM", commit: "e998be072d22ff57b4b49899819a1a153f4f3dc9", verification_date: "2026-11-09", file: "megatron/core/transformer/moe/router.py; megatron/core/transformer/moe/moe_utils.py", symbol: "TopKRouter.routing (routing_type == \"quantile_balancing\"); TopKRouter.quantile_balancing; qb_dual_update" }
+    limitations: ["Paper sections read; results not reproduced. Megatron-Core symbols confirmed present by static inspection; algorithm body and equivalence to the paper's histogram estimator not traced."]
     applicability: "Reading lead only; no lesson relies on it."
     related_claims: [CLM-022]
     curriculum_usage: { lessons: ["28.3"] }

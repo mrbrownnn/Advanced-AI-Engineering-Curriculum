@@ -460,7 +460,7 @@ Competing hypotheses include cache warmup, batching changes, thermal drift, retr
 - Mytkowicz et al. (ASPLOS 2009), [*Producing Wrong Data Without Doing Anything Obviously Wrong*](https://research.ibm.com/publications/producing-wrong-data-without-doing-anything-obviously-wrong): setup-induced measurement bias (CLM-002).
 - Georges, Buytaert, and Eeckhout (OOPSLA 2007), [*Statistically Rigorous Java Performance Evaluation*](https://doi.org/10.1145/1297027.1297033): startup, steady state, and repeated execution (CLM-004).
 - Kalibera and Jones (ISMM 2013), [*Rigorous Benchmarking in Reasonable Time*](https://kar.kent.ac.uk/33611/): hierarchical variance and experiment dimensioning (CLM-004).
-- Wasserstein and Lazar (2016), [*The ASA's Statement on p-Values*](https://doi.org/10.1080/00031305.2016.1154108): limits of p-value interpretation (CLM-012).
+- Wasserstein and Lazar (2016), [*The ASA Statement on p-Values: Context, Process, and Purpose*](https://doi.org/10.1080/00031305.2016.1154108): limits of p-value interpretation (CLM-012).
 - ACM, [*Artifact Review and Badging – Current*](https://www.acm.org/publications/policies/artifact-review-and-badging-current): repeatability, reproducibility, replicability (CLM-010).
 
 These references were accessed 2026-09-25 and were not re-read in the WP-F1 review. They are canonical methods sources, not evidence about 2025–2026 practice; this module makes no frontier or current-default claim about benchmarking practice.
@@ -637,6 +637,12 @@ A learner can exit Module 00 when they can:
 ### Module Wrap-Up (Final Mental Model Reconstruction)
 
 The final invariant is simple: **a precise number is not strong evidence unless the measurement contract, design, assumptions, and failure semantics make it answer the intended question.**
+
+### Cost & Telemetry Hook
+
+- [Lesson 22.1](../22-ai-economics/README.md): cost per experiment uses the declared estimand's denominator (successful task, not raw request); failed and excluded runs stay in the ledger.
+- [Lesson 22.3](../22-ai-economics/README.md): record dated hardware/runtime prices beside each benchmark manifest so a cost comparison can be recomputed.
+- [Lesson 23.2](../23-observability-reliability/README.md): treat dropped, timed-out, and censored samples as telemetry loss to report, not rows to delete.
 
 ## 12 Competency Targets
 

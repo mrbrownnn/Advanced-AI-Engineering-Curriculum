@@ -284,7 +284,7 @@ claims:
     evidence:
       - source_type: "paper"
         tier: 1
-        title: "The ASA's Statement on p-Values: Context, Process, and Purpose"
+        title: "The ASA Statement on p-Values: Context, Process, and Purpose"
         authors: "Ronald L. Wasserstein, Nicole A. Lazar"
         year: "2016"
         url: "https://doi.org/10.1080/00031305.2016.1154108"

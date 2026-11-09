@@ -158,7 +158,7 @@ claims:
       configuration: "CaMeL privileged/quarantined models and interpreter versus same model's native tool-calling API."
       metric_definition: "Fraction of benign tasks solved; successful attacks counted out of 949 separately."
       measurement_method: "Author-reported Table 2/4; not reproduced; no adaptive attack against CaMeL."
-    limitations: ["Exact AgentDojo suite version behind 949 cases unresolved; text-only attacks are out of scope; side channels remain; formal interpreter verification is future work; data-dependent actions reduce utility."]
+    limitations: ["AgentDojo suite version behind 949 cases not stated in CaMeL v2 text (re-searched 2026-11-09); text-only attacks are out of scope; side channels remain; formal interpreter verification is future work; data-dependent actions reduce utility."]
     applicability: "Design pattern for agents with high-authority tools."
     curriculum_usage: { lessons: ["18.4"], labs: ["LAB-D"], assessments: ["Mastery-18"] }
   - id: CLM-012

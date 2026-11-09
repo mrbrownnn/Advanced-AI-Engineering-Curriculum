@@ -397,7 +397,7 @@ Construct and defend a constrained decision frontier with sensitivity, uncertain
 - [Prompt Caching for Long-Horizon Tasks](https://arxiv.org/abs/2601.06007), Lumer et al. 2026: workload-specific cache boundary results (**O**, `CLM-007`).
 
 **FRONTIER**
-- [Is Escalation Worth It?](https://arxiv.org/abs/2605.06350), Bouchard 2026, preprint (**O**, `CLM-004`).
+- [Is Escalation Worth It?](https://arxiv.org/abs/2605.06350v1), Bouchard 2026, preprint v1 (v2 retitled and revised) (**O**, `CLM-004`).
 - [Routing, Cascades, and User Choice](https://arxiv.org/abs/2602.09902), Mahmood 2026, abstract-only (**O**, `CLM-005`).
 - [RouteNLP](https://arxiv.org/abs/2604.23577), Guo et al. 2026, abstract-only single deployment report (**O**, `CLM-029`).
 

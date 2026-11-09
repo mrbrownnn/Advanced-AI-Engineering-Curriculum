@@ -586,8 +586,17 @@ claims:
         version: "arXiv v3 (4 Mar 2025)"
         section: "Abstract; Section 2 preliminaries; Section 3 verification-phase paragraph"
         accessed_at: "2026-10"
+      - source_type: paper
+        tier: 1
+        title: "SpecInfer: Accelerating Generative Large Language Model Serving with Tree-based Speculative Inference and Verification"
+        authors: "Xupeng Miao, Gabriele Oliaro, Zhihao Zhang, Xinhao Cheng, Zeyu Wang, Zhengxin Zhang, Rae Ying Yee Wong, Alan Zhu, Lijie Yang, Xiaoxiang Shi, Chunan Shi, Zhuoming Chen, Daiyaan Arfeen, Reyna Abhyankar, Zhihao Jia"
+        year: "2023"
+        url: "https://arxiv.org/abs/2305.09781"
+        version: "arXiv v4; proof read in v3 (https://arxiv.org/abs/2305.09781v3)"
+        section: "Section 4 Theorem 4.2 (multi-step speculative sampling preserves the LLM sampling distribution); v3 Appendix A.3 proof"
+        accessed_at: "2026-11-09"
     limitations:
-      - "These are the papers' own statements. The multi-candidate (tree) verification proof that EAGLE cites was not opened or re-derived in this pass: TODO_VERIFY before asserting exactness of any specific tree verifier."
+      - "These are the papers' own statements. EAGLE attributes its tree verifier to SpecInfer; SpecInfer's Theorem 4.2 and its v3 Appendix A.3 proof were opened on 2026-11-09 but not re-derived here. Exactness of any specific runtime's tree verifier still needs its own check."
       - "No runtime implementation of either method was inspected."
       - "Quality claims for typical acceptance are empirical and scoped to the papers' models and tasks."
     applicability: "Choosing the correctness or quality gate that matches the acceptance rule actually deployed."

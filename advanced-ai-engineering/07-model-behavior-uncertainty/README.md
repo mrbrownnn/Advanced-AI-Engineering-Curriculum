@@ -758,6 +758,12 @@ A learner passes when they can:
 
 Model uncertainty is not a property emitted by one number. It is a validated relationship between a score, an event, a population, and a decision. Reliability comes from maintaining that relationship under version and distribution change—and refusing to expand its scope beyond the evidence.
 
+### Cost & Telemetry Hook
+
+- [Lesson 22.6](../22-ai-economics/README.md): the abstention threshold is a decision frontier; report coverage, risk, and escalation cost at the flip point.
+- [Lesson 23.3](../23-observability-reliability/README.md): the SLI counts offered outcomes — abstentions and escalations are outcomes, not missing requests.
+- [Lesson 23.5](../23-observability-reliability/README.md): confidence and detector scores are proxy quality; recalibrate only against delayed labels with versioned evaluator provenance.
+
 ## 12 Competency Targets
 
 ```yaml

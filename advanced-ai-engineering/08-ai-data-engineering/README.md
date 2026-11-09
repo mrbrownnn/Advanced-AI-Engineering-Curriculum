@@ -648,6 +648,12 @@ A learner passes when they can replay a release, break schema-green data, distin
 
 Data engineering is controlled evidence transformation. Preserve identity, authority, eligibility, and ancestry; validate progressively; keep evaluation independent; measure drift against consequences; and never let feedback data erase the distinction between observation and model-generated belief.
 
+### Cost & Telemetry Hook
+
+- [Lesson 22.2](../22-ai-economics/README.md): cost a dataset release fully loaded — labeling, adjudication, dedup compute, and deletion propagation, not storage alone.
+- [Lesson 23.1](../23-observability-reliability/README.md): emit dataset version, lineage ID, and gate result with every training and eval run.
+- [Lesson 23.5](../23-observability-reliability/README.md) and [Lesson 23.6](../23-observability-reliability/README.md): feedback labels arrive late and are model-influenced; govern them as telemetry, and separate drift alarms from data incidents.
+
 ## 12 Competency Targets
 
 ```yaml

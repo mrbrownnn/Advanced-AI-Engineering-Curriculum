@@ -606,7 +606,7 @@ These follow from stated assumptions (**D**, CLM-001, CLM-003, CLM-004, CLM-008,
 
 **FRONTIER** (each scoped to what was read)
 
-- [LiveBench](https://proceedings.iclr.cc/paper_files/paper/2025/hash/e4a46394ba5378b3f9a186a5b4c650d1-Abstract-Conference.html) — White et al., ICLR 2025. Abstract re-opened 2026-10-01. Frequently updated questions from recent sources, objective ground-truth scoring, and varied tasks (**O**, CLM-012). No result figure from it is used here.
+- [LiveBench](https://arxiv.org/abs/2406.19314) — White et al., ICLR 2025 (arXiv v2 comment: "ICLR 2025 Spotlight"). Abstract re-opened 2026-11-09; the earlier ICLR proceedings link was unreachable. Frequently updated questions from recent sources, objective ground-truth scoring, and varied tasks (**O**, CLM-012). No result figure from it is used here.
 - [JudgeArena](https://arxiv.org/abs/2608.02620) — Lushtaku et al., 2026, arXiv v1. Abstract-level, opened 2026-10-01. One interface over several judge benchmarks with swappable judges and metadata logging (**O**, CLM-017). Its claims about tuned open judges are author-reported and not reproduced; its adoption is unknown.
 - The wider 2025–2026 landscape of evaluation-statistics tooling and sequential release testing was not surveyed (`TODO_VERIFY`, CLM-025).
 
@@ -793,6 +793,12 @@ A learner successfully completing Module 15 must be able to:
 - **The Core Invariant**: Evaluation is a versioned measurement-and-decision system.
 - **The Evidence Path**: decision/population → sampled observations → graders → block-level estimates → explicit gates → guarded online validation.
 - Credibility comes from population fit, valid observations, explicit value judgments, complete denominators, and falsifiable links to production outcomes—not from a precise-looking score.
+
+### Cost & Telemetry Hook
+- [Lesson 22.1](../22-ai-economics/README.md): report evaluation cost per offered item, counting failed, retried, and unfinished runs in the denominator.
+- [Lesson 22.3](../22-ai-economics/README.md): record dated grader/judge prices and reconcile run cost against the provider invoice.
+- [Lesson 23.1](../23-observability-reliability/README.md): emit run, dataset, harness, and grader versions as pinned signal attributes.
+- [Lesson 23.5](../23-observability-reliability/README.md): treat online judge scores as proxies; join delayed labels before trusting offline-to-online transfer.
 
 ## 12 Competency Targets
 

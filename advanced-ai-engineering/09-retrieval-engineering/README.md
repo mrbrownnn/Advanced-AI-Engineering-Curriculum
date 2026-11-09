@@ -609,6 +609,12 @@ A learner passes when they can reproduce BM25 behavior, validate embedding/metri
 
 Retrieval is a chain of lossy transformations. Instrument every candidate and lifecycle boundary, compare approximation with exact search, compare rankings with relevance judgments, and accept complexity only where it improves the declared production frontier.
 
+### Cost & Telemetry Hook
+
+- [Lesson 22.1](../22-ai-economics/README.md): cost per query that meets the declared recall/nDCG target, including reranker and fusion stages.
+- [Lesson 22.4](../22-ai-economics/README.md): a query or embedding cache hit counts only if it passes the same index/embedding-version check as a miss.
+- [Lesson 23.1](../23-observability-reliability/README.md) and [Lesson 23.4](../23-observability-reliability/README.md): emit index and embedding version, candidate depth per stage, and ANN-versus-exact audit results; burn alerts on end-to-end latency, not per-stage microbenchmarks.
+
 ## 12 Competency Targets
 
 ```yaml

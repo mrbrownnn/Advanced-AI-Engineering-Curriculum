@@ -41,14 +41,14 @@ mechanisms:
   - {id: "MECH-03", description: "Training parallelism composes TP/SP collectives, PP schedules, CP block exchange or K/V gather, and EP all-to-all; every dimension includes backward dependencies and must be mapped to topology.", evidence_ids: ["CLM-009", "CLM-010", "CLM-011", "CLM-013", "CLM-014"], derived_from: []}
   - {id: "MECH-04", description: "Gradient buckets become ready during backward and launch asynchronous collectives; useful overlap depends on readiness order, bucket granularity, independent compute, and the final exposed tail.", evidence_ids: ["CLM-015", "CLM-016"], derived_from: ["MECH-03"]}
   - {id: "MECH-05", description: "Low-precision training is a recipe: encoding, scale timing and granularity, rounding, accumulator/output precision, operator coverage, master-state precision, and long-horizon validation act together.", evidence_ids: ["CLM-017", "CLM-018", "CLM-019", "CLM-020", "CLM-021", "CLM-022", "CLM-023", "CLM-024"], derived_from: []}
-  - {id: "MECH-06", description: "Restart economics balances checkpoint stalls, expected lost progress, restart time, and durability; asynchronous staging shrinks exposed stalls only if persistence keeps up and completion is verified.", evidence_ids: ["CLM-025", "CLM-026", "CLM-027", "CLM-028", "CLM-029", "CLM-030"], derived_from: []}
+  - {id: "MECH-06", description: "Restart economics balances checkpoint stalls, expected lost progress, restart time, and durability; asynchronous staging shrinks exposed stalls only if persistence keeps up and completion is verified.", evidence_ids: ["CLM-025", "CLM-027", "CLM-028", "CLM-029", "CLM-030"], derived_from: []}
 
 mathematical_models:
   - {id: "MATH-01", description: "ZeRO Adam state bytes per rank: stage 1 = 4Psi+12Psi/N, stage 2 = 2Psi+14Psi/N, stage 3 = 16Psi/N; add activations, workspaces, allocator reserve, and transient gathers separately.", evidence_ids: ["CLM-001"], derived_from: ["MECH-01"]}
   - {id: "MATH-02", description: "ZeRO bandwidth model: stages 1/2 communicate 2Psi elements per step; stage 3 communicates 3Psi. Ring physical bytes per rank for one collective over S bytes are approximately 2(n-1)S/n.", evidence_ids: ["CLM-002", "CLM-016"], derived_from: ["MECH-01"]}
   - {id: "MATH-03", description: "GPT-style activation approximation: sbh(34+5as/h) bytes/layer under cited assumptions; TP+SP divides by t; selective recomputation leaves about 34sbh/t; full layer checkpointing about 2sbh before partitioning.", evidence_ids: ["CLM-007"], derived_from: ["MECH-02"]}
   - {id: "MATH-04", description: "Ideal-compute-normalized 1F1B bubble beta=(p-1)/m and interleaved beta=(p-1)/(mv); elapsed idle fraction is beta/(1+beta).", evidence_ids: ["CLM-010"], derived_from: ["MECH-03"]}
-  - {id: "MATH-05", description: "Blocking-checkpoint waste W(tau) approximately C/tau + tau/(2M) + R/M; stationary useful-work interval tau=sqrt(2CM) under Young's first-order assumptions.", evidence_ids: ["CLM-026", "CLM-030"], derived_from: ["MECH-06"]}
+  - {id: "MATH-05", description: "Blocking-checkpoint waste W(tau) approximately C/tau + tau/(2M) + R/M; stationary useful-work interval tau=sqrt(2CM) under first-order assumptions.", evidence_ids: ["CLM-030"], derived_from: ["MECH-06"]}
 
 implementation_mechanisms:
   - {id: "IMPL-01", description: "Pinned PyTorch fully_shard installs module hooks around per-parameter DTensors; grouped collectives all-gather before compute and reduce-scatter gradients after backward, with HSDP optionally adding an all-reduce.", evidence_ids: ["CLM-004"], derived_from: ["MECH-01"]}
@@ -67,7 +67,7 @@ failure_modes:
 
 production_connections:
   - {id: "PROD-01", description: "A training plan records rank mesh, parallel degrees, topology, precision recipe, memory terms, collective buckets, schedule, checkpoint durability, and rollback state as one coupled contract.", evidence_ids: ["CLM-004", "CLM-019", "CLM-028"], derived_from: ["MECH-01", "MECH-03", "MECH-05", "MECH-06"]}
-  - {id: "PROD-02", description: "Operational interruption traces establish that restart economics matters at scale, but checkpoint intervals must be fitted to each system's observed failures and checkpoint path rather than copied from another run.", evidence_ids: ["CLM-025", "CLM-026", "CLM-030"], derived_from: ["MECH-06"]}
+  - {id: "PROD-02", description: "Operational interruption traces establish that restart economics matters at scale, but checkpoint intervals must be fitted to each system's observed failures and checkpoint path rather than copied from another run.", evidence_ids: ["CLM-025", "CLM-030"], derived_from: ["MECH-06"]}
 
 research_connections:
   - {id: "RESEARCH-01", description: "Zero-bubble and bounded-inconsistency pipelines explore different schedule/semantics frontiers beyond synchronous 1F1B.", evidence_ids: ["CLM-011", "CLM-012"], derived_from: ["MECH-03"]}
@@ -75,7 +75,7 @@ research_connections:
   - {id: "RESEARCH-03", description: "Long-horizon FP8 instability and 2026 checkpoint systems show why proxy runs and blocking-checkpoint assumptions remain incomplete evidence for frontier runs.", evidence_ids: ["CLM-023", "CLM-025", "CLM-027", "CLM-029"], derived_from: ["MECH-05", "MECH-06"]}
 
 todo_verify:
-  - {id: "TODO-01", description: "Exact Daly higher-order closed-form variant and validity boundary remain TODO_VERIFY because publisher full text was inaccessible; module quotes only Young's first-order expression.", evidence_ids: ["CLM-026"], derived_from: ["MATH-05"]}
+  - {id: "TODO-01", description: "Young (1974) and Daly (2006) primary-source statements remain TODO_VERIFY because publisher full text was inaccessible (ACM 403; Elsevier closed access); the module uses only its own first-order derivation and quotes neither formula.", evidence_ids: ["CLM-030"], derived_from: ["MATH-05"]}
 
 candidate_capabilities:
   - {capability: "Build and reconcile a per-rank training memory and communication ledger for DDP, ZeRO stages, FSDP1, and FSDP2.", mapped_mechanisms: ["MECH-01", "MATH-01", "MATH-02", "IMPL-01", "FAIL-01", "FAIL-02"]}

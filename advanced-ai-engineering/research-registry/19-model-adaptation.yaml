@@ -114,7 +114,7 @@ claims:
     concepts: [grpo, group_baseline, verifiable_reward]
     confidence: high
     currentness_status: "WORKLOAD-DEPENDENT"
-    evidence: [{ source_type: paper, tier: 1, title: "DeepSeekMath: Pushing the Limits of Mathematical Reasoning in Open Language Models", authors: "Zhihong Shao, Peiyi Wang, Qihao Zhu, Runxin Xu, Junxiao Song, Xiao Bi, Haowei Zhang, Mingchuan Zhang, Y.K. Li, Y. Wu, Daya Guo", year: "2024", url: "https://arxiv.org/abs/2402.03300", section: "Section 4.1.1 From PPO to GRPO; Section 4.1.2 Outcome Supervision RL with GRPO", accessed_at: "2026-09-27" }]
+    evidence: [{ source_type: paper, tier: 1, title: "DeepSeekMath: Pushing the Limits of Mathematical Reasoning in Open Language Models", authors: "Zhihong Shao, Peiyi Wang, Qihao Zhu, Runxin Xu, Junxiao Song, Xiao Bi, Haowei Zhang, Mingchuan Zhang, Y. K. Li, Y. Wu, Daya Guo", year: "2024", url: "https://arxiv.org/abs/2402.03300", section: "Section 4.1.1 From PPO to GRPO; Section 4.1.2 Outcome Supervision RL with GRPO", accessed_at: "2026-09-27" }]
     limitations: ["When all group rewards are equal the raw normalized advantage is 0/0; implementations add an epsilon or a zero-variance branch, and the reward term then contributes no gradient while any KL term still does.", "Scope: GRPO is widely used for RL with verifiable rewards; this does not make it a general default, and later recipes change its normalization and KL terms (CLM-017, CLM-018, CLM-029).", "Results depend on reward validity."]
     applicability: "RL fine-tuning with programmatic or model-based rewards."
     curriculum_usage: { lessons: ["19.5"], labs: ["LAB-C"], assessments: ["Mastery-19"] }

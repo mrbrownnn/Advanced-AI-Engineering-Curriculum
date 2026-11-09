@@ -24,9 +24,9 @@ claims:
         title: "Attention Is All You Need"
         authors: "Ashish Vaswani, Noam Shazeer, Niki Parmar, Jakob Uszkoreit, Llion Jones, Aidan N. Gomez, Lukasz Kaiser, Illia Polosukhin"
         year: "2017"
-        url: "https://proceedings.neurips.cc/paper/2017/hash/3f5ee243547dee91fbd053c1c4a845aa-Abstract.html"
+        url: "https://arxiv.org/abs/1706.03762"
         section: "Sections 3.2.1 and 3.2.2"
-        accessed_at: "2026-09-25"
+        accessed_at: "2026-11-09"
     limitations:
       - "The original paper is an encoder-decoder architecture; modern decoder-only models change normalization, position encoding, activation, attention head sharing, and implementation details."
       - "The equation defines semantics, not a required kernel materialization strategy."
@@ -48,9 +48,9 @@ claims:
         title: "Root Mean Square Layer Normalization"
         authors: "Biao Zhang, Rico Sennrich"
         year: "2019"
-        url: "https://proceedings.neurips.cc/paper/2019/hash/1e8a19426224ca89e83cef47f1e7f53b-Abstract.html"
+        url: "https://arxiv.org/abs/1910.07467"
         section: "Section 4"
-        accessed_at: "2026-09-25"
+        accessed_at: "2026-11-09"
       - source_type: "source_code"
         tier: 1
         title: "Transformers LlamaRMSNorm"

@@ -576,6 +576,12 @@ A learner successfully completing Module 20 must be able to:
 - **The Distributed Path**: fit → placement (replicas, then groups inside the fastest link domain) → communication budget with units → phase specialization only if transfer bytes/s fit the links and the SLO regime calls for it → routing bounded by load → spares per failure domain.
 - Inference is forward-only. Decode is latency-dominated and autoregressive; prefill is bandwidth-dominated and parallelizable. Most distributed-inference mistakes come from applying the intuition of one to the other.
 
+### Cost & Telemetry Hook
+- [Lesson 22.2](../22-ai-economics/README.md): cost a placement plan as fully loaded GPU-hours per offered task, including spares and idle group capacity, not per-GPU price.
+- [Lesson 22.6](../22-ai-economics/README.md): treat the replica-versus-TP and colocated-versus-disaggregated choice as a constrained frontier; report the flip point in workload mix or link bandwidth.
+- [Lesson 23.1](../23-observability-reliability/README.md): emit per-request group, rank, and phase spans, plus KV-transfer bytes and wait time, under a pinned signal contract.
+- [Lesson 23.6](../23-observability-reliability/README.md): tag failures by failure domain so a group outage, a straggler, and a routing hotspot are distinguishable in incidents.
+
 ## 12 Competency Targets
 
 ```yaml

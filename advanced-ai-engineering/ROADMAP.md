@@ -56,5 +56,6 @@ Expert Track remains outside the 26-week core budget. Modules 25–28 are author
 
 - **Evidence discipline** — methodology from Module 00 applied in every lab.
 - **Observability** — introduced in Modules 02 and 04, deepened in every module, dedicated Module 23.
+- **Cost & telemetry** — each module 00–21 ends with a *Cost & Telemetry Hook* naming the Module 22/23 lessons that apply to its artifacts.
 - **Security** — surfaces in agents, harnesses, and retrieval before the dedicated Module 18.
 - **Capstone** — absorbs artifacts from Module 04 onward.

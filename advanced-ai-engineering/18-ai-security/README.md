@@ -673,10 +673,10 @@ Papers quoted with a number were opened in full text (arXiv HTML) on 2026-10-01.
 *EC-4 — CaMeL* (CLM-011)
 - *Version/full-text pointers*: arXiv:2503.18813v2, 24 Jun 2025; §§3, 3.1, 6, 7, 9.3; Tables 1, 2, 4. Version 1 not read.
 - *System*: privileged planner, quarantined model without tool access, custom data-flow interpreter, policies before each tool call.
-- *Tasks/denominator*: AgentDojo; 97 benign tasks and 949 attack cases. AgentDojo v3 reports 629, so exact suite version is `TODO_VERIFY`.
+- *Tasks/denominator*: AgentDojo; 97 benign tasks and 949 attack cases. AgentDojo v3 reports 629; the CaMeL v2 text does not state which AgentDojo suite version produced 949 (full text re-searched 2026-11-09).
 - *Attacker knowledge/budget*: AgentDojo built-in attack; no adaptive attack against CaMeL.
 - *Metric/baseline/result*: task success versus same model's native tool-calling API. Table 2 native → CaMeL: o3 high 84.5→77.3%; o4-mini 79.4→76.3%; Claude 4 Sonnet 86.6→74.2%; Gemini 2.5 Pro 73.2→41.2%; Gemini 2.5 Flash 55.7→35.1%. Table 4 successful attacks out of 949: 0 for o3/Gemini Pro, 1 for o4-mini, 11 for Claude 4 Sonnet. Median token ratios 2.82× input and 2.73× output.
-- *Status/limits*: author-reported, not reproduced. Meaning of Table 2 ± values was not confirmed (`TODO_VERIFY`). Text-only attacks are out of scope; side channels remain; interpreter verification is future work; data-dependent actions reduce utility.
+- *Status/limits*: author-reported, not reproduced. Table 2's caption does not define its ± values (re-checked 2026-11-09); they are not interpreted here. Text-only attacks are out of scope; side channels remain; interpreter verification is future work; data-dependent actions reduce utility.
 
 *EC-5 — AgentDojo* (CLM-013)
 - *Version/full-text pointers*: arXiv:2406.13352v3, 24 Nov 2024; §§3–5; Tables 1, 3–5.
@@ -916,6 +916,11 @@ A learner must be able to:
 - **Path**: untrusted source → context → proposed action → principal/provenance/risk/budget check → sandboxed, destination-authorized, budgeted, audited effect.
 - Detectors lower probabilities; architecture removes paths. Evaluate after attacker adapts.
 - A number needs denominator, protocol, baseline. A ceiling is a bound only when every factor is enforced.
+
+### Cost & Telemetry Hook
+- [Lesson 22.1](../22-ai-economics/README.md): report defense cost per offered task, including blocked, confirmed, and retried actions.
+- [Lesson 23.3](../23-observability-reliability/README.md): count blocked or aborted actions as offered outcomes, not dropped requests.
+- [Lesson 23.6](../23-observability-reliability/README.md): govern audit-trail and ledger telemetry; keep security-sensitive content out of general traces.
 
 ## 12 Competency Targets
 

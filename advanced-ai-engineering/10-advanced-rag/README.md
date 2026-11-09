@@ -769,6 +769,12 @@ A learner passes when they can demonstrate query-visible freshness rather than i
 
 RAG is a versioned evidence-control loop. Preserve identity across every transformation, measure visibility at the query boundary, treat cache/fallback state as part of the read contract, treat context as constrained selection, keep contradictions explicit, require claim-level support, and choose architecture from matched evidence rather than fashion.
 
+### Cost & Telemetry Hook
+
+- [Lesson 22.1](../22-ai-economics/README.md): cost per *supported* answer — denominator counts claim-level-supported answers, not requests or retrieved passages.
+- [Lesson 22.4](../22-ai-economics/README.md): retrieval and answer caches are part of the read contract; cost a hit only if it passes the same version/freshness check as a miss.
+- [Lesson 23.1](../23-observability-reliability/README.md) and [Lesson 23.5](../23-observability-reliability/README.md): emit request/context/citation lineage (document ID + version per retrieved chunk); treat citation-support scores as proxy quality with delayed labels.
+
 ## 12 Competency Targets
 
 ```yaml

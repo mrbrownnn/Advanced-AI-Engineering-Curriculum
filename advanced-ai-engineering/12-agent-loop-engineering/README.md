@@ -726,6 +726,12 @@ A learner successfully completing Module 12 must be able to:
 - **The Control Path**: `state → proposal → validation/authorization → execution → observation/effect verification → progress decision → terminal state or next bounded step`.
 - Reliability comes from typed transitions, external authority, observable effects, classified recovery, explicit stops, and trajectory-level falsification—not from letting the model continue until its prose sounds complete.
 
+### Cost & Telemetry Hook
+
+- [Lesson 22.1](../22-ai-economics/README.md): cost per verified task success — failed and step-limit-terminated trajectories stay in the cost numerator.
+- [Lesson 22.3](../22-ai-economics/README.md): the pre-dispatch reservation ledger is the runtime cost record; reconcile it against billed usage.
+- [Lesson 23.1](../23-observability-reliability/README.md) and [Lesson 23.3](../23-observability-reliability/README.md): emit one span per step (proposal, validation, tool call, observation) plus the terminal reason; SLI is the offered task outcome, not loop completion.
+
 ## 12 Competency Targets
 
 ```yaml

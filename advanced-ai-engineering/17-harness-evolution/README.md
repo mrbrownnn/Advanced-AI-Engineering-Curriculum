@@ -592,6 +592,12 @@ A learner successfully completing Module 17 must be able to:
 - **The Change Path**: manifest diff → validity → paired flips → governed optimization → shadow → powered canary → ramp or state-aware rollback → ledger.
 - Aggregate scores approve nothing on their own; paired block gates, independent scoped confirmation, concurrent controls, and rollback-state checks provide complementary—not absolute—evidence.
 
+### Cost & Telemetry Hook
+- [Lesson 22.3](../22-ai-economics/README.md): re-price every migration candidate with dated prices; reconcile canary spend against invoice.
+- [Lesson 22.6](../22-ai-economics/README.md): compare candidate manifests on a constrained cost/quality frontier and record flip points.
+- [Lesson 23.1](../23-observability-reliability/README.md): emit the manifest hash and model ID on every span so canary and control are separable.
+- [Lesson 23.4](../23-observability-reliability/README.md): gate canary ramp on offered-outcome SLI burn rate, not before/after dashboards.
+
 ## 12 Competency Targets
 
 ```yaml

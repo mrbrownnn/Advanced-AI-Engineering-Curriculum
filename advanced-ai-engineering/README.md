@@ -82,11 +82,15 @@ advanced-ai-engineering/
 ├── 17-harness-evolution/             Migration, optimization, rollout
 ├── 18-ai-security/                   Threat models and authority controls
 ├── 19-model-adaptation/              Fine-tuning decisions, data, and gates
-├── 20-distributed-inference/         (outline) Parallelism and communication
-├── 21-multimodal-ai-systems/         (outline) Multimodal pipelines
-├── 22-ai-economics/                  (outline) Cost and routing
-├── 23-observability-reliability/     (outline) Tracing, SLOs, incidents
-├── 24-model-system-codesign/         (outline) Architecture-system coupling
+├── 20-distributed-inference/         Parallelism and communication
+├── 21-multimodal-ai-systems/         Multimodal pipelines
+├── 22-ai-economics/                  Cost and routing
+├── 23-observability-reliability/     Tracing, SLOs, incidents
+├── 24-model-system-codesign/         Architecture-system coupling
+├── 25-pretraining-dynamics-scaling/ Expert: scaling laws, μP, instabilities
+├── 26-distributed-low-precision-training/ Expert: ZeRO/FSDP, FP8
+├── 27-rl-post-training-systems/     Expert: RLVR, GRPO estimators, async RL
+├── 28-moe-training-dynamics/        Expert: routing, load balancing
 ├── capstone/                         AI Runtime Platform project
 ├── graduation/                       Final architecture review
 ├── research-registry/                Evidence registries per module
@@ -118,4 +122,4 @@ Repository-level material outside this folder: [paper library](../paper-library/
 
 ## Status
 
-Modules 00–19 are authored against the [instructional schema](INSTRUCTIONAL_SCHEMA.md), each with a research registry and knowledge model, and are being corrected under the audit in [`../audit.md`](../audit.md). Modules 20–24 are outlines and are not yet curriculum content. Run `python tools/validate_curriculum.py` for the static checks; passing them does not certify technical correctness.
+Modules 00–24 (core) and 25–28 (expert) are authored against the [instructional schema](INSTRUCTIONAL_SCHEMA.md), each with a research registry and knowledge model. Modules 29–36 are proposed in [EXPERT-TRACK.md](EXPERT-TRACK.md). Run `python tools/validate_curriculum.py` for the static checks; passing them does not certify technical correctness.

@@ -647,10 +647,10 @@ These items follow from stated assumptions (**D**, CLM-001, CLM-004, CLM-005, CL
 **DOCUMENTED BEHAVIOR OF NAMED RUNTIMES AND APIS** (observed, scoped to the named source)
 
 - [Temporal Workflow Definition](https://docs.temporal.io/workflow-definition) — opened 2026-10-01. Workflow code must be deterministic to support replay; emitted commands are compared with the existing event history; nondeterministic work belongs in activities; versioning or patching is required for command-changing edits (**O**, CLM-002, CLM-003, CLM-012).
-- [Azure Durable orchestrator code constraints](https://learn.microsoft.com/en-us/azure/azure-functions/durable/durable-functions-code-constraints) — page dated 2026-08-24, opened 2026-10-01. Orchestrators replay and must be deterministic; clocks, random values, environment variables, and direct I/O must go through context APIs or activities (**O**, CLM-002).
+- [Azure Durable orchestrator code constraints](https://learn.microsoft.com/en-us/azure/durable-task/common/durable-task-code-constraints) — opened 2026-10-01; URL redirect and page date (2026-10-12) re-checked 2026-11-09. Orchestrators replay and must be deterministic; clocks, random values, environment variables, and direct I/O must go through context APIs or activities (**O**, CLM-002).
   - *Scope of both*: two runtime families that use replay. Not every durable engine does, and neither page describes external-effect safety.
-- [Temporal Cloud limits](https://docs.temporal.io/cloud/limits), [Events and Event History](https://docs.temporal.io/workflow-execution/event), and [Child Workflows](https://docs.temporal.io/child-workflows) — opened 2026-10-01. Event-history warning and termination thresholds, and the child-workflow partitioning guidance (**O**, CLM-013, CLM-020). One runtime's documented limits; they can change.
-- [The Idempotency-Key HTTP Header Field](https://datatracker.ietf.org/doc/html/draft-ietf-httpapi-idempotency-key-header) (draft-07, 2025-10-15, an expired Internet-Draft) and [one payment API's idempotent-requests page](https://docs.stripe.com/api/idempotent_requests) — opened 2026-10-01 (**O**, CLM-017). A draft and one vendor's API; neither is a standard that endpoints can be assumed to follow.
+- [Temporal Cloud limits](https://docs.temporal.io/evaluate/cloud/limits), [Events and Event History](https://docs.temporal.io/workflow-execution/event), and [Child Workflows](https://docs.temporal.io/child-workflows) — opened 2026-10-01. Event-history warning and termination thresholds, and the child-workflow partitioning guidance (**O**, CLM-013, CLM-020). One runtime's documented limits; they can change.
+- [The Idempotency-Key HTTP Header Field](https://datatracker.ietf.org/doc/html/draft-ietf-httpapi-idempotency-key-header-07) (draft-07, 2025-10-15, an expired Internet-Draft) and [one payment API's idempotent-requests page](https://docs.stripe.com/api/idempotent_requests) — opened 2026-10-01 (**O**, CLM-017). A draft and one vendor's API; neither is a standard that endpoints can be assumed to follow.
 
 **INDUSTRY PREVALENCE:** not established by this module. No adoption survey was opened (`TODO_VERIFY`, CLM-023).
 
@@ -658,7 +658,7 @@ These items follow from stated assumptions (**D**, CLM-001, CLM-004, CLM-005, CL
 
 **FRONTIER** (each scoped to what was read)
 
-- Durable-execution integrations for agent frameworks. One agent framework's documentation lists integrations with several durable-execution systems, and one runtime vendor publishes recipes for durable agent loops, tool calling, and human-in-the-loop approval ([framework page](https://pydantic.dev/docs/ai/integrations/durable_execution/overview/), [vendor cookbook](https://docs.temporal.io/ai-cookbook); both opened 2026-10-01) (**O**, CLM-022). This shows availability. It does not show adoption, and it does not show that the integrations implement the receiver contract of Lesson 14.2.
+- Durable-execution integrations for agent frameworks. One agent framework's documentation lists integrations with several durable-execution systems, and one runtime vendor publishes recipes for durable agent loops, tool calling, and human-in-the-loop approval ([framework page](https://pydantic.dev/docs/ai/capabilities/durable_execution/overview/), [vendor cookbook](https://docs.temporal.io/ai/cookbook); both opened 2026-10-01) (**O**, CLM-022). This shows availability. It does not show adoption, and it does not show that the integrations implement the receiver contract of Lesson 14.2.
 - Replay-safe AI telemetry and richer durable event streams were named in the earlier revision without a source. No primary source was opened (`TODO_VERIFY`, CLM-023).
 
 **LEGACY / INSUFFICIENT:** save the chat transcript and call it a checkpoint; resume from a step number without effect evidence; assume a timeout means no commit; add an idempotency key without atomic receiver support; call compensation rollback; rely on an unfenced lease; block a worker during HITL; upgrade workflow code without replay tests.
@@ -823,6 +823,13 @@ A learner successfully completing Module 14 must be able to:
 - **The Core Invariant**: A durable runtime remembers decisions, while external reality has independent commit points.
 - **The Recovery Path**: history → deterministic state/command → activity attempt → external effect evidence → commit, reconcile, compensate, or escalate.
 - Correctness comes from history plus effect identity, atomic idempotency or reconciliation, fencing, explicit compensation, durable coordination, and adversarial crash testing—not from replay alone.
+
+### Cost & Telemetry Hook
+
+- [Lesson 22.2](../22-ai-economics/README.md): durable history, timers, and retained state are fixed cost; activity retries are marginal cost — count both per completed workflow.
+- [Lesson 22.3](../22-ai-economics/README.md): bill model/tool calls per activity attempt; replay must not re-record cost for attempts already in history.
+- [Lesson 23.2](../23-observability-reliability/README.md): propagate trace context across activity retries and worker takeover; emit state/activity/effect telemetry keyed by operation ID so replay does not duplicate spans.
+- [Lesson 23.4](../23-observability-reliability/README.md): burn alerts on unreconciled effects and history-limit warnings, not only on workflow failures.
 
 ## 12 Competency Targets
 

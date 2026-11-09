@@ -671,6 +671,12 @@ A learner successfully completing Module 19 must be able to:
 - **The Adaptation Path**: failure class → decision → memory plan → data manifest with provenance → objective → paired three-part gate with margins → canary → promote or roll back.
 - LoRA trades capacity for retention, and its targets and scale are explicit choices. Preference objectives are only as good as their rewards, normalization, and drift monitoring. Safety is re-measured on every refresh, and poisoning is prevented upstream because the gate cannot prove its absence.
 
+### Cost & Telemetry Hook
+- [Lesson 22.2](../22-ai-economics/README.md): compare adaptation cost (training, eval, hosting) against prompt, retrieval, or routing alternatives as build-versus-API.
+- [Lesson 22.5](../22-ai-economics/README.md): if the adapted model sits in a router or cascade, cost escalation to the base model.
+- [Lesson 23.1](../23-observability-reliability/README.md): emit base model, adapter, and checkpoint hash on every request span.
+- [Lesson 23.5](../23-observability-reliability/README.md): monitor post-release drift with proxy quality; reconcile with delayed labels before the next refresh.
+
 ## 12 Competency Targets
 
 ```yaml

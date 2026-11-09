@@ -624,7 +624,7 @@ Section pointers below were re-checked against the linked full texts on 2026-09-
   - *Why it matters*: Evaluates phase disaggregation under explicit workloads and exposes placement and KV-transfer trade-offs (**O**, CLM-014).
   - *Key Sections*: Sections 2.1–2.3 and Section 3 (prefill/decode characterization and trade-off analysis); Section 4 (placement and online scheduling).
   - *Scope*: Evidence that phase behavior is workload- and hardware-dependent, and that disaggregation is a candidate intervention in the Mastery problem. Detailed disaggregated placement belongs to Module 20.
-- *Splitwise: Efficient Generative LLM Inference Using Phase Splitting* (Patel et al., ISCA 2024). — [Microsoft Research page](https://www.microsoft.com/en-us/research/publication/splitwise-efficient-generative-llm-inference-using-phase-splitting/) · [arXiv:2311.18677](https://arxiv.org/abs/2311.18677)
+- *Splitwise: Efficient Generative LLM Inference Using Phase Splitting* (Patel et al., ISCA 2024). — [DOI](https://doi.org/10.1109/ISCA59077.2024.00019) · [arXiv:2311.18677](https://arxiv.org/abs/2311.18677)
   - *Reading Priority*: DIRECTED_READ for understanding phase separation economics and network KV transfer overheads.
   - *Key Sections*: Section III (Characterization); Section IV-C (KV-cache transfer).
   - *Scope*: Characterization of its own production traces and hardware. It is a comparison point, not a default architecture.
@@ -820,6 +820,12 @@ A learner successfully completing Module 04 must be able to:
 - **The Path to High Goodput**:
   $$\text{Arrivals} \to \text{Overload Controls} \to \text{Queue/Admission} \to \text{Scheduling and Batching} \to \text{GPU/KV Constraints} \to \text{Completion, Rejection, or Cancellation}.$$
 - When degradation occurs, align client, queue, scheduler, host, GPU, KV-allocation, and network timelines; rank competing explanations; intervene; then repeat the same measurements. No single ordering or signal identifies every incident.
+
+### Cost & Telemetry Hook
+
+- [Lesson 22.1](../22-ai-economics/README.md) and [Lesson 22.2](../22-ai-economics/README.md): cost capacity plans per goodput-satisfying request, counting rejected, cancelled, and preempted work in the denominator and fixed reserved capacity.
+- [Lesson 23.3](../23-observability-reliability/README.md): define TTFT/ITL SLIs over offered requests, including shed and timed-out ones, not only completions.
+- [Lesson 23.4](../23-observability-reliability/README.md): turn the module's multi-tenant SLOs into error budgets with multiwindow burn alerts on queue delay and goodput.
 
 ## 12 Competency Targets
 
