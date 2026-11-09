@@ -71,17 +71,20 @@ What is the logical KV payload per retained token under explicit architecture as
 `Logical KV payload bytes per retained token = 2 (K and V) × bytes_per_element × cached_layers × num_kv_heads × head_dim` (**D**, CLM-002)
 *Assumptions*: Uniform uncompressed decoder self-attention with one stored K and V vector per cached layer/head/token. This excludes sharding/replication, block rounding, alignment, scales/metadata, allocator state, latent attention, sliding windows, recurrent/state-space state, and hybrid layouts. `bytes_per_element` is 2 for FP16/BF16.
 
+*Where each factor comes from*: for every cached token, each cached layer stores one K vector and one V vector (factor 2) per KV head; each vector has `head_dim` elements; each element costs `bytes_per_element` bytes. Multiplying the counts gives elements per token, and the dtype size converts elements to bytes. Query heads do not appear: only KV heads are cached, which is why MQA (`num_kv_heads = 1`) and GQA (`num_kv_heads` < query heads) shrink the payload relative to MHA.
+
 **Latent-attention variant (MLA):** the formula above does not apply. Using the retained state from Module 01 Lesson 1.7 (**O**, CLM-014):
 `Logical MLA payload bytes per retained token = bytes_per_element × cached_layers × (d_c + d_h^R)`
+where: $d_c$ is the width (element count) of the joint KV latent $c^{KV}$ and $d_h^R$ the width of the head-shared RoPE key $k^R$. There is no factor 2 and no KV-head factor, because one shared latent stands in for both K and V across all heads.
 *Assumptions*: one latent and one decoupled RoPE key per layer per token, no per-head K/V cached, no padding. Whether a runtime stores the latent before or after its normalization, in which dtype, and padded to what width is runtime-specific (`TODO_VERIFY` per runtime).
 
 **Worked Example:**
 - *Input (synthetic MHA configuration)*: 32 layers, 32 query heads, 32 KV heads (MHA), head_dim=128, FP16.
-- *Steps*: `Bytes/token = 2 × 2 × 32 × 32 × 128 = 524,288 bytes = 0.5 MiB`; a 2,048-token sequence needs $2048 \times 0.5$ MiB $= 1{,}024$ MiB $= 1$ GiB; 80 sequences need 80 GiB.
+- *Steps*: factors in formula order are K/V = 2, bytes/element = 2 (FP16), layers = 32, KV heads = 32, head_dim = 128. `Bytes/token = 2 × 2 × 32 × 32 × 128 = 524,288 bytes = 0.5 MiB` (since $524{,}288/1{,}048{,}576=0.5$, with 1 MiB $=2^{20}$ bytes); a 2,048-token sequence needs $2048 \times 0.5$ MiB $= 1{,}024$ MiB $= 1$ GiB; 80 sequences need 80 GiB.
 - *Result*: KV alone for 80 such sequences equals an 80 GiB device's capacity, so they cannot fit once weights and runtime memory are included.
 - *Input (MLA, DeepSeek-V2 paper values and released config)*: 60 layers, $d_c=512$, $d_h^R=64$, BF16 (2 bytes) assumed for the exercise.
-- *Steps*: $2 \times 60 \times 576 = 69{,}120$ bytes $= 67.5$ KiB per token (**D**, CLM-015); a 4,096-token request holds $270$ MiB.
-- *Counterexample*: inserting the config's `num_key_value_heads = 128` and `head_dim = 128` into the GQA formula gives $2\times2\times60\times128\times128=3{,}932{,}160$ bytes $=3.75$ MiB per token, about $56.9\times$ the MLA payload.
+- *Steps*: $d_c+d_h^R=512+64=576$ elements per layer; $2 \times 60 \times 576 = 69{,}120$ bytes $= 67.5$ KiB per token (**D**, CLM-015) ($69{,}120/1{,}024=67.5$); a 4,096-token request holds $270$ MiB ($4{,}096\times67.5=276{,}480$ KiB, $/1{,}024=270$ MiB).
+- *Counterexample*: inserting the config's `num_key_value_heads = 128` and `head_dim = 128` into the GQA formula gives $2\times2\times60\times128\times128=3{,}932{,}160$ bytes $=3.75$ MiB per token, about $56.9\times$ the MLA payload ($3{,}932{,}160/69{,}120\approx56.9$; equivalently $(2\times128\times128)/576$, since dtype and layers cancel).
 - *Interpretation / limits*: both are logical payloads. *Validation hierarchy*: analytical KV estimate → runtime KV allocator metrics → framework allocator metrics → process/device VRAM.
 
 **Knowledge Check:**
@@ -113,7 +116,7 @@ What are the different types of memory waste in LLM inference, and how do they m
 **Concepts & Definitions:**
 - **Abstraction Hierarchy**: Request/logical KV demand → Inference-engine allocation policy → KV block/page allocation → Framework allocator → CUDA/device allocator → Physical HBM.
 - **Reservation Waste (Logical)**: Over-allocating memory based on a predicted `max_sequence_length` that the request never reaches.
-- **Internal Fragmentation (Block level)**: Wasted space *inside* an allocated block: with block size $B$ and length $S>0$, tail slack is $B\lceil S/B\rceil-S\in[0,B-1]$ tokens per independently allocated sequence (**D**, CLM-004).
+- **Internal Fragmentation (Block level)**: Wasted space *inside* an allocated block: with block size $B$ and length $S>0$, tail slack is $B\lceil S/B\rceil-S\in[0,B-1]$ tokens per independently allocated sequence (**D**, CLM-004). Here $S$ is the sequence length in tokens, $\lceil S/B\rceil$ the number of blocks allocated (round up), and $B\lceil S/B\rceil$ the token capacity of those blocks; slack is capacity minus use. It is 0 when $S$ is a multiple of $B$ and at most $B-1$ when the last block holds one token. Example with $B=16$: $S=100$ needs $\lceil100/16\rceil=7$ blocks $=112$ slots, slack $12$; $S=1000$ needs $63$ blocks $=1008$ slots, slack $8$.
 - **External Fragmentation (Engine level)**: Free memory scattered in non-contiguous chunks, preventing large contiguous logical allocations.
 - **Allocator-level Fragmentation**: Waste caused by the OS/CUDA memory manager failing to coalesce freed segments.
 
@@ -123,6 +126,7 @@ Naive systems allocate contiguous tensors of size `max_length`. If requests fini
 **Worked Example:**
 Request A (needs 1000 tokens), Request B (needs 100), Request C (needs 1000).
 Naive continuous contiguous allocation reserves 2048 tokens per request. Total requested: 2100. Total allocated: 6144. Reservation waste: 4044 tokens.
+*Step-by-step*: requested $=1000+100+1000=2100$; allocated $=3\times2048=6144$; waste $=6144-2100=4044$ token slots, i.e. per request $1048+1948+1048$. Only $2100/6144\approx34\%$ of the reservation holds KV. For comparison, paging with $B=16$ would allocate $63+7+63=133$ blocks $=2128$ slots, leaving $28$ slots of internal slack (Lesson 3.3).
 
 **Knowledge Check:**
 1. At which layer of the abstraction hierarchy does reservation waste occur?
@@ -163,11 +167,13 @@ Paged KV separates the logical address space from physical storage.
 `offset = token_index % block_size`
 `physical_block = block_table[logical_block]`
 
+where `token_index` is 0-based (the $n$-th token has index $n-1$), `floor` is integer division, and `%` is the remainder. Together they are the quotient/remainder split `token_index = logical_block × block_size + offset`, with `0 ≤ offset < block_size`. The number of blocks a sequence of `num_tokens` needs is `ceil(num_tokens / block_size)`; a new block is needed exactly when the token being written has `offset == 0`.
+
 **Worked Example:**
 Block size B = 16. A sequence has 34 tokens.
 Logical blocks needed: ceil(34/16) = 3 blocks (Indices 0, 1, 2).
 The Block Manager allocates physical blocks: `[7, 19, 4]`.
-Token 33 (the 34th token): `logical_block = 2`. `offset = 1`. It resides at physical block `4`, offset `1`.
+Token 33 (the 34th token): `logical_block = 2`. `offset = 1` ($33 = 2\times16+1$, so `floor(33/16)=2`, `33 % 16 = 1`). It resides at physical block `4`, offset `1`.
 
 **Guided Practice:**
 `block_size = 4`.
@@ -260,7 +266,7 @@ Block feasibility at one instant is exact arithmetic: `free_after = free − dem
 - *Input — identical block state in every scenario*: `free_blocks = 10`; running `A` (expected growth +4 blocks) and `B` (+8 blocks); queued `C` needs 6 blocks for its 96-token prompt. Block size 16 tokens. A and B have full tails, so each needs a block at iterations 1, 17, 33, …; A holds 6 blocks and B 8. C emits 32 tokens and needs a block at its 1st and 17th decode iteration. On completion a request frees all its blocks.
 - *Step 1 — the invariant arithmetic*: admitting C now leaves $10-6=4$ free blocks. Note also that A+B's projected growth is 12 blocks, more than the 10 free *even without C*, so the snapshot alone cannot certify either choice.
 - *Step 2 — two completion timelines*: **T1**: A really uses all +4 blocks (64 more tokens). **T2**: A emits end-of-sequence after 12 tokens; the +4 was a `max_tokens` bound, not a forecast.
-- *Step 3 — two step-cost models*: **K1**: a decode iteration costs 20 ms for batch 1–3 (insensitive to batch in this range), plus 0.5 ms per prefill token scheduled in that iteration. **K2**: $14+6\times\text{batch}$ ms plus the same prefill term.
+- *Step 3 — two step-cost models*: **K1**: a decode iteration costs 20 ms for batch 1–3 (insensitive to batch in this range), plus 0.5 ms per prefill token scheduled in that iteration. **K2**: $14+6\times\text{batch}$ ms plus the same prefill term. Here *batch* is the number of requests resident in that iteration, so K2 gives $20$, $26$, and $32$ ms for batch 1, 2, 3; e.g. an iteration with A, B, and C resident that also runs C's 96-token prefill costs $14+6\times3+0.5\times96=80$ ms under K2, versus $20+48=68$ ms under K1.
 - *Step 4 — two policies*: **Admit now**, preempting the youngest request with recomputation on shortfall; **Delay** C until A completes.
 - *Step 5 — replay the timeline iteration by iteration* (mean gap = mean duration of the iterations in which the request emitted a token):
 
@@ -275,7 +281,7 @@ Block feasibility at one instant is exact arithmetic: `free_after = free − dem
 | T2 | K2 | Admit now | 0 | 36.00 ms | 22.44 ms | 80 ms | 952 ms |
 | T2 | K2 | Delay | 0 | 26.00 ms | 22.44 ms | 386 ms | 1,192 ms |
 
-- *How one row is computed (T1, K1, Admit now)*: iteration 1 allocates A and B's blocks (8 left), then C's 6 (2 left) and runs C's 96-token prefill: $20+0.5\times96=68$ ms. Iteration 2 gives C its next block (1 left). At iteration 17 A takes the last block and B needs one: shortfall, so the youngest request C is preempted, discarding 111 cached positions. C is re-admitted after A finishes (iteration 65) and re-prefills $96+16=112$ tokens: $20+56=76$ ms. A's 64 iterations: $(63\times20+68)/64=20.75$ ms. B's 128: $(126\times20+68+76)/128=20.81$ ms.
+- *How one row is computed (T1, K1, Admit now)*: iteration 1 allocates A and B's blocks (8 left), then C's 6 (2 left) and runs C's 96-token prefill: $20+0.5\times96=68$ ms. Iteration 2 gives C its next block (1 left). At iteration 17 A takes the last block and B needs one: shortfall, so the youngest request C is preempted, discarding 111 cached positions. C is re-admitted after A finishes (iteration 65) and re-prefills $96+16=112$ tokens: $20+56=76$ ms. A's 64 iterations: $(63\times20+68)/64=20.75$ ms. B's 128: $(126\times20+68+76)/128=20.81$ ms. (Each mean gap is total time of the iterations the request participated in, divided by its iteration count: A sees one 68 ms prefill iteration and 63 plain 20 ms iterations, $1{,}328/64$; B sees both C prefills, $2{,}664/128=20.8125$.)
 - *Result* (**D**, CLM-017): with the same “$10-6=4$”, T1 turns admission into a preemption and wasted prefill, so delay lowers A's and B's mean gaps under both cost models, at the cost of C's TTFT rising from 68 ms to 1,348 ms (K1). In T2 there is no preemption. B's mean gap is identical under both policies because delaying C moves C's prefill and co-residency later in B's life instead of removing them. A pays for admission: 4 ms extra mean gap under K1 but 10 ms under K2, because K2 charges every co-resident iteration.
 - *Interpretation / limits*: “delaying C protects TPOT” held for A in these four synthetic cases, failed for B in T2, and its size depended on the cost model. None of these numbers is a measurement. Real schedulers also chunk prefill, choose victims differently, and may not recompute, so treat the table as a template for the measurements below.
 
@@ -355,7 +361,7 @@ Pure round-robin load balancing often reduces cache locality, while perfect cach
 **Worked Example (synthetic):**
 - *Input*: a hot prefix is resident only on Worker 1. A request's prefill costs 150 ms on a miss and 30 ms on a hit. Current queue wait is 400 ms on Worker 1 and 50 ms on Worker 2.
 - *Steps*: TTFT estimate on Worker 1 $=400+30=430$ ms; on Worker 2 $=50+150=200$ ms.
-- *Result*: Worker 2 is better by 230 ms despite the cache miss. Routing to the hit wins only when Worker 1's wait is below $50+(150-30)=170$ ms.
+- *Result*: Worker 2 is better by 230 ms despite the cache miss. Routing to the hit wins only when Worker 1's wait is below $50+(150-30)=170$ ms. *Derivation*: with $W_1, W_2$ the queue waits and $P_{hit}, P_{miss}$ the prefill costs, Worker 1 wins when $W_1+P_{hit}<W_2+P_{miss}$, i.e. $W_1<W_2+(P_{miss}-P_{hit})$: the cache hit is worth exactly the prefill it saves, $120$ ms here.
 - *Interpretation / limits*: the break-even ignores that the miss also inserts the prefix on Worker 2 (future hits), that queue waits change as routing shifts load, and that the costs are workload-specific estimates to be measured in Lab C.
 
 **Quantitative Model / Trade-off Comparison:**
@@ -396,7 +402,11 @@ Token-selective eviction is a different mechanism: it changes which positions at
 
 **Worked Example (synthetic scale layout):**
 - *Input*: the Lesson 3.1 MHA configuration (512 KiB/token at FP16) and the Lesson 3.1 guided-practice budget (63 GiB for KV, 4,096-token requests). Assume FP8 values plus one FP32 scale per (layer, K or V, KV head, 16-token block).
-- *Steps*: FP8 payload $=256$ KiB/token. Scales $=32\times2\times32\times4$ bytes per 16 tokens $=512$ bytes/token. Total $256.5$ KiB/token, a $512/256.5=1.996\times$ reduction. Per request: $4096\times256.5$ KiB $\approx1.0020$ GiB.
+- *Steps*: FP8 payload $=256$ KiB/token. Scales $=32\times2\times32\times4$ bytes per 16 tokens $=512$ bytes/token.
+  - Payload: FP8 is 1 byte/element versus 2 for FP16, so $512/2=256$ KiB/token.
+  - Scales: one scale per (layer, K or V, KV head) per 16-token block gives $32\times2\times32=2{,}048$ scales per block; at 4 bytes each that is $8{,}192$ bytes per 16 tokens, i.e. $8{,}192/16=512$ bytes $=0.5$ KiB per token.
+  - Total and ratio: $256+0.5=256.5$ KiB/token; FP16 / FP8-with-scales $=512/256.5$.
+  - Per request: $4{,}096\times256.5=1{,}050{,}624$ KiB $=1{,}026$ MiB $=1{,}026/1{,}024\approx1.0020$ GiB. Total $256.5$ KiB/token, a $512/256.5=1.996\times$ reduction. Per request: $4096\times256.5$ KiB $\approx1.0020$ GiB.
 - *Result*: the payload-only bound moves from $\lfloor63/2\rfloor=31$ to $\lfloor63/1.0020\rfloor=62$ requests.
 - *Interpretation / limits*: this doubles a *screening* bound only. Weights, activations, dequantization kernels, any full-precision residual window, and the quality gate are unmeasured, and a different scale granularity changes the metadata term (**O**, CLM-009).
 
@@ -431,11 +441,14 @@ When is it viable to move KV blocks off the GPU and into host memory?
 **Quantitative Model / Derivation:**
 `transfer_serialization_time >= KV_payload_bytes / measured_effective_transfer_bandwidth`. Setup, synchronization, contention, conversion, and non-overlapped critical-path work add to completion time.
 
+where `KV_payload_bytes` is the KV state to move (bytes/token × tokens, Lesson 3.1) and `measured_effective_transfer_bandwidth` is the sustained rate actually observed on that path (not the link's nominal peak). Both must use the same unit family: GiB with GiB/s, or GB with GB/s ($1$ GiB $=2^{30}$ bytes, $1$ GB $=10^9$ bytes). It is a lower bound (`>=`) because it counts only the time to push the bytes; every other cost listed adds to it.
+
 **Worked Example:**
 Assume the 0.5 MiB/token configuration from Lesson 3.1.
 If a 4096-token KV cache is offloaded, `KV_payload_bytes = 4096 * 0.5 MiB = 2,048 MiB = 2 GiB`.
 For this exercise, assume measured effective host↔device transfer bandwidth is 50 GiB/s.
 The ideal serialization lower bound for fetching 2 GiB over this link is `2 GiB / 50 GiB/s = 0.04 seconds (40 ms)`.
+Unit check: if the same link were quoted as 50 GB/s ($50\times10^9$ bytes/s $\approx46.6$ GiB/s), the bound would be $2\times2^{30}/(50\times10^9)\approx0.0429$ s $\approx43$ ms, about 7% higher. This is the mismatch named in the Common Failure below.
 If restore is required before the first resumed computation, it adds at least 40 ms to that request's critical path before setup and contention. It is not automatically a per-output-token TPOT charge; placement and overlap determine which request metric moves.
 
 **Knowledge Check:**

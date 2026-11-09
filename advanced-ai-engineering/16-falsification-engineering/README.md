@@ -109,6 +109,14 @@ CheckList's minimum-functionality, invariance, and directional-expectation tests
 **Quantitative Model / Derivation:**
 For generator support $S_G$ and valid domain $D$, a property test can falsify $P$ only on sampled $x\in S_G\cap D$. Passing provides no direct evidence about $D\setminus S_G$.
 
+where:
+- $P$ is the property (predicate) under test; $x$ is one generated input or action sequence;
+- $S_G$ is the set of inputs the generator can produce with nonzero probability; $D$ is the valid domain;
+- $S_G\cap D$ ("intersection") is the inputs that are both reachable and valid — the only place a test can find a real counterexample;
+- $D\setminus S_G$ ("set difference") is the valid inputs the generator can never produce — the non-claims.
+
+*Tiny example (synthetic):* the domain allows amounts 1–100, but a generator draws amounts 1–50. Then $S_G\cap D$ covers amounts 1–50 and $D\setminus S_G$ is amounts 51–100. A million passing cases say nothing about amount 75, because amount 75 was never possible. Inputs in $S_G\setminus D$ (invalid ones the generator *can* produce) are the opposite problem: their failures are harness noise, not counterexamples.
+
 **Worked Example (synthetic):**
 - *Input*: the claim “the payment agent is robust to retries.”
 - *Steps*: (1) Predicate: for an authorized transfer intent in the declared schema, the receiver records at most one effect per logical intent. (2) Domain: opened account, amount 1–100, unique intent id, at most two attempts. (3) Oracle: the receiver-side ledger, not the client's response. (4) Generator: action sequences with a fault choice per attempt from {none, request lost, acknowledgement lost}. (5) Budget and seed. (6) Severity: critical, because money moves.
@@ -204,7 +212,9 @@ Target signature: `(INV-ONE-EFFECT, ack_lost_after_commit, receiver_effects(i1)=
 
 The run made 24 predicate calls and accepted 8 steps.
 
-*Result — minimized trace.* 2 steps, a shrink ratio of 2/8:
+*Counting the accepted steps:* deleting steps 8 and 7 (2), deleting the four `note`/`read` steps one at a time (4), simplifying fault 2 (1), and lowering the amount (1) give $2+4+1+1=8$. A **predicate call** is one execution of a candidate plus its oracle check; the table shows only selected candidates, so rejected calls outnumber the visible "no" rows.
+
+*Result — minimized trace.* 2 steps, a shrink ratio of 2/8 (minimized length ÷ original length $=0.25$; lower means more reduction):
 
 ```text
 1 open(B)
@@ -266,6 +276,8 @@ Metamorphic testing replaces a missing single-input oracle with two obligations 
 
 $$R_i(x,x')\Rightarrow R_o(f(x),f(x')).$$
 
+where $x$ is the source input, $x'$ the follow-up input, $f$ the system under test, and $\Rightarrow$ reads "if … then". In words: *if* the pair of inputs satisfies the input relation, *then* the pair of outputs must satisfy the output relation. A violation needs both halves: $R_i$ true **and** $R_o$ false. If $R_i$ is false, the implication says nothing, which is why the verdict is `NOT_APPLICABLE` rather than `PASS`.
+
 Both $x,x'$ must remain in-domain; $R_i$ must preserve or deliberately change the relevant semantics; $R_o$ must encode the expected invariant or direction. Candidate relations include permutation invariance only when order is irrelevant, citation preservation under irrelevant distractors, and equivariance under a semantics-preserving locale transform. Each is a claim to be proved for the task, not a default.
 
 A 2025 study collected 191 relations for NLP tasks, ran 36 of them on three LLMs, and manually analyzed 937 reported violations. The authors report that roughly 60% were true positives (**O**, CLM-005). That figure is author-reported for their four tasks and relations and does not transfer. Its lesson does: a large share of raw violations can come from the relation, not the system. Never assume synonym replacement, paraphrase, formatting, answer-order swap, or added context is semantically neutral for every task.
@@ -276,7 +288,15 @@ For free-form outputs, separate transformation validity from output-relation gra
 
 *An invalid relation: "recall is monotonic when the eligible corpus grows."* With $Recall@k=|Rel\cap Top_k|/|Rel|$ and fixed $k$, this is false. Counterexample: $k=1$, one relevant document $r$ with score 0.8, so $Recall@1=1$. Add one irrelevant document with score 0.9. It takes rank 1 and $Recall@1=0$ (**D**, CLM-016).
 
+where $Rel$ is the set of relevant documents, $Top_k$ the set of the first $k$ returned documents, $|\cdot|$ set size, and $k$ the cutoff (here $k$ is a rank cutoff, not the reproduction count $k$ of Lesson 16.5). The numerator can only count relevant documents that fit inside the $k$ slots, so a new higher-scoring irrelevant document pushes a relevant one out.
+
 Corpus growth has no general direction at all. With a corpus-dependent scorer such as BM25, adding irrelevant documents changes the IDF of query terms and can reorder the *old* documents. Example with $tf=1$, no length normalization, and $IDF=\ln\bigl(1+\frac{N-n+0.5}{n+0.5}\bigr)$: corpus $d_1=\{a\}$, $d_2=\{b\}$, $d_3=\{b\}$, $d_4=\{c\}$, query $\{a,b\}$. Scores are $d_1=1.204$ and $d_2=d_3=0.693$, so $d_1$ ranks first. Add three irrelevant documents containing only $a$. Now $IDF(a)=0.575$ and $IDF(b)=1.163$, and $d_2$ ranks first. If $Rel=\{d_2\}$, $Recall@1$ rose from 0 to 1; if $Rel=\{d_1\}$, it fell from 1 to 0.
+
+*Step-by-step for the BM25 example.* $N$ is the number of documents in the corpus and $n$ the number containing the term. With $tf=1$ and no length normalization, a document's score is the sum of $IDF$ over query terms it contains.
+1. Before: $N=4$. Term $a$: $n=1$, $IDF(a)=\ln\bigl(1+\frac{4-1+0.5}{1+0.5}\bigr)=\ln(1+2.333)=\ln 3.333=1.204$. Term $b$: $n=2$, $IDF(b)=\ln\bigl(1+\frac{2.5}{2.5}\bigr)=\ln 2=0.693$.
+2. Scores: $d_1$ contains only $a$, so $1.204$; $d_2,d_3$ contain only $b$, so $0.693$. Rank 1 is $d_1$.
+3. After adding three $\{a\}$ documents: $N=7$. Term $a$: $n=4$, $IDF(a)=\ln\bigl(1+\frac{3.5}{4.5}\bigr)=\ln 1.778=0.575$. Term $b$: $n=2$, $IDF(b)=\ln\bigl(1+\frac{5.5}{2.5}\bigr)=\ln 3.2=1.163$.
+4. Scores: $d_1$ (and each new document) $0.575$; $d_2,d_3$ $1.163$. Rank 1 is now $d_2$ (by tie-break over $d_3$). Term $a$ became common, so it is worth less; $b$ became relatively rarer, so it is worth more.
 
 *A valid relation, MR-K: grow $k$ on a fixed exact ranking.*
 
@@ -393,7 +413,9 @@ With generated mutants $M$, killed mutants $K$, and adjudicated equivalent or in
 
 $$MS=\frac{K}{M-E}.$$
 
-Example: 20 generated, 12 killed, 3 equivalent, 1 invalid gives $MS=12/(20-3-1)=0.75$. The score measures sensitivity to the selected operators—not production defect prevalence or correctness. One surviving critical mutant matters more than the score.
+where $MS$ is the mutation score, $M$ the count of generated mutants, $K$ the count killed (at least one test fails on the mutant), and $E$ the count adjudicated equivalent or invalid. The denominator $M-E$ is the number of mutants a test *could* kill: an equivalent mutant behaves correctly, so no correct test should fail on it, and an invalid mutant never runs. Leaving them in the denominator would penalize the suite for something no test can do. (Here $K$ is a count of mutants; it is unrelated to the cutoff $k$ of Lesson 16.3.)
+
+Example: 20 generated, 12 killed, 3 equivalent, 1 invalid gives $MS=12/(20-3-1)=0.75$. Step by step: $E=3+1=4$; killable mutants $=20-4=16$; $MS=12/16=0.75$. The naive $12/20=0.60$ understates sensitivity. The score measures sensitivity to the selected operators—not production defect prevalence or correctness. One surviving critical mutant matters more than the score.
 
 **Worked Example — fixture F-16, differential miss and mutation kill table (synthetic, executed toy model):**
 
@@ -423,7 +445,7 @@ All four pass on the base system.
 | M5 dedupe store refactored, same behavior | pass | pass | pass | pass | equivalent | equivalent |
 | M6 receiver acknowledges before it commits | pass | pass | pass | pass | survives | **survives** |
 
-- *Steps*: $M=6$, $E=1$ (M5). Before promotion $K=2$ and $MS=2/5=0.40$. After promotion $K=4$ and $MS=4/5=0.80$.
+- *Steps*: $M=6$, $E=1$ (M5), so $M-E=5$ killable mutants. Before promotion only M2 and M3 are killed by T1, T2, or T4: $K=2$ and $MS=2/5=0.40$. Promoting T3 adds kills of M1 and M4. After promotion $K=4$ and $MS=4/5=0.80$.
 - *Result*: M1 is the incident's defect, and the suite could not see it until T3 existed. M4 is a second defect class that only T3 kills. M6 survives a suite scoring 0.80.
 - *Why M6 is not equivalent*: a probe outside the suite crashes the receiver between its two steps. The base system then ends with one effect after the retry; M6 ends with the client told `OK` and zero effects. The suite has no fault at that boundary, which is exactly the non-claim recorded in Lesson 16.1.
 - *Interpretation / limits*: the score rose from 0.40 to 0.80 and the most severe survivor is unchanged. Six hand-written mutants are not an operator distribution; a real registry needs systematic operators and an equivalence review.
@@ -474,11 +496,28 @@ $$p_U=1-\alpha^{1/n}.$$
 
 With $n=100$ and $\alpha=0.05$, $p_U\approx0.0295$ (**D**, CLM-009). By symmetry, $n$ reproductions in $n$ replays give a one-sided lower bound $\alpha^{1/n}$ on the reproduction rate. For $k$ reproductions in $n$ replays with $0<k<n$, report $k/n$ with an exact binomial (Clopper–Pearson) interval. All three assume independent, identically distributed trials. They do not cover unseen prompts and fail under correlated retries, shifting systems, adaptive search, or hidden exclusions.
 
+where $p$ is the unknown per-trial failure probability, $n$ the number of trials, $\alpha$ the error rate we accept (confidence $1-\alpha$, e.g. 95% for $\alpha=0.05$), $p_U$ the upper bound on $p$, and $k$ the number of reproductions (not the rank cutoff of Lesson 16.3). "IID Bernoulli" means each trial is an independent yes/no draw with the same $p$.
+
+*Step-by-step for $p_U$.*
+1. If the true rate is $p$, the chance that $n$ independent trials all pass is $(1-p)^n$.
+2. The bound is the largest $p$ that is still not "too surprising" given zero failures: set $(1-p_U)^n=\alpha$. Any $p>p_U$ would make a clean run less likely than $\alpha$.
+3. Take the $n$-th root: $1-p_U=\alpha^{1/n}$, so $p_U=1-\alpha^{1/n}$.
+4. Numbers for $n=100$: $\ln 0.05=-2.996$; $-2.996/100=-0.02996$; $e^{-0.02996}=0.9705$; $p_U=1-0.9705=0.0295$. Check: $(1-0.0295)^{100}\approx0.050$.
+
+Plain reading: 100 clean trials do not show the failure rate is zero; they show it is probably below about 3%. Because $-\ln 0.05\approx3$, $p_U\approx 3/n$ for large $n$, so halving the bound needs twice the trials.
+
+*The same rule as a search budget.* To claim $p_U\le p^*$ from a clean run, solve $(1-p^*)^n\le\alpha$ for $n$: $n\ge\ln\alpha/\ln(1-p^*)$. For $p^*=0.01$ and $\alpha=0.05$: $n\ge-2.996/-0.01005=298.1$, so 299 clean IID trials. A smaller budget cannot support that claim, whatever the result.
+
+*Step-by-step for the reproduction lower bound.* Let $q$ be the reproduction rate. All $n$ replays reproduce with probability $q^n$. Setting $q_L^{\,n}=\alpha$ gives $q_L=\alpha^{1/n}$ — the same algebra with "pass" and "fail" swapped.
+
+*Clopper–Pearson in plain language.* The interval contains every rate $p$ under which the observed $k$ of $n$ would not be in the extreme $\alpha/2$ tail on either side. It is "exact" because it uses the binomial distribution directly instead of a normal approximation, so it stays valid for small $n$ and for $k$ near 0 or $n$. Its width shrinks roughly like $1/\sqrt{n}$: in the worked example below, going from 20 to 200 replays narrows the interval from width 0.438 to 0.132.
+
 **Worked Example — fixture F-16 under replay (synthetic, executed toy model):**
 - *Input 1, scripted fault*: the minimized trace with `ack_lost` forced on attempt 1. 20 replays.
 - *Result 1*: 20 of 20 reproduce the signature with two receiver effects. One-sided 95% lower bound on the reproduction rate: $0.05^{1/20}=0.861$. The model is deterministic, so the bound is slack; it shows what 20 clean replays can and cannot support.
 - *Input 2, timing race*: no scripted fault. The acknowledgement latency of attempt 1 is drawn from a log-normal distribution with median 80 ms and $\sigma=0.5$; the client timeout is 100 ms; the duplicate occurs when latency exceeds the timeout. Replay seed 163.
 - *Result 2*: 7 of 20 replays reproduce the signature: rate 0.35, exact 95% interval $[0.154,\,0.592]$. With 200 replays: 60 reproduce, rate 0.30, interval $[0.237,\,0.369]$. In this model the true probability is 0.328.
+- *Where 0.328 comes from*: log-normal latency $L$ means $\ln L$ is normal with mean $\ln 80$ and standard deviation $\sigma=0.5$ (σ is on the log scale, not in ms). A duplicate needs $L>100$. Standardize: $z=\frac{\ln 100-\ln 80}{0.5}=\frac{\ln 1.25}{0.5}=\frac{0.223}{0.5}=0.446$. Then $P(L>100)=1-\Phi(0.446)=0.328$, where $\Phi$ is the standard normal CDF. Both intervals contain 0.328; the point estimates 0.35 and 0.30 do not equal it, which is ordinary sampling noise.
 - *Interpretation / limits*: one failing run does not make the case deterministic, and 13 passing replays do not make it fixed. Record the count and interval, and keep the scripted-fault version as the regression test. In every reproducing replay the signature and both ledger entries match; a replay that fails for another reason is counted separately, not as a reproduction. The latency distribution is an exercise assumption.
 - *Contrast*: 100 independent draws on one fixed prompt match the IID model. 100 retries on ten prompts chosen adaptively after near failures do not. Neither covers unseen prompt domains.
 
@@ -525,6 +564,8 @@ For each method report unique adjudicated clusters and severity alongside comput
 $$\text{yield}=\frac{\sum_{\text{unique clusters}}\text{severity weight}}{\text{total cost}},$$
 
 where the weights are risk policy, not measurements.
+
+The numerator sums one severity weight per **unique adjudicated cluster** the method found — not per case — so 20 duplicates of one cluster count once. The denominator is the method's total declared cost (compute, judge, human, triage) in one unit. Yield is therefore "risk-weighted distinct problems found per unit of cost".
 
 **Worked Example A — the F-16 ledger entry (synthetic):**
 

@@ -151,6 +151,20 @@ $$
 L_{visible}=t_{query\ visible}-t_{source\ event}.
 $$
 
+where:
+
+- $t_{source\ event}$: the time the change happened at the source of truth (the declared start endpoint);
+- $t_{query\ visible}$: the first time a production-equivalent query (same route, replica, and cache path a user would hit) returns the new version;
+- $L_{visible}$: the visibility lag in seconds for one event on one read path. Each event and path gives one sample; the SLO is stated over the distribution of samples (for example its p95).
+
+A useful split, used in the worked example below, puts the write acknowledgement time $t_w$ between the two endpoints:
+
+$$
+L_{visible}=\underbrace{(t_w-t_{source\ event})}_{\text{before the write}}+\underbrace{(t_{query\ visible}-t_w)}_{\text{after the write}}.
+$$
+
+This is an identity (add and subtract $t_w$), so it always holds for one event. What it does not give is a per-stage breakdown inside each bracket, because stages can overlap.
+
 The relation is exact for declared endpoints; decomposing it into stage times requires the actual dependency graph because work may overlap. Record event time semantics and clock skew. Report a distribution and stale-read fraction by source/slice, not only a mean. In Elasticsearch, for example, a write can return before it is searchable, and refresh trades visibility latency against indexing and search work (**O**, CLM-008).
 
 **Stable IDs and versions are inputs to idempotency; they do not create it.** A retry is safe only if the *store* applies an acceptance rule to every write, and applies it atomically. Each logical source item has a stable `doc_id`. The source assigns each change a monotonically increasing `version` (an event sequence number or source revision, never a worker's wall clock). The store keeps one record per `doc_id`: `(version_s, content_hash_s, state_s ∈ {live, tombstone})`. An incoming event `(op, doc_id, version_e, hash_e)` is decided as follows (**D**, CLM-018):
@@ -190,6 +204,8 @@ The last row is the reason for condition 3. The fix is a tombstone retention per
 - A **progress watermark** $H_r$ for representation $r$ is the largest source sequence number $s$ such that every event $\le s$ has been decided and is visible in $r$. It is a monotone progress report. By itself it guarantees nothing about what one request reads.
 - A **pinned read snapshot** $S$ is chosen once per request, and *every* read for that request is served at $S$: lexical, vector, metadata, citation-target fetch, and cache. Enforcement needs one of: a store-level point-in-time or generation/alias read; or an application filter that drops any hit with version newer than $S$ and refuses (or waits for) representations with $H_r<S$. If a representation cannot serve $S$, the response is marked partial or the request abstains.
 
+Notation: lowercase $s$ is any source sequence number; uppercase $S$ is the one sequence number a request is pinned to. Small example of the watermark definition: if events 100, 101, and 103 are decided and visible in $r$ but 102 is not, then $H_r=101$, not 103, because "every event $\le s$" fails at $s=102$. A request pinned at $S$ can be served by $r$ only when $H_r\ge S$.
+
 Deletions obligated by policy or law are a separate hard constraint. A snapshot older than a delete must still exclude the deleted item, typically through a tombstone overlay checked at read time.
 
 **Mixed-version read fixture** (synthetic). Event 101 updates `A` from v1 to v2; event 102 deletes `B`. At request time $H_{lex}=102$, $H_{vec}=100$, and a cached candidate list was built at 100.
@@ -221,8 +237,8 @@ A read-time filter can only *drop* hits newer than $S$. It cannot bring back an 
 
 Steps:
 
-1. Per-path visibility: $L_{visible,R1}=12.5$ s and $L_{visible,R2}=19.0$ s. The post-write portion $t_v-t_w$ is 1.5 s on R1 and 8.0 s on R2. Reporting only $t_v-t_w$ would hide the 11 s before the write.
-2. Probes run once per second from $t=0$ to $t=30$ (31 probes), alternating R1 (even seconds) and R2 (odd seconds), bypassing the cache. Stale probes: 7 on R1 ($t=0,2,\dots,12$) and 9 on R2 ($t=1,3,\dots,17$), so $16/31\approx0.516$ of probes in the window are stale.
+1. Per-path visibility: $L_{visible,R1}=12.5$ s and $L_{visible,R2}=19.0$ s. The post-write portion $t_v-t_w$ is 1.5 s on R1 and 8.0 s on R2. Reporting only $t_v-t_w$ would hide the 11 s before the write. (Here $t_v$ is short for $t_{query\ visible}$ on that replica. Check with the split above: R1 $=11.0+1.5=12.5$ s; R2 $=11.0+8.0=19.0$ s.)
+2. Probes run once per second from $t=0$ to $t=30$ (31 probes), alternating R1 (even seconds) and R2 (odd seconds), bypassing the cache. Stale probes: 7 on R1 ($t=0,2,\dots,12$) and 9 on R2 ($t=1,3,\dots,17$), so $16/31\approx0.516$ of probes in the window are stale. Counting: a probe is stale when it runs before its replica's visibility time. R1 has 16 even-second probes and the ones with $t<12.5$ are $0,2,\dots,12$, that is $12/2+1=7$. R2 has 15 odd-second probes and the ones with $t<19.0$ are $1,3,\dots,17$, that is $(17-1)/2+1=9$. Stale fraction $=(7+9)/(16+15)=16/31$. The fraction depends on the window length chosen, so report the window with it.
 3. The cache is independent of both replicas. With no invalidation, the cached v7 answer is served until $t=65$. With invalidation at $t=12.0$ and a cache miss refilled from R2 at $t=12.2$, the refill stores v7 again and serves it until $t=72.2$. Invalidation without a version check made the cache *later* than either replica. A cache key or entry check that requires version ≥ v8 prevents that refill.
 4. For `Q`, the lexical path stops returning it at 12 s, but the vector path still returns it until 40 s. That is an incomplete delete, not refresh lag.
 
@@ -270,9 +286,11 @@ Fusion-in-Decoder shows that a model can aggregate multiple retrieved passages i
 
 Steps:
 
+Both policies below walk the list in rank order and add a chunk only if the running total stays within the budget $B=1{,}000$ tokens, i.e. chunk $k$ is added when $\sum_{j\in\text{context}} tokens_j + tokens_k \le B$. They differ only in which chunks are eligible before that walk starts.
+
 1. *Concatenate by rank:* k1 (450) + k2 (400) = 850 tokens. k3 does not fit (1,150). The context holds one document twice and does not contain k4.
 2. *Constrained selection:* drop k2 as a duplicate of k1 by document/version and overlap; drop k3 because a newer version is eligible. Remaining in rank order: k1 (450), k4 (350), k5 (250). k1 + k4 = 800 fits; adding k5 gives 1,050, which does not. Context = {k1, k4}, 800 tokens, 200 unused.
-3. *Result:* evidence opportunity for the needed qualifier is 0 in the first context and 1 in the second, with 50 fewer tokens.
+3. *Result:* evidence opportunity for the needed qualifier is 0 in the first context and 1 in the second, with 50 fewer tokens ($850-800=50$).
 
 Interpretation and limits: the gain here comes from selection, with retrieval unchanged. Whether the model then *uses* k4 is a separate measurement. To test placement, hold the context {k1, k4} fixed and move k4 from first to last, then add distractors; a quality change under that design isolates placement sensitivity more directly than changing retrieval and order together. The table does not predict which order is better for a given model.
 
@@ -387,6 +405,13 @@ CitationCoverage=\frac{support\text{-}required\ claims\ with\ at\ least\ one\ ci
 {support\text{-}required\ claims}.
 $$
 
+Short notation for one answer:
+
+- $e$: emitted citations that were checked; $s$: those judged supported (rule below). $CitationCorrectness=s/e$.
+- $n$: support-required claims; $k$: claims whose cited evidence entails them; $m$: claims with at least one citation marker. $SupportCompleteness=k/n$ and $CitationCoverage=m/n$.
+
+A claim can only have entailing cited evidence if it has a citation, so $k\le m\le n$, and therefore completeness $\le$ coverage always. A gap between them counts the claims that carry a marker but are not supported. Correctness has a different denominator ($e$, not $n$), so it is not bounded by either.
+
 The units differ. Correctness counts *citations*. Completeness and coverage count *claims*. A claim is "support-required" when the answer policy says it needs evidence; greetings, hedges, and restatements of the question are excluded by a declared rule.
 
 **Multi-citation rule.** When one claim carries several citations:
@@ -397,6 +422,15 @@ The units differ. Correctness counts *citations*. Completeness and coverage coun
 ALCE uses the same structure: its citation recall asks whether the concatenation of a statement's cited passages entails the statement, and its citation precision flags a citation as irrelevant under the removal test above (**O**, CLM-013; §3.3 and Figure 3 of the paper). ALCE scores precision as 0 for every citation of a statement whose recall is 0. That detail belongs to ALCE; state your own rule for it.
 
 **Zero-denominator rule.** If an answer emits no citations, correctness is *undefined* for that answer: report it as "n/a, 0 citations", not as 1 and not as 0. If an answer has no support-required claims, completeness and coverage are undefined. When aggregating, say whether you pool counts over answers (micro) or average per-answer ratios (macro), exclude undefined answers from a macro average, and report how many were excluded. An abstention is scored by the abstention policy, not by these ratios.
+
+For answers $a=1,\dots,A$ with counts $s_a$ and $e_a$ (same pattern for $k_a/n_a$ and $m_a/n_a$):
+
+$$
+Correctness_{micro}=\frac{\sum_a s_a}{\sum_a e_a},\qquad
+Correctness_{macro}=\frac{1}{|A'|}\sum_{a\in A'}\frac{s_a}{e_a},
+$$
+
+where $A'$ is the set of answers with $e_a>0$. Micro weights each citation equally, so answers with many citations dominate; macro weights each answer equally.
 
 Declare claim segmentation, support threshold, citation granularity, and the rules above before scoring. A syntactically valid `[3]` can point to a real but irrelevant document. ALCE separates answer correctness and citation quality; source inspection of Haystack at the pinned revision likewise shows numeric reference parsing/binding, not semantic entailment verification.
 
@@ -439,7 +473,7 @@ Answer 2 shows the multi-citation rule. It has two claims:
 | C5 | [d4][d5] | neither alone; d4+d5 together entail C5 | d4 yes, d5 yes (removing either breaks support) | yes |
 | C6 | [d6][d7] | d6 alone entails C6; d7 is unrelated | d6 yes, d7 no (removing d7 changes nothing) | yes |
 
-Answer 2: correctness $3/4$, completeness $2/2$, coverage $2/2$.
+Answer 2: correctness $3/4$, completeness $2/2$, coverage $2/2$. (Counting: $e=4$ citations, of which d4, d5, d6 are supported, so $s=3$; $n=2$ claims, both supported and both marked, so $k=m=2$.)
 
 Aggregating the two answers:
 
@@ -447,6 +481,8 @@ Aggregating the two answers:
 |---|---|---|
 | Correctness | $(2+3)/(3+4)=5/7\approx0.714$ | $(2/3+3/4)/2=17/24\approx0.708$ |
 | Completeness | $(2+2)/(4+2)=4/6\approx0.667$ | $(1/2+1)/2=0.75$ |
+
+Step-by-step for correctness: micro pools numerators and denominators, $s_1+s_2=2+3=5$ over $e_1+e_2=3+4=7$. Macro averages the two ratios, $(2/3+3/4)/2=(8/12+9/12)/2=17/24$. Micro is slightly higher because Answer 2, with the better ratio, also has more citations and so more weight.
 
 Micro and macro differ, so the report must say which one it uses. A third answer with zero citations would add nothing to the micro correctness denominator and would be excluded from the macro correctness average, with the exclusion count reported. Limits: the entailment labels are given here. In practice they come from an NLI model or an LLM judge with its own error rate, and that error must be estimated against human adjudication before the ratios are trusted.
 
@@ -457,7 +493,7 @@ Micro and macro differ, so the report must say which one it uses. A third answer
 **Guided Practice:** Label claims and evidence spans, then replay with oracle availability, candidates, context, and citation binding to isolate the earliest failing stage.
 
 **Feedback Contract:**
-- *Expected Output*: a claim-evidence table with one row per (claim, citation) pair, evaluator/human agreement, a stage trace, and uncertainty. For Knowledge Check 2: correctness $5/5=1$, completeness $3/5$, coverage $3/5$. High correctness with low completeness means the citations that exist are good and two claims have none.
+- *Expected Output*: a claim-evidence table with one row per (claim, citation) pair, evaluator/human agreement, a stage trace, and uncertainty. For Knowledge Check 2: correctness $5/5=1$, completeness $3/5$, coverage $3/5$ ($e=s=5$; $n=5$; the markers sit on 3 claims, so $m=3$, and those 3 are supported, so $k=3$). High correctness with low completeness means the citations that exist are good and two claims have none.
 - *Common Failure*: one aggregate "groundedness" score; or computing completeness from marker counts, which gives coverage.
 - *Diagnostic Hint*: point to the row in your table that each numerator counts. If correctness and completeness cannot be traced to the same rows, they were computed from different data.
 - *Concept to Revisit*: citation versus claim as the counted unit; multi-citation rule; zero-denominator rule.
@@ -481,7 +517,11 @@ $$
 U(route)=Q(route)-\lambda_L L(route)-\lambda_C C(route),
 $$
 
-subject to hard access, safety, freshness, and consistency constraints. This is a product-specific heuristic: quality definition and weights are not universal. Published comparisons through 2025 report different task-dependent outcomes, which is evidence against a universal winner (**O**, CLM-015).
+subject to hard access, safety, freshness, and consistency constraints.
+
+where $Q$ is a unitless quality score, $L$ is a latency (seconds), $C$ is a cost (USD), and $\lambda_L$ (per second) and $\lambda_C$ (per USD) convert latency and cost into quality units, so every term of $U$ is unitless. $\lambda_L$ answers "how much quality would we give up to save one second?" Note: in this lesson $L$ means latency, not the visibility lag $L_{visible}$ of Lesson 10.2, and $Q$ means quality, not document `Q` of the Lesson 10.2 ledger.
+
+This is a product-specific heuristic: quality definition and weights are not universal. Published comparisons through 2025 report different task-dependent outcomes, which is evidence against a universal winner (**O**, CLM-015).
 
 Self-RAG, corrective RAG, and hybrid routing demonstrate adaptive mechanism families. They add evaluator/router errors, correlated self-judgment, extra model or search calls, new source-quality risks, latency, and cost. Treat them as workload-dependent/frontier until calibrated on the target service (**O**, CLM-016).
 
@@ -504,10 +544,12 @@ Setup: four routes evaluated on the same 400 questions, the same source snapshot
 
 Steps:
 
+How a $U$ cell is computed (RAG row): $\lambda_L L=0.02\times2.1=0.042$; $\lambda_C C=5\times0.004=0.020$; $U=0.82-0.042-0.020=0.758$. The other rows follow the same pattern.
+
 1. Apply hard constraints first. LC fails latency. Cached LC fails freshness, even though its utility would be 0.756. A route that fails a hard constraint is rejected whatever its utility.
 2. Compare utilities of the feasible routes: RAG 0.758, Hybrid 0.728. **RAG is selected**, although Hybrid has the higher quality.
-3. Sensitivity: Hybrid ties RAG when $0.778-0.004\lambda_C=0.788-0.012\lambda_C$, that is at $\lambda_C=1.25\ \text{USD}^{-1}$. If the product values cost at less than 1.25 per USD, Hybrid wins. The decision depends on a weight, so the weight must be recorded with the decision.
-4. Uncertainty: with 400 questions, the standard error of a proportion near 0.82 is about $\sqrt{0.82\times0.18/400}\approx0.019$. The 0.04 gap between RAG and Hybrid needs a paired interval (Module 15) before it is treated as real.
+3. Sensitivity: Hybrid ties RAG when $0.778-0.004\lambda_C=0.788-0.012\lambda_C$, that is at $\lambda_C=1.25\ \text{USD}^{-1}$. Derivation: hold $\lambda_L=0.02$ fixed and leave $\lambda_C$ free. RAG: $Q-\lambda_L L=0.82-0.042=0.778$, so $U_{RAG}=0.778-0.004\lambda_C$. Hybrid: $0.86-0.072=0.788$, so $U_{Hyb}=0.788-0.012\lambda_C$. Setting them equal gives $(0.012-0.004)\lambda_C=0.788-0.778$, so $\lambda_C=0.010/0.008=1.25$. If the product values cost at less than 1.25 per USD, Hybrid wins. The decision depends on a weight, so the weight must be recorded with the decision.
+4. Uncertainty: with 400 questions, the standard error of a proportion near 0.82 is about $\sqrt{0.82\times0.18/400}\approx0.019$. The 0.04 gap between RAG and Hybrid needs a paired interval (Module 15) before it is treated as real. (Formula: for a proportion $\hat p$ measured on $n$ questions, $SE=\sqrt{\hat p(1-\hat p)/n}$; here $\hat p=0.82$, $n=400$. For scale only: if the two routes were scored on independent question sets, the SE of the difference would be about $\sqrt{0.0192^2+0.0173^2}\approx0.026$, so the gap is roughly 1.5 SE. Because both routes answer the same 400 questions, the paired interval uses the per-question differences instead, which is why it is the right test.)
 
 Interpretation and limits: the example shows the order of operations (constraints, then utility, then sensitivity). It does not show that RAG beats hybrid routing in general. Retrieval misses weaken RAG; evidence dilution or position sensitivity can weaken full context; a router adds its own errors. Per-slice results (no-answer, temporal, access-restricted, long noisy documents) can reverse the aggregate ranking, so the selected route still needs a fallback.
 
@@ -518,7 +560,7 @@ Interpretation and limits: the example shows the order of operations (constraint
 **Guided Practice:** Run matched RAG, full-context, and hybrid routes under equal eligibility and load; test no-answer, noisy-long-document, temporal, and access slices. Then recompute the table decision with the latency constraint relaxed to $L\le7.0$ s.
 
 **Feedback Contract:**
-- *Expected Output*: a matched frontier, route calibration/errors, full cost and latency, hard-constraint checks, fallback, and rollback. For the relaxed constraint: LC becomes feasible with $U=0.88-0.130-0.150=0.600$, which is still the lowest feasible utility, so RAG remains selected. Feasible is not the same as preferred.
+- *Expected Output*: a matched frontier, route calibration/errors, full cost and latency, hard-constraint checks, fallback, and rollback. For the relaxed constraint: LC becomes feasible with $U=0.88-0.130-0.150=0.600$ ($0.02\times6.5=0.130$, $5\times0.030=0.150$), which is still the lowest feasible utility, so RAG remains selected. Feasible is not the same as preferred.
 - *Common Failure*: comparing unequal corpora or models; or folding a hard constraint into the utility, so that a large quality gain "pays for" stale or unauthorized answers.
 - *Diagnostic Hint*: list every route you rejected and the single reason. If the reason is a utility number, check that the route passed all hard constraints first.
 - *Concept to Revisit*: hard constraints versus weighted utility; matched comparison conditions.

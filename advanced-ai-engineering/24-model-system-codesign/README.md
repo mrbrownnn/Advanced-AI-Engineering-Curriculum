@@ -105,25 +105,35 @@ For a dense GQA decoder with $L$ layers, hidden size $d$, $H_q$ query heads, $H_
   $$Q_{HBM}\approx M_{weights}+B\,S\,k_{KV},\qquad W\approx B(2P_{matmul}+4dSL),\qquad T_{step}\ge\max\!\left(\frac{W}{C},\frac{Q_{HBM}}{\beta}\right)$$
   Here $k_{KV}$ is KV bytes per token, $C$ is the attainable compute ceiling, and $\beta$ is the attainable HBM bandwidth. Both are aggregated over the GPUs of one replica, and the bound ignores communication and scheduler time (**O**, CLM-008).
 
+*Where the formulas come from (step by step):*
+- **Symbols**: $b$ = bytes per stored element (2 for BF16); $S$ = tokens already retained in the context (written $S_k$ in Module 01's $4dS_k$); $B$ = sequences decoded together in one step; $M_{weights}$ = weight bytes ($=bP$ when every parameter is stored at $b$ bytes); $W$ = FLOPs per step; $T_{step}$ = time per step.
+- **Attention weights**: $W_Q$ and $W_O$ each map $d\to d$ ($d^2$ each, since $H_qd_h=d$). $W_K$ and $W_V$ each map $d\to H_{kv}d_h$ ($dH_{kv}d_h$ each). Sum: $2d^2+2dH_{kv}d_h$. With $H_{kv}=H_q$ (MHA) this becomes $4d^2$.
+- **KV bytes per token**: each layer stores one K and one V vector (factor $2$) per KV head ($H_{kv}$), each of $d_h$ elements at $b$ bytes, in each of $L$ layers: $2\cdot L\cdot H_{kv}\cdot d_h\cdot b$.
+- **Decode FLOPs**: a matmul with $P$ weights costs one FMA $=2$ FLOPs per weight per token, so $2P_{matmul}$. Attention over $S$ past tokens per layer costs $QK^\top$ ($d$ multiply-adds per past token, $2dS$ FLOPs) plus the weighted sum of $V$ (another $2dS$), so $4dS$ per layer and $4dSL$ in total. The input-embedding lookup is a gather, not a matmul, so only the LM head contributes $V\cdot d$ to $P_{matmul}$.
+- **Step bytes**: one decode step reads the weights once, shared by all $B$ sequences ($M_{weights}$), and each sequence reads its own $S$ tokens of KV ($S\,k_{KV}$). Hence $Q_{HBM}\approx M_{weights}+B\,S\,k_{KV}$.
+- **Step bound**: the step cannot finish faster than its FLOPs at full compute ($W/C$) or its bytes at full bandwidth ($Q_{HBM}/\beta$), so $T_{step}$ is at least the larger of the two. Arithmetic intensity is $I=W/Q_{HBM}$; the ridge is $C/\beta$. If $I<C/\beta$, the bytes term is larger.
+
 **Worked Example (real config, synthetic ceilings):**
 - *Input*: the pinned Qwen2.5-72B-Instruct config: $L=80$, $d=8192$, $H_q=64$, $H_{kv}=8$, $m=29{,}568$, $V=152{,}064$, untied embeddings, BF16, and q/k/v biases in the Qwen2 attention (**O**, CLM-022).
-- *Step 1 — parameters*:
+- *Step 1 — parameters* (derived widths: $d_h=8192/64=128$, so K and V each have $H_{kv}d_h=8\cdot128=1024$ outputs):
   - attention weights per layer: $2\cdot8192^2+2\cdot8192\cdot8\cdot128=150{,}994{,}944$;
-  - q/k/v biases: $8192+2\cdot1024=10{,}240$;
-  - SwiGLU: $3\cdot8192\cdot29{,}568=726{,}663{,}168$;
-  - two norms: $16{,}384$;
+  - q/k/v biases: $8192+2\cdot1024=10{,}240$ (one bias per output: $d$ for Q, $1024$ each for K and V);
+  - SwiGLU: $3\cdot8192\cdot29{,}568=726{,}663{,}168$ (gate, up, and down matrices, each $d\times m$);
+  - two norms: $16{,}384$ ($2\cdot d$ scale vectors);
   - block total: $877{,}684{,}736$.
   - $80$ blocks $=70{,}214{,}778{,}880$, plus final norm $8{,}192$, plus embedding and LM head $2\cdot152{,}064\cdot8192=2{,}491{,}416{,}576$, gives $P=72{,}706{,}203{,}648$. This matches the Hub metadata exactly (**O**, CLM-022).
 - *Step 2 — bytes*: $2P=145{,}412{,}407{,}296$ bytes $=145.41$ GB $\approx135.43$ GiB of logical weight payload. KV: $2\cdot80\cdot8\cdot128\cdot2=327{,}680$ bytes $=320$ KiB per token.
+  - Units: GB $=10^9$ bytes, GiB $=2^{30}=1{,}073{,}741{,}824$ bytes, KiB $=1024$ bytes. So $145{,}412{,}407{,}296/10^9=145.41$ GB and $145{,}412{,}407{,}296/2^{30}\approx135.43$ GiB; $327{,}680/1024=320$ KiB.
 - *Step 3 — FLOPs per decode token at $S=8192$*:
-  - $P_{matmul}=80(150{,}994{,}944+726{,}663{,}168)+152{,}064\cdot8192=71{,}458{,}357{,}248$, so matmuls cost $142{,}916{,}714{,}496$ FLOPs;
-  - attention: $4\cdot8192\cdot8192\cdot80=21{,}474{,}836{,}480$ FLOPs.
+  - $P_{matmul}=80(150{,}994{,}944+726{,}663{,}168)+152{,}064\cdot8192=71{,}458{,}357{,}248$, so matmuls cost $142{,}916{,}714{,}496$ FLOPs. (Biases, norms, and the input embedding are excluded: they are adds, scales, or a lookup, not matrix products. $P_{matmul}=P-80(10{,}240+16{,}384)-8{,}192-152{,}064\cdot8192$.);
+  - attention: $4\cdot8192\cdot8192\cdot80=21{,}474{,}836{,}480$ FLOPs ($4\cdot d\cdot S\cdot L$ with $d=8192$ and $S=8192$ — the two equal numbers are a coincidence of this example);
+  - total per token: $142{,}916{,}714{,}496+21{,}474{,}836{,}480=164{,}391{,}550{,}976$ FLOPs, so attention is about $13\%$ of decode FLOPs at this context.
 - *Step 4 — one step, $B=32$*, with **synthetic** replica ceilings $C=6.4\times10^{15}$ FLOP/s and $\beta=24\times10^{12}$ B/s (ridge $266.7$ FLOP/byte):
-  - $Q_{HBM}=145{,}412{,}407{,}296+32\cdot8192\cdot327{,}680=231{,}311{,}753{,}216$ bytes;
-  - $W=32\cdot164{,}391{,}550{,}976=5{,}260{,}529{,}631{,}232$ FLOPs;
-  - $I\approx22.74$ FLOP/byte;
-  - bounds: $T_{mem}\ge9.638$ ms and $T_{comp}\ge0.822$ ms.
-- *Result*: under these assumptions, the step screen is bounded by bytes moved, not by FLOPs, by roughly $11.7\times$.
+  - $Q_{HBM}=145{,}412{,}407{,}296+32\cdot8192\cdot327{,}680=231{,}311{,}753{,}216$ bytes (weights $145.41$ GB plus KV reads $85{,}899{,}345{,}920$ bytes $\approx85.90$ GB);
+  - $W=32\cdot164{,}391{,}550{,}976=5{,}260{,}529{,}631{,}232$ FLOPs, where $164{,}391{,}550{,}976=142{,}916{,}714{,}496+21{,}474{,}836{,}480$ is the per-token total from Step 3;
+  - $I=W/Q_{HBM}=5.2605\times10^{12}/(2.3131\times10^{11})\approx22.74$ FLOP/byte, far below the ridge $C/\beta=(6.4\times10^{15})/(24\times10^{12})=266.7$;
+  - bounds: $T_{mem}=Q_{HBM}/\beta=2.3131\times10^{11}/(24\times10^{12})\ \text{s}\ge9.638$ ms and $T_{comp}=W/C=5.2605\times10^{12}/(6.4\times10^{15})\ \text{s}\ge0.822$ ms.
+- *Result*: under these assumptions, the step screen is bounded by bytes moved, not by FLOPs, by roughly $11.7\times$ ($9.638/0.822\approx11.7$, equivalently ridge $/\,I=266.7/22.74$).
 - *Interpretation / limits*: this is a lower bound for one decode step and one replica. It excludes TP all-reduce, sampling, scheduler gaps, attention kernel efficiency, and quantization. It is a hypothesis to test with a profiler (Module 02). It does not say the deployment is "memory-bound" at every batch size or context.
 
 **Knowledge Check:**
@@ -173,17 +183,25 @@ The runtime's capacity number is therefore a function of architecture × TP layo
 - MLA, logical: $k_{MLA}=L(d_c+d_h^R)b$, from the paper's retained state (**O**, CLM-003).
 - Physical KV per token across a TP group of size $t$, uniform attention, under the pinned Qwen2 rule: $k_{phys}=t\cdot2L\max(1,\lfloor H_{kv}/t\rfloor)d_hb$, before page rounding. When $t>H_{kv}$, this exceeds the logical value by $t/H_{kv}$.
 
+*Where:* $d_c$ = MLA joint KV latent width (`kv_lora_rank`); $d_h^R$ = decoupled RoPE key width per token (`qk_rope_head_dim`); $t$ = TP degree; $\lfloor\cdot\rfloor$ = round down.
+
+*Step by step:*
+- **GQA versus MHA ratio**: everything in $2LH_{kv}d_hb$ is unchanged except $H_{kv}$, so $k_{MHA}/k_{GQA}=H_q/H_{kv}$. For Qwen2.5-72B: $64/8=8\times$.
+- **MLA**: one latent of $d_c$ elements plus one RoPE key of $d_h^R$ elements per layer, with no separate V and no per-head copies, so $L(d_c+d_h^R)b$. Equivalently, it equals GQA with $g$ groups when $2gd_h=d_c+d_h^R$.
+- **TP rule**: when $t\le H_{kv}$ (and $t$ divides $H_{kv}$), each rank holds $H_{kv}/t$ heads and $t$ ranks hold $t\cdot H_{kv}/t=H_{kv}$: no excess. When $t>H_{kv}$, each rank holds $\max(1,0)=1$ head, so $t$ ranks hold $t$ head copies instead of $H_{kv}$: ratio $t\cdot1/H_{kv}=t/H_{kv}$.
+
 **Worked Example (pinned configs; same-dimension MHA is a counterfactual):**
 - *GQA, real*: Qwen2.5-72B has 320 KiB/token (Lesson 24.1). An 8,192-token request holds $8192\cdot327{,}680=2{,}684{,}354{,}560$ bytes $=2.5$ GiB.
-- *MHA counterfactual, same $L,d,H_q$*: $2\cdot80\cdot64\cdot128\cdot2=2{,}621{,}440$ bytes $=2{,}560$ KiB/token, which is $20$ GiB per 8,192-token request. K/V projections grow by $80\cdot2\cdot8192\cdot(8192-1024)=9{,}395{,}240{,}960$ weights. With the added biases the model has $82{,}102{,}591{,}488$ parameters, or $164.21$ GB $\approx152.93$ GiB in BF16.
+- *MHA counterfactual, same $L,d,H_q$*: $2\cdot80\cdot64\cdot128\cdot2=2{,}621{,}440$ bytes $=2{,}560$ KiB/token, which is $20$ GiB per 8,192-token request. K/V projections grow by $80\cdot2\cdot8192\cdot(8192-1024)=9{,}395{,}240{,}960$ weights (each of K and V widens from $1024$ to $8192$ outputs in each of 80 layers). The K/V biases grow by $80\cdot2\cdot(8192-1024)=1{,}146{,}880$, so with the added biases the model has $72{,}706{,}203{,}648+9{,}395{,}240{,}960+1{,}146{,}880=$ $82{,}102{,}591{,}488$ parameters, or $164.21$ GB $\approx152.93$ GiB in BF16.
 - *Capacity screen*: synthetic 8 GPUs × 68 GiB usable for weights plus KV $=544$ GiB.
   - GQA KV pool: $544-135.43=408.57$ GiB, so $\lfloor408.57/2.5\rfloor=163$ requests at 8,192 tokens.
   - MHA KV pool: $544-152.93=391.07$ GiB, so $\lfloor391.07/20\rfloor=19$ requests.
   - The KV ratio is $8\times$; the capacity ratio is $163/19\approx8.6\times$, because the weights also changed.
+  - Why more than $8\times$: the MHA weights are $17.5$ GiB larger, which shrinks its KV pool ($391.07<408.57$ GiB), and flooring ($\lfloor19.55\rfloor=19$ versus $\lfloor163.43\rfloor=163$) costs MHA a larger fraction.
 - *MLA, real*: DeepSeek-V3 has $L=61$, $d_c=512$, $d_h^R=64$ (**O**, CLM-004).
-  - $61\cdot576\cdot2=70{,}272$ bytes $=68.625$ KiB/token. This matches the 70.272 KB (decimal) in Table 1 of the DeepSeek co-design paper (**O**, CLM-018).
-  - An 8,192-token request holds $549$ MiB.
-  - Trap: the config's `num_key_value_heads = 128` in the GQA formula gives $2\cdot61\cdot128\cdot128\cdot2=3{,}997{,}696$ bytes/token, about $56.9\times$ too large.
+  - $61\cdot576\cdot2=70{,}272$ bytes $=68.625$ KiB/token ($576=d_c+d_h^R=512+64$; $70{,}272/1024=68.625$). This matches the 70.272 KB (decimal) in Table 1 of the DeepSeek co-design paper (**O**, CLM-018).
+  - An 8,192-token request holds $8192\cdot70{,}272/2^{20}=549$ MiB.
+  - Trap: the config's `num_key_value_heads = 128` in the GQA formula gives $2\cdot61\cdot128\cdot128\cdot2=3{,}997{,}696$ bytes/token ($\approx3.81$ MiB), about $56.9\times$ too large ($3{,}997{,}696/70{,}272\approx56.9$).
 - *TP replication, real Qwen2.5-72B at $t=16$*: each rank keeps $\max(1,\lfloor8/16\rfloor)=1$ KV head. Per rank: $2\cdot80\cdot1\cdot128\cdot2=40{,}960$ bytes/token. Across 16 ranks: $655{,}360$ bytes $=640$ KiB per token, twice the logical 320 KiB.
 - *Interpretation / limits*: the counterfactual MHA model has no trained weights, so its capacity says nothing about quality. Page rounding, MLA alignment padding, packed FP8 MLA formats, and non-KV allocations change these numbers. Lab D reconciles them against the runtime's reported block count.
 
@@ -232,10 +250,19 @@ For a TPOT target $T_{SLO}$, each resource implies a maximum batch:
 - Compute: $B_{C}=\lfloor C\,T_{SLO}/(2P_{matmul}+4dSL)\rfloor$.
 - Scheduler: the configured cap $B_{sched}$.
 
+*Where:* $M_{KV}$ = bytes left for KV after weights and non-KV allocations; $k$ = KV bytes per token ($k_{KV}$ of Lesson 24.1); $S\,k$ = KV bytes held (and read per step) by one sequence at context $S$; $T_{SLO}$ = TPOT target in seconds.
+
+*Step by step (each $B_r$ solves "demand at batch $B$ $\le$ capacity" for $B$):*
+- **KV capacity**: $B\cdot S\,k\le M_{KV}$, so $B\le M_{KV}/(S\,k)$.
+- **HBM bandwidth**: require the Lesson 24.1 bytes bound to fit the budget, $(M_{weights}+B\,S\,k)/\beta\le T_{SLO}$. Multiply by $\beta$: $M_{weights}+B\,S\,k\le\beta T_{SLO}$. Subtract $M_{weights}$ and divide by $S\,k$: $B\le(\beta T_{SLO}-M_{weights})/(S\,k)$. $\beta T_{SLO}$ is the byte budget of one step; weights are paid once per step whatever $B$ is.
+- **Compute**: $B(2P_{matmul}+4dSL)/C\le T_{SLO}$, so $B\le C\,T_{SLO}/(2P_{matmul}+4dSL)$.
+- Floor each, because batches are whole sequences.
+
 The feasible batch is $\min(B_{KV},B_{BW},B_C,B_{sched},\dots)$, and the minimizer is the screening limiter. An architecture change moves several of these at once. GQA versus MHA changes both $k$ and $M_{weights}$. MoE changes $M_{weights}$, the per-token FLOPs, and adds a network term (Lesson 24.4). The bound uses attainable ceilings, so if the measured $\beta$ is lower, the bandwidth bound tightens (**O**, CLM-008).
 
 **Quantitative Model / Derivation:**
 $$B^*=\min_r B_r,\qquad r^*=\arg\min_r B_r$$
+This matches the pressure definition: at a fixed batch $B$, resource $r$ hits its limit when $B=B_r$, and each $p_r$ grows with $B$. As $B$ rises, the first resource to reach $p_r=1$ is the one with the smallest $B_r$, so $r^*$ is the screening limiter of the definition above. (For KV and compute $p_r=B/B_r$ exactly before flooring; the bandwidth pressure is not proportional to $B$ because weight bytes are fixed.)
 Goodput still requires queueing, TTFT, tail behavior, and quality. $B^*$ is a ceiling on resident decode concurrency, not a throughput prediction (**D**, CLM-014).
 
 **Worked Example (Lesson 24.2 weights and KV; synthetic ceilings and scheduler cap):**
@@ -247,10 +274,13 @@ Inputs: $S=8192$, $T_{SLO}=40$ ms TPOT, $C=6.4\times10^{15}$ FLOP/s, a scheduler
 | GQA (Qwen2.5-72B) | 24 TB/s | 163 | 303 | 128 | scheduler cap |
 | GQA (Qwen2.5-72B) | 12 TB/s | 163 | 124 | 128 | HBM bandwidth |
 
+- $B_{KV}$ comes from the Lesson 24.2 capacity screen: GQA $\lfloor408.57/2.5\rfloor=163$, MHA $\lfloor391.07/20\rfloor=19$ (GiB of pool over GiB per 8,192-token request).
 - $B_{BW}$ for GQA at 24 TB/s: $(0.04\cdot24\times10^{12}-145{,}412{,}407{,}296)/(8192\cdot327{,}680)=303.46$, so 303.
-- At 12 TB/s: $124.64$, so 124.
-- MHA at 24 TB/s: $(0.04\cdot24\times10^{12}-164{,}205{,}182{,}976)/(8192\cdot2{,}621{,}440)=37.06$, so 37.
-- Compute is far from binding: at $B=128$ the GQA compute time is $3.29$ ms of the 40 ms.
+  - Numerator: step byte budget $0.04\cdot24\times10^{12}=9.6\times10^{11}$ bytes minus $1.454\times10^{11}$ weight bytes $=8.146\times10^{11}$ bytes left for KV reads.
+  - Denominator: $8192\cdot327{,}680=2{,}684{,}354{,}560$ bytes ($2.5$ GiB) per sequence.
+- At 12 TB/s: $(4.8\times10^{11}-1.454\times10^{11})/2{,}684{,}354{,}560=124.64$, so 124. Halving $\beta$ more than halves $B_{BW}$, because the fixed weight bytes take a larger share of a smaller budget.
+- MHA at 24 TB/s: $(0.04\cdot24\times10^{12}-164{,}205{,}182{,}976)/(8192\cdot2{,}621{,}440)=37.06$, so 37. ($164{,}205{,}182{,}976=2\cdot82{,}102{,}591{,}488$, the BF16 weight bytes from Lesson 24.2.)
+- Compute is far from binding: at $B=128$ the GQA compute time is $128\cdot164{,}391{,}550{,}976/(6.4\times10^{15})=3.29$ ms of the 40 ms. Equivalently, $B_C=\lfloor6.4\times10^{15}\cdot0.04/164{,}391{,}550{,}976\rfloor=1{,}557$, far above every other $B_r$.
 - *Result*: moving from MHA to GQA moves the screening limiter off KV capacity. Where it lands depends on two inputs that the attention variant does not set: the scheduler configuration and the attainable bandwidth (**D**, CLM-012).
 - *Interpretation / limits*: an 8.6× KV-capacity gain yields at most $128/19\approx6.7\times$ resident batch with the cap, or $124/19\approx6.5\times$ at the lower bandwidth. Neither number is a throughput or cost ratio. The screen ignores TP communication, prefill interference, mixed context lengths, and kernel efficiency. Lab C tests it with a sweep.
 
@@ -263,7 +293,7 @@ Inputs: $S=8192$, $T_{SLO}=40$ ms TPOT, $C=6.4\times10^{15}$ FLOP/s, a scheduler
 Repeat the table for DeepSeek-V3's MLA state (68.625 KiB/token) on a synthetic 16-GPU replica with 1,088 GiB usable for weights plus KV, $641.29$ GiB of checkpoint, and $\beta=48\times10^{12}$ B/s. Ignore communication first. Then state which missing term (Lesson 24.4) you expect to bind, and why the decode-step bytes screen alone cannot settle it.
 
 **Feedback Contract:**
-- *Expected Evidence*: $M_{KV}=1088-641.29=446.71$ GiB and $B_{KV}=\lfloor446.71\cdot2^{30}/(8192\cdot70{,}272)\rfloor$; a bandwidth bound that counts only selected expert weights per step *if* you assume batched expert reuse, stated as an assumption; a ranked hypothesis that network dispatch/combine or expert imbalance becomes the binding term; the measurement that would discriminate.
+- *Expected Evidence*: $M_{KV}=1088-641.29=446.71$ GiB and $B_{KV}=\lfloor446.71\cdot2^{30}/(8192\cdot70{,}272)\rfloor$ (the $2^{30}$ converts GiB to bytes; this evaluates to $833$); a bandwidth bound that counts only selected expert weights per step *if* you assume batched expert reuse, stated as an assumption; a ranked hypothesis that network dispatch/combine or expert imbalance becomes the binding term; the measurement that would discriminate.
 - *Common Failure*: counting all 671B parameters as bytes read per decode step, or declaring "MLA makes it compute-bound" from the cited study without reproduction.
 - *Diagnostic Hint*: which expert weights does one decode step actually touch at your batch size, and over which links do the tokens travel?
 - *Concept to Revisit*: shape-dependent regime transitions (Module 02, Lesson 2.5).
@@ -296,14 +326,17 @@ The co-design paper frames MLA, MoE, FP8, overlap schedules, node-limited routin
 **Quantitative Model / Derivation:**
 Per MoE layer and decode step, as a payload-only screen:
 $$Q_{a2a}=B\,k'\,d\,(b_{disp}+b_{comb}),\qquad T_{a2a}\ge\Gamma\frac{Q_{a2a}}{BW_{eff}}+\alpha$$
-Here $k'$ counts selected experts including the shared one where it is treated as routed, $\Gamma\ge1$ is the max-over-receivers imbalance factor, and $\alpha$ collects latency terms. The DeepSeek co-design paper uses this form, with FP8 dispatch (1 byte), BF16 combine (2 bytes), $B=32$, $k'=9$, $d\approx7$K, and 50 GB/s. It obtains $120.96\ \mu$s per all-to-all pair and a best-case $14.76$ ms TPOT bound over 61 layers, explicitly excluding latency and inefficiency (**O**, CLM-018). The 2025–2026 bottleneck study models the same term with an explicit imbalance factor (**O**, CLM-017).
+Here $k'$ counts selected experts including the shared one where it is treated as routed, $\Gamma\ge1$ is the max-over-receivers imbalance factor, and $\alpha$ collects latency terms. Also: $B$ = tokens per device in the step, $d$ = hidden size, $b_{disp}$ and $b_{comb}$ = bytes per element in the dispatch and combine directions, $BW_{eff}$ = effective per-device link bandwidth (bytes/s).
+
+*Step by step:* each token's hidden state ($d$ elements) goes to $k'$ experts at $b_{disp}$ bytes per element ($k'\,d\,b_{disp}$ bytes), and $k'$ outputs of $d$ elements return at $b_{comb}$ bytes ($k'\,d\,b_{comb}$). Over $B$ tokens: $B\,k'\,d\,(b_{disp}+b_{comb})$. Time is bytes over bandwidth; the most loaded receiver gets $\Gamma$ times the average share, so the collective finishes $\Gamma$ times later, plus fixed latency $\alpha$. Check of the paper's figure: $32\cdot9\cdot7000\cdot3/(50\times10^9)\ \text{s}=120.96\ \mu$s (so "$d\approx7$K" is used as $7000$), and $14.76\text{ ms}/(61\cdot120.96\ \mu\text{s})=2$, so that bound counts twice the pair time per layer (the reason for the factor 2 is in the paper's Section 2.3.2, not restated here). The worked example below uses one pair per layer. The DeepSeek co-design paper uses this form, with FP8 dispatch (1 byte), BF16 combine (2 bytes), $B=32$, $k'=9$, $d\approx7$K, and 50 GB/s. It obtains $120.96\ \mu$s per all-to-all pair and a best-case $14.76$ ms TPOT bound over 61 layers, explicitly excluding latency and inefficiency (**O**, CLM-018). The 2025–2026 bottleneck study models the same term with an explicit imbalance factor (**O**, CLM-017).
 
 **Worked Example (DeepSeek-V3 config; synthetic bandwidth and imbalance):**
 - *Input*: $d=7168$, $k'=9$, $B=32$ tokens per device, 1 + 2 bytes, $BW_{eff}=40$ GB/s (the paper's effective inter-node figure, used here as a synthetic input), 58 MoE layers ($61-3$ dense), no overlap.
-- *Step 1 — payload*: $32\cdot9\cdot7168\cdot3=6{,}193{,}152$ bytes $=5.906$ MiB per layer.
-- *Step 2 — time*: $6{,}193{,}152/40\times10^9=154.83\ \mu$s at $\Gamma=1$; $232.24\ \mu$s at $\Gamma=1.5$.
-- *Step 3 — per decode step*: $58\cdot154.83=8.98$ ms, or $13.47$ ms at $\Gamma=1.5$, of communication alone if nothing overlaps.
-- *Step 4 — resident versus selected*: one routed expert has $3\cdot7168\cdot2048=44{,}040{,}192$ parameters. Over 58 layers the routed experts hold $256\cdot58\cdot44{,}040{,}192=653{,}908{,}770{,}816$ parameters, while a token selects $9\cdot58\cdot44{,}040{,}192=22{,}988{,}980{,}224$ expert parameters.
+- *Step 1 — payload*: $32\cdot9\cdot7168\cdot3=6{,}193{,}152$ bytes $=5.906$ MiB per layer ($3=b_{disp}+b_{comb}=1+2$; $6{,}193{,}152/2^{20}=5.906$).
+- *Step 2 — time*: $6{,}193{,}152/(40\times10^9)\ \text{s}=154.83\ \mu$s at $\Gamma=1$; $1.5\cdot154.83=232.24\ \mu$s at $\Gamma=1.5$ ($\alpha$ set to 0).
+- *Step 3 — per decode step*: $58\cdot154.83\ \mu\text{s}=8.98$ ms, or $58\cdot232.24\ \mu\text{s}=13.47$ ms at $\Gamma=1.5$, of communication alone if nothing overlaps.
+- *Step 4 — resident versus selected*: one routed expert has $3\cdot7168\cdot2048=44{,}040{,}192$ parameters (a SwiGLU expert: three $d\times m_e$ matrices with expert width $m_e=2048$). Over 58 layers the routed experts hold $256\cdot58\cdot44{,}040{,}192=653{,}908{,}770{,}816$ parameters, while a token selects $9\cdot58\cdot44{,}040{,}192=22{,}988{,}980{,}224$ expert parameters (8 routed + 1 shared, the shared expert assumed the same size as one routed expert).
+  - Ratio: selected/resident routed-expert parameters $=9/256\approx3.5\%$ per token, so expert FLOPs scale with $9$ while resident bytes scale with $256$.
 - *Step 5 — node-limited dispatch*: in a deduplicated scheme with one inter-node copy per destination node, FP8 inter-node dispatch per token drops from $8\cdot7168=57{,}344$ bytes (8 nodes) to at most $4\cdot7168=28{,}672$ bytes (4 nodes) (**O**, CLM-007).
 - *Result*: on this synthetic link, all-to-all alone takes 9–13 ms per decode step. A 40 ms TPOT budget leaves room, but a 15 ms interactive budget does not unless communication overlaps with compute or the effective bandwidth rises.
 - *Interpretation / limits*: payload only; ignores $\alpha$, kernel launch, intra-node forwarding, overlap (which DeepSeek uses), and shared-expert placement. The deployment layouts are author-reported, not defaults (**O**, CLM-005).
@@ -317,7 +350,7 @@ Here $k'$ counts selected experts including the shared one where it is treated a
 Recompute Steps 2–3 for an intra-node-only EP group at $BW_{eff}=160$ GB/s (synthetic). Then state the batch size at which compute per expert, not communication, would dominate under a Roofline screen with your declared ceilings.
 
 **Feedback Contract:**
-- *Expected Evidence*: $6{,}193{,}152/160\times10^9=38.71\ \mu$s per layer and $\approx2.25$ ms per step at $\Gamma=1$; an explicit compute model for one expert's batched GEMM, with its ceilings labeled synthetic; a statement that the crossover depends on expert-load skew.
+- *Expected Evidence*: $6{,}193{,}152/(160\times10^9)=38.71\ \mu$s per layer and $\approx2.25$ ms per step at $\Gamma=1$; an explicit compute model for one expert's batched GEMM, with its ceilings labeled synthetic; a statement that the crossover depends on expert-load skew.
 - *Common Failure*: using total parameters as per-token FLOPs, or omitting the combine direction.
 - *Diagnostic Hint*: how many bytes does one token send, to how many owners, in each direction?
 - *Concept to Revisit*: MoE accounting (Module 01, Lesson 1.7); collectives and expert parallelism (Module 20 — Distributed Inference).
@@ -352,6 +385,8 @@ The KV ratio enters only through $g$. If KV capacity was not binding (Lesson 24.
 
 **Quantitative Model / Derivation:**
 $$n=\left\lceil\frac{\lambda_{success}}{g_{cons}}\right\rceil,\qquad c_{success}=\frac{n\cdot p_{replica\text{-}hour}}{3600\,\lambda_{success}}$$
+*Where:* $\lambda_{success}$ = target successful requests per second; $g_{cons}$ = conservative per-replica goodput (req/s); $n$ = replicas; $p_{replica\text{-}hour}$ = price of one replica for one hour; $\lceil\cdot\rceil$ = round up (a fraction of a replica cannot be bought).
+*Step by step:* $n$ replicas cost $n\,p_{replica\text{-}hour}$ per hour, and in one hour they serve $3600\,\lambda_{success}$ successes. Cost per success is the ratio; multiply by $10^6$ for cost per million successes.
 Report $c$ at both ends of the $g$ interval. Add fixed costs and migration cost only inside the declared boundary. Full cost accounting is Module 22 — AI Economics.
 
 **Worked Example (all inputs synthetic):**
@@ -359,9 +394,10 @@ Report $c$ at both ends of the $g$ interval. Add fixed costs and migration cost 
 - *Gate*: GQA − MHA paired difference: aggregate interval $[-0.6,+0.3]$, long-context slice $[-0.9,+0.4]$. Both lower bounds are above $-1.0$, so GQA passes.
 - *Measured $g$ intervals*: MHA $[1.9,2.1]$, GQA $[5.6,6.0]$ req/s per replica.
 - *Replicas*: MHA $\lceil40/1.9\rceil=22$ to $\lceil40/2.1\rceil=20$; GQA $\lceil40/5.6\rceil=8$ to $\lceil40/6.0\rceil=7$.
-- *Cost at the conservative end*: MHA $22\cdot24=\$528$/h, or $528/(3600\cdot40)\cdot10^6=\$3{,}666.67$ per million successes. GQA $8\cdot24=\$192$/h, or $\$1{,}333.33$ per million.
-- *Ratios*: the KV ratio is $8\times$; the conservative replica ratio is $22/8=2.75\times$.
-- *Volume sensitivity*: at 730 h/month, the conservative saving is $(22-8)\cdot24\cdot730=\$245{,}280$/month at $\lambda=40$. At $\lambda=5$ it is $(3-1)\cdot24\cdot730=\$35{,}040$/month. A synthetic one-time migration cost of \$150,000 pays back in $0.61$ months at $\lambda=40$ and $4.28$ months at $\lambda=5$.
+  - Example: $40/1.9=21.05$, rounded up to 22 replicas; $40/5.6=7.14$, rounded up to 8.
+- *Cost at the conservative end*: MHA $22\cdot24=\$528$/h, or $528/(3600\cdot40)\cdot10^6=\$3{,}666.67$ per million successes ($3600\cdot40=144{,}000$ successes per hour). GQA $8\cdot24=\$192$/h, or $192/144{,}000\cdot10^6=\$1{,}333.33$ per million.
+- *Ratios*: the KV ratio is $8\times$; the conservative replica ratio is $22/8=2.75\times$. (The goodput ratio $5.6/1.9\approx2.95\times$ is the uncapped driver; integer rounding of $n$ turns it into $2.75\times$.)
+- *Volume sensitivity*: at 730 h/month, the conservative saving is $(22-8)\cdot24\cdot730=\$245{,}280$/month at $\lambda=40$. At $\lambda=5$ it is $(3-1)\cdot24\cdot730=\$35{,}040$/month ($\lceil5/1.9\rceil=3$ MHA versus $\lceil5/5.6\rceil=1$ GQA replica). A synthetic one-time migration cost of \$150,000 pays back in $150{,}000/245{,}280=0.61$ months at $\lambda=40$ and $150{,}000/35{,}040=4.28$ months at $\lambda=5$.
 - *Result*: "GQA cuts infrastructure cost per success by about $2.75\times$ *for this workload, gate, measured goodput, and price*." The conditions are part of the result.
 - *Interpretation / limits*: the $8\times$ KV ratio did not become an $8\times$ cost ratio. Goodput gained less, and integer replicas and volume shape the saving. All numbers are synthetic; your contract must supply measured $g$ and dated prices (**D**, CLM-015).
 
@@ -411,13 +447,17 @@ For candidates A and B, with continuous replicas as a first screen:
 $$c_X(x)=\frac{p_X}{3600\,g_X(x)}\cdot10^6\ \text{per million successes},\qquad x^\dagger:\ c_A(x^\dagger)=c_B(x^\dagger)$$
 Then recheck at integer replica counts and the conservative $g$ bounds.
 
+*Where:* $p_X$ = price per replica-hour of candidate $X$; $g_X(x)$ = its per-replica goodput as a function of the uncertain input $x$. This is the Lesson 24.5 formula with $n=\lambda/g_X$ (no rounding), so $\lambda$ cancels.
+
+*Step by step for the threshold:* $c_A=c_B$ means $p_A/g_A=p_B/g_B$, so the goodput B needs is $g_B^\dagger=g_A\cdot p_B/p_A$. If $g_B(x)$ is known, solve $g_B(x^\dagger)=g_B^\dagger$ for $x^\dagger$.
+
 **Worked Example (all inputs synthetic):**
 - *Candidates*:
   - A: dense GQA, 8-GPU replica, \$24/h, $g_A=5.6$ req/s.
   - B: MoE+MLA, 16-GPU replica across two nodes, \$48/h. Its goodput depends on the effective inter-node bandwidth $BW$ (GB/s) through a synthetic fitted line, $g_B=4.5+0.09\,BW$, valid on $BW\in[50,100]$.
 - *Step 1*: $c_A=24/(3600\cdot5.6)\cdot10^6=\$1{,}190.48$ per million.
-- *Step 2*: at $BW=50$, $g_B=9.0$ and $c_B=\$1{,}481.48$. At $BW=100$, $g_B=13.5$ and $c_B=\$987.65$.
-- *Step 3 — threshold*: $c_B=c_A$ requires $g_B=48\cdot5.6/24=11.2$, so $BW^\dagger=(11.2-4.5)/0.09=74.44$ GB/s.
+- *Step 2*: at $BW=50$, $g_B=4.5+0.09\cdot50=9.0$ and $c_B=48/(3600\cdot9.0)\cdot10^6=\$1{,}481.48$. At $BW=100$, $g_B=4.5+9.0=13.5$ and $c_B=48/(3600\cdot13.5)\cdot10^6=\$987.65$.
+- *Step 3 — threshold*: $c_B=c_A$ requires $g_B=48\cdot5.6/24=11.2$ (B costs $2\times$ per hour, so it needs $2\times$ the goodput), so $4.5+0.09\,BW^\dagger=11.2$ gives $BW^\dagger=(11.2-4.5)/0.09=74.44$ GB/s. Check: $c_B(74.44)=48/(3600\cdot11.2)\cdot10^6=\$1{,}190.48=c_A$.
 - *Step 4 — dominance*: B is cheaper only above 74.44 GB/s. If B also has a higher P99 TPOT, or a quality slice near its margin, neither candidate dominates.
 - *Result*: "Prefer B only if sustained effective inter-node bandwidth stays above ~75 GB/s under production expert skew, and B passes the shared gate. Otherwise prefer A." Guardrail: monitor achieved all-to-all bandwidth and expert imbalance $\Gamma$, with rollback to A if a declared window falls below threshold.
 - *Interpretation / limits*: the linear $g_B(BW)$ is a synthetic fit; a real one comes from Lab C sweeps with intervals. Integer replica rounding moves the threshold. The thresholds are not probabilities (**D**, CLM-016).
@@ -620,11 +660,11 @@ Reviewers use these to check arithmetic, not to grade a design.
 - **KV pool per replica**: A $8\cdot68-135.43=408.57$ GiB; B $16\cdot68-641.29=446.71$ GiB.
 - **Per-request KV**:
   - A: chat $2400\cdot320$ KiB $=750$ MiB; documents $13{,}500\cdot320$ KiB $=4{,}218.75$ MiB.
-  - B: chat $2400\cdot68.625$ KiB $=160.84$ MiB; documents $904.72$ MiB.
+  - B: chat $2400\cdot68.625$ KiB $=160.84$ MiB; documents $13{,}500\cdot68.625$ KiB $=904.72$ MiB (divide KiB by 1024 for MiB).
 - **B parameters**: routed experts $653{,}908{,}770{,}816$ of the stored total; selected expert parameters per token $22{,}988{,}980{,}224$ (Lesson 24.4).
 - **Gate**: A passes (aggregate $-0.4>-1.0$, slice $-0.8>-1.0$). B fails the long-document slice ($-1.8<-1.0$). B's cost may not be reported as a deployable comparison for the full service. A submission may still analyze B as "chat-only" if it declares a routing split and re-gates.
-- **Cost**: A needs $\lceil30/1.4\rceil=22$ to $\lceil30/1.7\rceil=18$ replicas, which is \$528 to \$432 per hour, or \$4,888.89 to \$4,000.00 per million successes. For reference only (B fails the gate): B needs 10 to 7 replicas, which is \$480 to \$336 per hour, or \$4,444.44 to \$3,111.11 per million. The intervals overlap, so even if B passed, neither would dominate on cost.
-- **All-to-all for B at 60 GB/s**: $6{,}193{,}152/60\times10^9=103.22\ \mu$s per layer at $\Gamma=1$, or $5.99$ ms over 58 layers; $8.98$ ms at $\Gamma=1.5$.
+- **Cost**: A needs $\lceil30/1.4\rceil=22$ to $\lceil30/1.7\rceil=18$ replicas, which is \$528 to \$432 per hour, or \$4,888.89 to \$4,000.00 per million successes ($528/(3600\cdot30)\cdot10^6$ and $432/108{,}000\cdot10^6$). For reference only (B fails the gate): B needs 10 to 7 replicas, which is \$480 to \$336 per hour, or \$4,444.44 to \$3,111.11 per million. The intervals overlap, so even if B passed, neither would dominate on cost.
+- **All-to-all for B at 60 GB/s**: $6{,}193{,}152/(60\times10^9)=103.22\ \mu$s per layer at $\Gamma=1$, or $5.99$ ms over 58 layers; $8.98$ ms at $\Gamma=1.5$.
 
 ### Rubric Dimensions
 - **Conditional Quantitative Answers** (Deliverables 1, 4, 5):

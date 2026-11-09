@@ -85,12 +85,15 @@ At request start, create a logical operation span with sampling-eligible attribu
 **Quantitative Model / Derivation:**
 For 121 client chunks, mean per-output-chunk time is `(last-first)/(121-1)`. Server TPOT similarly divides post-first-token duration by output-token gaps. These are exact only at their named clocks and populations.
 
+*Why divide by $n-1$:* $n$ arrivals have only $n-1$ gaps between them (fence-post rule). The first arrival marks the start of the averaged interval, so 121 chunks give 120 gaps and 241 tokens give 240 gaps. TTFC (time to first chunk) is read on the client clock; TTFT (time to first token) and TPOT (time per output token) are read on the server clock.
+
 **Worked Example (synthetic):**
 Input: logical client span 3.650 s; attempt 1 fails at 0.600 s; retry starts 0.650 s; first client chunk at 1.250 s; last at 3.650 s; server receives retry at 0.670 s, first token after 0.560 s, and 241 tokens finish after 2.960 s server duration.
 1. Client time to first chunk from logical start = 1.250 s; from retry = 0.600 s.
 2. Client mean chunk gap = `(3.650-1.250)/120 = 0.020 s`.
 3. Server TPOT = `(2.960-0.560)/240 = 0.010 s`.
 4. A `(0.64,1.28]` TTFC histogram bucket cannot recover retry or server decomposition.
+Step 4 in plain terms: a histogram keeps only "this request fell somewhere in 0.64–1.28 s"; the retry and the server-side timings are already gone and cannot be rebuilt from it.
 Result: no valid subtraction converts client TTFC into server TTFT. Limit: synthetic clocks; unsynchronized clock skew needs separate measurement.
 
 **Knowledge Check:**
@@ -128,8 +131,12 @@ Propagate context gateway → orchestrator → retrieval/provider/tool. Record r
 **Quantitative Model / Derivation:**
 `P(observe at least one of k rare events)=1-(1-p)^k`. With unequal inclusion probabilities, estimate a rate as `Σ(y_i/p_i)/Σ(1/p_i)` only when every `p_i` is known and no extra censoring exists.
 
+*Reading the formulas:* each event is kept independently with probability $p$, so it is missed with probability $1-p$; all $k$ are missed with probability $(1-p)^k$, and the complement is "see at least one". In the weighted estimate the sums run over exported traces; $y_i=1$ if trace $i$ failed, else 0, and $p_i$ is its inclusion probability. Each kept trace stands in for $1/p_i$ offered requests, so the numerator estimates total failures and the denominator estimates total requests. If traces vanished for a reason with no known $p_i$ (eviction, crash), their weight is unknown and the rate is not identifiable.
+
 **Worked Example (synthetic; D):**
 One million offered requests contain 40 rare failures. At `p=0.01`, expected sampled failures = 0.4 and visibility is `1-0.99^40=0.331` (**D**, CLM-018). Tail policy keeps all 40 failures and 1% of 999,960 successes: exported count ≈10,039.6; naive failure share `40/10039.6=0.398%`, versus true `0.004%`. Weighting failures by 1 and successes by 100 recovers `40/1,000,000=0.004%`. If 500 crashed workers never end spans, span-only correction cannot recover them (**D**, CLM-019).
+
+Step by step: head sampling expects `40×0.01=0.4` failures; the chance of seeing none is `0.99^40≈0.669`, so visibility is `1-0.669=0.331`. Tail sampling exports `40+0.01×999,960=40+9,999.6=10,039.6` traces; dividing failures by exported traces inflates the failure share about 100×. Each kept success has `p=0.01` (weight 100) and each failure `p=1` (weight 1): weighted failures `=40`, weighted total `=40+9,999.6×100=1,000,000`.
 
 **Knowledge Check:**
 1. Why is sampled=true not proof all child spans arrived? 2. When is inverse-probability weighting invalid? 3. What population contains crashed requests?
@@ -166,14 +173,17 @@ Ingress writes every offered request. Terminal reconciliation assigns rejection,
 **Quantitative Model / Derivation:**
 `SLI_offered=good/offered`. With `u` unfinished and `g` known good, bounds are `[g/N,(g+u)/N]`. Exclusion sensitivity recomputes both numerator and denominator under the declared policy.
 
+*Why these bounds:* $N$ is the offered count. Unfinished requests have no known outcome, so the worst case counts all $u$ as bad (lower bound $g/N$) and the best case counts all as good (upper bound $(g+u)/N$). The width $u/N$ shows how much the unknowns could matter.
+
 **Worked Example (synthetic; D, CLM-021):**
 Input: 120,000 offered; 6,000 rejected; 108,300 completed OK; 1,140 errors; 2,280 timeouts; 1,710 cancellations; 570 unfinished; 104,000 pass latency and schema.
+Check: buckets sum to `6,000+108,300+1,140+2,280+1,710+570=120,000` offered; admitted `=120,000-6,000=114,000`; completed (OK plus explicit error) `=108,300+1,140=109,440`. Each view below changes the denominator (and, for step 4, the good predicate).
 1. Completion-conditioned success = `108300/109440=98.96%`.
 2. Admitted completion = `108300/114000=95.00%`.
 3. Offered completion = `108300/120000=90.25%`.
 4. Offered-outcome good = `104000/120000=86.67%`.
 5. Excluding cancellations = `104000/118290=87.92%`.
-6. Unfinished bounds = `[104000,104570]/120000=[86.67%,87.14%]`.
+6. Unfinished bounds = `[104000,104570]/120000=[86.67%,87.14%]` (the upper bound counts all 570 unfinished as good).
 Limit: cancellations may be caused by slowness; exclusion can hide harm.
 
 **Knowledge Check:**
@@ -201,6 +211,7 @@ How should alert thresholds be recomputed for this SLO, window, traffic level, a
 
 **Concepts & Definitions:**
 - Allowance `a=1-S`; burn rate `B=e/a`; burn 1 exhausts budget exactly over SLO period.
+  - Terms: `S` is the SLO target, `a` the allowed bad fraction, `e` the observed error ratio in a window, `T` the SLO period. Example: `S=99.9%` gives `a=0.001`; over 30 days (`43,200 min`) that equals `0.001×43,200=43.2 min` of full outage. Burn `B=2` spends budget twice as fast as allowed, so it lasts `T/2`. Since `e≤1`, the largest possible burn is `1/a`.
 - Multiwindow alerts pair a long budget-consumption window with a short active-burn window. Workbook values 14.4/6/1 are starting points for a 99.9%, 30-day example, not constants (**O**, CLM-022).
 - Low traffic needs counts/intervals, separate synthetics, or a longer/combined population; one failure can be a noisy page (**O**, CLM-024).
 
@@ -210,8 +221,12 @@ Choose page-value budget fractions and response windows, derive burn, convert to
 **Quantitative Model / Derivation:**
 Budget fraction consumed over `w` is `Bw/T`; constant-rate exhaustion is `T/B`; approximate fire time after outage onset is `(a/e)wB` plus evaluation and notification delay.
 
+*Derivation steps:* (1) Pick the budget fraction $f$ a page should represent and the long window $w$. (2) Solve $f=Bw/T$ for the alert burn $B=fT/w$. (3) Convert to an error-ratio threshold $Ba$. (4) In the fire-time formula, $B$ is the alert-threshold burn and $e$ the actual outage error ratio: the window average rises roughly linearly as the outage fills the window, reaching $Ba$ after a fraction $Ba/e$ of $w$, i.e. time $(a/e)wB$.
+
 **Worked Example (synthetic arithmetic; D, CLM-023):**
 For 30 days = 720 h: 2%/1 h gives `B=14.4`; 5%/6 h gives `B=6`; 10%/72 h gives `B=1`. At SLO 99%, thresholds are 14.4%, 6%, 1%. A 30% error ratio burns 30×, exhausts in 24 h, and reaches the 1 h page after `0.01/0.30×60×14.4=28.8 min`. At SLO 90%, maximum burn is 10, so a 14.4× alert is impossible. At 10 req/h and 99.9%, one hourly failure is 100× burn and consumes `1/7.2=13.9%` of monthly budget—not 1,000×.
+
+Step by step: `B=fT/w`, so `0.02×720/1=14.4`, `0.05×720/6=6`, `0.10×720/72=1`. At 99% (`a=0.01`) thresholds are `14.4×0.01=14.4%`, `6×0.01=6%`, `1×0.01=1%`. A 30% error ratio gives `B=0.30/0.01=30`; exhaustion `720/30=24 h`; fire time `(0.01/0.30)×60 min×14.4=28.8 min`. At 90% SLO, `a=0.1`, max burn `1/0.1=10<14.4`. Low traffic: 1 failure in 10 requests is `e=0.1`, `B=0.1/0.001=100`; the month has `10×720=7,200` requests and `7,200×0.001=7.2` allowed failures, so one failure uses `1/7.2≈13.9%`. 1,000× (`=1/a`) would require every request in the window to fail.
 
 **Knowledge Check:**
 1. Why does maximum burn depend on SLO? 2. Why require long and short windows? 3. Why can synthetic success not repair real-user reliability?
@@ -248,8 +263,15 @@ Fast proxies page or prioritize review. A separate mature quality SLI joins inde
 **Quantitative Model / Derivation:**
 With sensitivity `q1`, specificity `q0`, and raw pass `p`, corrected prevalence is `(p+q0-1)/(q0+q1-1)`, requiring `q0+q1>1` and invariance. Delayed-positive estimate at age `d` is `n_d/(N F(d))`. Detector PPV is `πs/[πs+(1-π)FPR]`.
 
+*Where these come from:*
+- Correction: $q_1=P(\text{judge pass}\mid\text{truly good})$, $q_0=P(\text{judge reject}\mid\text{truly bad})$. With true good rate $\theta$, raw pass is $p=q_1\theta+(1-q_0)(1-\theta)$; solving for $\theta$ gives $(p+q_0-1)/(q_0+q_1-1)$. If $q_0+q_1\le 1$ the judge is no better than chance and the denominator is zero or negative.
+- Delay: $n_d$ is positives (e.g. complaints) seen among $N$ outcomes of age $d$; $F(d)$ is the fraction of eventual positives arrived by age $d$, estimated from mature cohorts. Dividing by $F(d)$ scales the partial count to its expected final value.
+- PPV (positive predictive value) is Bayes' rule: $\pi$ is the prior incident rate, $s$ sensitivity, FPR the false-positive rate. Numerator = true alarms; denominator = true plus false alarms.
+
 **Worked Example (synthetic; D):**
 Calibration: `q1=.92`, `q0=.80`. Raw pass `.88` corrects to `.68/.72=.944`; `.82` to `.62/.72=.861`, so raw 6 points understates corrected 8.3 points (**D**, CLM-026). A new accepted failure type can make stale correction read `.919` while truth is `.860`; proxy is not truth. Separately, 150 complaints among 10,000 day-old outcomes with `F(1d)=.5` estimate `150/(10000×.5)=3%`, not 1.5%. At 2% incident prior, sensitivity .9 and FPR .1 give PPV `.018/.116=.155` (**D**, CLM-031).
+
+Step by step: denominator `q0+q1-1=.80+.92-1=.72`; raw `.88` gives numerator `.88+.80-1=.68`, raw `.82` gives `.62`. Raw gap `.88-.82=.06`; corrected gap `.944-.861=.083`. PPV: true alarms `.02×.9=.018`, false alarms `.98×.1=.098`, total `.116`; roughly 1 alarm in 6.5 is a real incident.
 
 **Knowledge Check:**
 1. What invariance makes correction valid? 2. Why are missing recent complaints not negatives? 3. Can drift detection identify harm?
@@ -286,10 +308,16 @@ Filter labels before aggregation, observe overflow, sample trace envelopes and c
 **Quantitative Model / Derivation:**
 Series upper bound is the product of retained cardinalities. Trace volume = requests × sample fraction × spans/request × bytes/span. Content uses its own capture probability.
 
+*Why a product:* a metric stores one time series per distinct label combination. With 3 values of label A and 2 of label B there are at most `3×2=6` combinations; each added label multiplies the count. A tenant or request ID label multiplies series by the number of tenants or requests, which is why unbounded IDs belong in the ledger, not on metric labels.
+
 **Worked Example (synthetic; D, CLM-035):**
 Labels `3 models×2 providers×5 operations×5 errors×6 regions×4 tiers=3,600` series/metric; adding 500 tenants yields 1.8M. At 1M requests/day, 12 spans×1.2 KB = 14.4 GB/day unsampled. Content 26 KB/request = 26 GB/day. Over 30 days with traces at 1% but content hook at 100%: traces 4.32 GB + content 780 GB = 784.32 GB. Sampling traces alone misses budget and privacy target.
 
+Step by step: `3×2×5×5×6×4=3,600`; `3,600×500=1,800,000`. Traces: `1M×12×1.2 KB=14.4 GB/day`, `×30 days×0.01=4.32 GB`. Content: `1M×26 KB=26 GB/day`, `×30=780 GB` at 100% capture. Content dominates because the hook ignores trace sampling.
+
 Mitigation arithmetic: at 99% SLO and burn 30, page at 28.8 min has consumed 2%; a 6-minute rollback adds 0.42%, totaling 2.42%. Diagnosing 45 minutes first totals 5.54% (**D**, CLM-037). Limit: rollback may be unsafe or irrelevant.
+
+Step by step (budget fraction `=Bw/T`, `T=43,200 min`): at page `30×28.8/43,200=2.00%`; rollback `30×6/43,200≈0.42%`; diagnosis `30×45/43,200≈3.13%`. Mitigate first: `2.00+0.42=2.42%`; diagnose first: `2.00+3.13+0.42≈5.54%`.
 
 **Knowledge Check:**
 1. Why does trace sampling not bound content capture? 2. What evidence distinguishes telemetry loss from traffic loss? 3. When should rollback not be first mitigation?
@@ -421,7 +449,7 @@ Use registry exercise fixture (**CLM-043**, synthetic): 20M offered requests/30 
 
 **Required artifacts:** source trace; signal dictionary; request/terminal ledger; SLI and alert code; sampling simulator; calibration/delay workbook; governance budget; incident timeline; fault assertions.
 
-**Reference checks:** calibration `q1=230/250=.92`, `q0=117/150=.78`, denominator `.70`; corrected quality `(.84+.78-1)/.70=.8857`. Metric series with tenant = `4×2×4×8×5×6×1200=7,372,800`; without tenant = 6,144. Unsampled traces = `20M×9×1.5KB=270GB`; unsampled content = 600GB, already the full budget before trace/storage overhead. Any feasible plan must default content off or reduce it independently.
+**Reference checks:** calibration `q1=230/250=.92`, `q0=117/150=.78`, denominator `.92+.78-1=.70`; corrected quality `(.84+.78-1)/.70=.8857`. Metric series with tenant = `4×2×4×8×5×6×1200=9,216,000`; without tenant = 7,680 (`4×2×4×8=256`, `×5=1,280`, `×6=7,680`, `×1,200=9,216,000`). Unsampled traces = `20M×9×1.5KB=270GB`; unsampled content = `20M×30KB=600GB`, already the full budget before trace/storage overhead. Any feasible plan must default content off or reduce it independently.
 
 | Dimension | Insufficient | Competent | Strong |
 |---|---|---|---|

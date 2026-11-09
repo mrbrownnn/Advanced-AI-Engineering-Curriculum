@@ -91,15 +91,21 @@ Given a FLOP budget, how many parameters and how many tokens, and why did the fi
 
 **Concepts & Definitions:**
 - **Training compute**: Kaplan et al. estimate non-embedding training compute as $C \approx 6N$ FLOPs per token, i.e. $C\approx 6ND$, with $N$ excluding vocabulary and positional embeddings (**O**, CLM-001). The 6 is $2$ (forward, FMA-as-two from Module 01, Lesson 1.6) $\times 3$ (backward ≈ twice forward). It omits the context-dependent attention term.
+  - *Where*: $C$ = total training FLOPs; $N$ = (non-embedding) parameter count; $D$ = training tokens processed (not unique tokens).
+  - *Step-by-step*: each parameter takes part in one multiply-add per token in the forward pass, i.e. $2$ FLOPs, so forward $\approx 2N$ per token. The backward pass computes gradients with respect to both activations and weights, about twice the forward work, $\approx 4N$. Forward + backward $= 2N + 4N = 6N$ per token; times $D$ tokens gives $C\approx 6ND$.
+  - *Example*: $N=10^9$, $D=2\times10^{10}$ gives $C\approx 6\times10^9\times2\times10^{10}=1.2\times10^{20}$ FLOPs. Conversely, $D = C/(6N)$: at fixed $C$, doubling $N$ halves $D$.
 - **Compute-optimal allocation**: the $(N, D)$ that minimizes final loss at fixed $C$. It is defined only relative to a loss model and a training procedure.
 - **Kaplan allocation**: $N_{opt}\propto C^{0.73}$, $D\propto C^{0.27}$, with large models stopped well short of convergence. All their runs used a fixed $2.5\times10^5$ steps with cosine decay to zero (**O**, CLM-002). Classified LEGACY as an allocation rule.
 - **Chinchilla allocation**: three methods give $a = 0.50, 0.49, 0.46$ and $b = 0.50, 0.51, 0.54$. The parametric fit is $L(N,D) = E + A/N^\alpha + B/D^\beta$ with $E=1.69$, $A=406.4$, $B=410.7$, $\alpha=0.34$, $\beta=0.28$. Chinchilla (70B, 1.4T tokens) used the same FLOPs as Gopher (**O**, CLM-003).
+  - *Where*: $L$ = final pretraining loss (cross-entropy per token); $E$ = irreducible loss (what an infinite model on infinite data would still pay); $A/N^\alpha$ = penalty for finite model size; $B/D^\beta$ = penalty for finite data; $\alpha,\beta>0$ = how fast each penalty shrinks. $a$ and $b$ are the exponents in $N_{opt}\propto C^a$, $D_{opt}\propto C^b$; since $C\propto ND$, $a+b=1$ (e.g. $0.46+0.54$). In this module $B$ always means this fitted coefficient, not batch size.
+  - *Reading exponents*: $a=0.50$ means 10× more compute buys $10^{0.5}\approx3.16$× more parameters and $3.16$× more tokens. Kaplan's $a=0.73$ instead puts $10^{0.73}\approx5.4$× into parameters and only $10^{0.27}\approx1.9$× into tokens.
+  - *Cross-entropy and perplexity*: per-token loss is $-\log p(\text{next token})$ averaged over tokens; perplexity is $e^{L}$ when $L$ is in nats. E.g. $L=2.33$ corresponds to perplexity $e^{2.33}\approx10.3$, i.e. the model is as uncertain as a uniform choice among ~10 tokens.
 - **Why they disagree** (several confounds, none sufficient alone):
   - Hoffmann et al.: a fixed token count and schedule across model sizes makes intermediate losses overestimates; a cosine cycle overshooting the run by more than 25% noticeably degrades performance (**O**, CLM-004).
   - Pearce and Song: counting non-embedding parameters at small scale gives a local exponent of 0.74–0.78 (**O**, CLM-006).
   - Porian et al.: last-layer FLOPs, warmup duration, and scale-dependent optimizer tuning; correcting them moved their exponent from ≈0.86 to ≈0.50. They report careful LR decay was *not* essential in their reproduction (**O**, CLM-007).
   - Besiroglu et al.: the Chinchilla Approach-3 fit itself had procedural errors; their refit gives $E=1.8172$, $A=482.01$, $B=2085.43$, $\alpha=0.3478$, $\beta=0.3658$, about 20 tokens per parameter (**O**, CLM-005).
-- **Inference-aware allocation**: adding $2N$ FLOPs per inference token to the objective favors smaller models trained longer when inference demand is large (~1B requests). Sardana et al. report one case of a 16B model on 3.35T tokens replacing a 30B-Chinchilla-quality model at 17% lower cost (**O**, CLM-010).
+- **Inference-aware allocation**: adding $2N$ FLOPs per inference token (forward pass only, so $2N$ rather than $6N$) to the objective favors smaller models trained longer when inference demand is large (~1B requests). Sardana et al. report one case of a 16B model on 3.35T tokens replacing a 30B-Chinchilla-quality model at 17% lower cost (**O**, CLM-010).
 
 **Mechanism Explanation:**
 At fixed $C$, a larger $N$ lowers the $A/N^\alpha$ term but forces fewer tokens, which raises $B/D^\beta$. The optimum balances the marginal gains, which is why the exponents depend only on $\alpha$ and $\beta$. Anything that biases the measured loss at a given $(N,D)$ biases $\alpha$ and $\beta$, and therefore the allocation. A schedule not decayed at the measured checkpoint inflates loss for short runs of large models. Excluding embeddings changes $N$ most at small scale. Untuned small models look worse than they are. The allocation is a property of the measurement procedure as much as of the model.
@@ -109,10 +115,21 @@ Minimize $E + AN^{-\alpha} + B(C/6N)^{-\beta}$ over $N$:
 $$N_{opt}=G\left(\tfrac{C}{6}\right)^{a},\quad D_{opt}=G^{-1}\left(\tfrac{C}{6}\right)^{b},\quad G=\left(\tfrac{\alpha A}{\beta B}\right)^{\frac{1}{\alpha+\beta}},\quad a=\tfrac{\beta}{\alpha+\beta},\ b=\tfrac{\alpha}{\alpha+\beta}.$$
 Assumptions: $C=6ND$ exactly; single epoch over unique data; the fitted form holds at target scale.
 
+*Step-by-step (substitution):*
+1. Fix $C$ and eliminate $D$ with $D=C/(6N)$: $L(N)=E+AN^{-\alpha}+B\left(\tfrac{C}{6}\right)^{-\beta}N^{\beta}$.
+2. Set $dL/dN=0$: $-\alpha AN^{-\alpha-1}+\beta B\left(\tfrac{C}{6}\right)^{-\beta}N^{\beta-1}=0$.
+3. Multiply by $N$: $\alpha AN^{-\alpha}=\beta B\left(\tfrac{C}{6}\right)^{-\beta}N^{\beta}=\beta B D^{-\beta}$. At the optimum, the marginal gain from a bit more $N$ equals the marginal loss from the matching cut in $D$.
+4. Solve for $N$: $N^{\alpha+\beta}=\tfrac{\alpha A}{\beta B}\left(\tfrac{C}{6}\right)^{\beta}$, so $N_{opt}=G\,(C/6)^{\beta/(\alpha+\beta)}$ with $G$ as above.
+5. Then $D_{opt}=(C/6)/N_{opt}=G^{-1}(C/6)^{1-a}=G^{-1}(C/6)^{b}$, since $1-a=\alpha/(\alpha+\beta)=b$.
+
+So $a$ depends only on $\alpha,\beta$; $A$ and $B$ only shift the constant $G$. Tokens per parameter at the optimum is $D_{opt}/N_{opt}=G^{-2}(C/6)^{b-a}$, which is constant in $C$ only when $\alpha=\beta$.
+
 **Worked Example (recomputed from published fits; $C=10^{21}$ FLOPs):**
 1. $C/6 = 1.667\times10^{20}$ token-parameters.
 2. *Hoffmann (rounded)*: $a = 0.28/0.62 = 0.4516$. $N\approx1.82\times10^9$, $D\approx9.1\times10^{10}$, ≈50 tokens/parameter, predicted $L\approx2.33$.
-3. *Besiroglu refit*: $a\approx0.5126$. $N\approx2.78\times10^9$, $D\approx6.0\times10^{10}$, ≈22 tokens/parameter, predicted $L\approx2.31$.
+   - Details: $G=(0.34\cdot406.4/(0.28\cdot410.7))^{1/0.62}\approx1.345$; $N=1.345\times(1.667\times10^{20})^{0.4516}\approx1.82\times10^9$; $D=(1.667\times10^{20})/N\approx9.1\times10^{10}$; check $6ND\approx10^{21}$. Loss: $1.69+406.4/N^{0.34}+410.7/D^{0.28}\approx1.69+0.289+0.350=2.33$.
+   - Optimality check (step 3 above): $0.34\times0.289\approx0.28\times0.350\approx0.098$.
+3. *Besiroglu refit*: $a=0.3658/0.7136\approx0.5126$, $G\approx0.1196$. $N\approx2.78\times10^9$, $D\approx6.0\times10^{10}$, ≈22 tokens/parameter, predicted $L\approx2.31$.
 4. *Chinchilla's own budget*: $6\times70\times10^9\times1.4\times10^{12}=5.88\times10^{23}$. The rounded fit puts the optimum at ≈32.5B/3.0T; the refit at ≈73B/1.34T, close to the actual run.
 5. *Interpretation and limits*: the same data and the same functional form give a 1.5× different model size at $10^{21}$ because of the fit procedure alone. The "20 tokens per parameter" heuristic is a property of one refit, data set, and tokenizer, not a constant. The predicted losses differ by only ≈0.02, so the loss surface is flat near the optimum, and inference cost (CLM-010) can move the decision more than the fit error.
 
@@ -147,11 +164,18 @@ How accurate is a forecast from proxy runs, and which changes make it meaningles
 - **Absolute relative error (ARE)**: $|L_{pred}-L_{obs}|/L_{obs}$ on a held-out larger run. Choshen et al. report ≈4% as the best typically achieved, initialization noise of up to 4% in loss, better fits from intermediate checkpoints and from dropping the first ~10B tokens, and about 5 models as a safe minimum (**O**, CLM-011).
 - **Fit-procedure sensitivity**: the Chinchilla replication shows that loss averaging versus summing, rounding, and optimizer termination change the fitted parameters and their stated intervals (**O**, CLM-005).
 - **Data-constrained regime**: up to 4 epochs of repetition gave negligible loss change versus unique data. Effective tokens follow $D' = U_D + U_D R^*_D(1-e^{-R_D/R^*_D})$ with $R^*_D\approx15.4$, beyond which returns diminish extremely fast (**O**, CLM-009). $R^*_D$ is a decay constant, not the point where repeats become worthless.
+  - *Where*: $U_D$ = unique tokens; $R_D$ = number of *repeats* beyond the first epoch (so total tokens $D=U_D(1+R_D)$, and 4 epochs means $R_D=3$); $R^*_D$ = fitted decay constant; $D'$ = effective unique-token equivalent that replaces $D$ in $B/D^\beta$.
+  - *Reading it*: for small $R_D$, $1-e^{-R_D/R^*_D}\approx R_D/R^*_D$, so $D'\approx U_D(1+R_D)=D$ (repeats count almost fully). As $R_D\to\infty$, $D'\to U_D(1+R^*_D)\approx16.4\,U_D$: no amount of repetition is worth more than ~16 epochs of unique data.
+  - *Example*: $U_D=100$B, $R_D=3$: $e^{-3/15.4}\approx0.823$, so $D'=100\text{B}\times(1+15.4\times0.177)\approx373$B, versus $D=400$B trained.
 - **Downstream unpredictability**: in one meta-analysis, downstream-task scaling was predictable in only 39% of cases (**O**, CLM-012; FRONTIER). Forecast validation loss; check task metrics separately.
 - **Proxy invariants**: data mixture, tokenizer, parametrization, schedule family, and unique-data regime must be the same in proxy and target.
 
 **Mechanism Explanation:**
-In log–log space, $E + AN^{-\alpha}$ is concave. A straight line fitted over a short range is steeper than the curve's tail and runs below the asymptote when extrapolated. The fit can look excellent in range and be badly wrong out of range. Seed noise sets a floor on what any fit can resolve. Changing an invariant changes $E$, $A$, or $\alpha$ themselves, so the proxy points no longer describe the target. Repetition replaces $D$ with a smaller $D'$, so a compute-optimal plan that assumed unique data overstates its token benefit.
+In log–log space, $E + AN^{-\alpha}$ is convex: its slope flattens toward 0 as $N$ grows. A straight line fitted over a short range is steeper than the curve's tail and runs below the asymptote when extrapolated. The fit can look excellent in range and be badly wrong out of range. Seed noise sets a floor on what any fit can resolve. Changing an invariant changes $E$, $A$, or $\alpha$ themselves, so the proxy points no longer describe the target. Repetition replaces $D$ with a smaller $D'$, so a compute-optimal plan that assumed unique data overstates its token benefit.
+
+*Log–log slope, step by step (D):* a pure power law $L=kN^{-p}$ gives $\log L=\log k-p\log N$, a straight line with slope $-p$. With an irreducible term, $L=E+AN^{-\alpha}$, the local slope is
+$$\frac{d\log L}{d\log N}=\frac{N}{L}\frac{dL}{dN}=\frac{-\alpha AN^{-\alpha}}{L}=-\alpha\,\frac{L-E}{L}.$$
+It equals $-\alpha$ only when $E=0$ and shrinks in magnitude as $L$ approaches $E$. For the synthetic truth below ($E=1.8$, $\alpha=0.34$): slope $\approx-0.164$ at $N=10^7$, $-0.090$ at $1.6\times10^8$, $-0.055$ at $10^9$, $-0.028$ at $10^{10}$. A line fitted on $10^7$–$1.6\times10^8$ averages a slope of ≈−0.125, far steeper than the tail, so it undershoots.
 
 **Quantitative Model / Derivation:**
 - Forecast with interval: fit on $k\ge5$ runs; bootstrap over runs and seeds; report $L_{pred}$ with a prediction interval widened by the seed spread at the largest proxy.
@@ -159,9 +183,9 @@ In log–log space, $E + AN^{-\alpha}$ is concave. A straight line fitted over a
 
 **Worked Example (synthetic, noiseless; D, CLM-013):**
 1. *Truth*: $L = 1.8 + 400/N^{0.34}$. Proxies at $N = 1,2,4,8,16\times10^7$ give $L = 3.468, 3.117, 2.841, 2.622, 2.450$.
-2. *Pure power-law fit*: $L \approx 25.76\,N^{-0.1252}$. Maximum in-range residual 1.3%.
-3. *Extrapolation*: at $N=10^9$ it predicts 1.923 versus a true 2.148 (−10.5%). At $10^{10}$ it predicts 1.441 versus 1.959 (−26.4%), below the irreducible loss.
-4. *With an $E$ term misjudged by ±0.1*: predictions at $10^{10}$ are 1.907 or 2.016 (−2.6% / +2.9%).
+2. *Pure power-law fit*: $L \approx 25.76\,N^{-0.1252}$. Maximum in-range residual 1.3%. (Fit = least-squares line through $(\log N,\log L)$; slope $-0.1252$, intercept $\log 25.76$.)
+3. *Extrapolation*: at $N=10^9$ it predicts 1.923 versus a true 2.148 (−10.5%). At $10^{10}$ it predicts 1.441 versus 1.959 (−26.4%), below the irreducible loss. (ARE $=|1.441-1.959|/1.959\approx0.264$; $10^{10}$ is $62.5\times$ the largest proxy.)
+4. *With an $E$ term misjudged by ±0.1* (fix $E=1.7$ or $1.9$, fit $A,\alpha$ as a line through $(\log N,\log(L-E))$): predictions at $10^{10}$ are 1.907 or 2.016 (−2.6% / +2.9%).
 5. *Repetition (D, from CLM-009's form)*: with $U_D = 100$B unique tokens, 400B trained tokens ($R_D=3$) give $D'\approx373$B (93%). 1.6T ($R_D=15$) give $D'\approx1.06$T (66%). 4T ($R_D=39$) give $D'\approx1.52$T (38%).
 6. *Interpretation and limits*: in-range fit quality says almost nothing about extrapolation. The irreducible term matters more than the exponent. Repetition silently turns a planned token count into fewer effective tokens. All values are synthetic or recomputed.
 
@@ -196,18 +220,20 @@ Can a learning rate tuned on a 40M-parameter proxy be used unchanged on a 7B tar
 - **Maximal Update Parametrization (μP)**: per-layer scaling of initialization, multipliers, and Adam learning rate so that updates stay order-one as width grows. In Tensor Programs V's Table 3, Adam LR is 1 for input weights and biases and $1/\text{fan\_in}$ for hidden and output weights; init variance is $1/\text{fan\_in}$ for input and hidden and $1/\text{fan\_in}^2$ for output. The equivalent Table 8 form puts a $1/\text{fan\_in}$ multiplier on the output layer. Attention uses $q^\top k/d$ instead of $q^\top k/\sqrt d$ (**O**, CLM-016).
 - **μTransfer**: tune on a narrow proxy, copy to the wide target. Yang et al. report outperforming published 6.7B GPT-3 numbers from a 40M proxy at a tuning cost of 7% of pretraining, and published BERT-large numbers from a 13M proxy at a tuning cost equal to one BERT-large pretraining. Optimization HPs, init, and multipliers transfer; regularization HPs such as dropout and weight decay are listed as not transferring (**O**, CLM-015).
 - **SP can transfer too**: Everett et al., at up to 26.8B parameters, report that all parameterizations can transfer with per-layer LR prescriptions and that their SP prescription outperformed μP (**O**, CLM-017; FRONTIER).
-- **Depth transfer**: scaling residual branches by $L^{-\alpha}$ with $\alpha=1$ (CompleteP) is reported to give depth-wise transfer over 2–128 layers, with 11.8–34.4% FLOP savings over μP at 1.9B (**O**, CLM-018; FRONTIER, author-reported).
-- **Adam epsilon**: gradient RMS shrinks with scale, so a fixed $\epsilon$ (1e-8) can dominate the denominator. Wortsman et al. report that lowering it to 1e-15 improved loss for a 4.8B model at LR 0.3 while 1e-6 diverged; μParam stabilized the optimal LR but did not reduce LR sensitivity (**O**, CLM-021).
+- **Depth transfer**: scaling residual branches by $L^{-\alpha}$ (here $L$ = number of layers and $\alpha$ a depth exponent, not the loss or the Chinchilla exponent) with $\alpha=1$ (CompleteP) is reported to give depth-wise transfer over 2–128 layers, with 11.8–34.4% FLOP savings over μP at 1.9B (**O**, CLM-018; FRONTIER, author-reported).
+- **Adam epsilon**: gradient RMS shrinks with scale, so a fixed $\epsilon$ (1e-8) can dominate the denominator. Adam's per-entry step is $\eta\,\hat m/(\sqrt{\hat v}+\epsilon)$, where $\hat m$ and $\hat v$ are running means of the gradient $g$ and of $g^2$. If $|g|\gg\epsilon$ the step is $\approx\pm\eta$; if $|g|\approx10^{-9}$ with $\epsilon=10^{-8}$, the step is $\approx\eta\cdot10^{-9}/(1.1\times10^{-8})\approx0.09\,\eta$, so the effective LR silently drops ~11×. Wortsman et al. report that lowering it to 1e-15 improved loss for a 4.8B model at LR 0.3 while 1e-6 diverged; μParam stabilized the optimal LR but did not reduce LR sensitivity (**O**, CLM-021).
 
 **Mechanism Explanation:**
 Under SP with Adam, each hidden-weight entry moves by about the learning rate regardless of width, but a matrix–vector product sums $n$ such changes. The change in activations therefore grows with width $n$, and the stable learning rate falls roughly as $1/n$. μP divides the hidden learning rate by fan-in so that the activation change stays constant, which pins the optimum. The output layer needs an extra $1/\text{fan\_in}$ so logits do not blow up as width grows. Transfer is a statement about *optimum location*, not about loss: μP does not promise a better loss, only a learning rate that means the same thing at every width.
 
 **Quantitative Model / Derivation:**
 For a hidden matrix $W\in\mathbb{R}^{n\times n}$ updated by Adam with entries $\approx\pm\eta$ and input entries $x_j=\Theta(1)$, the coordinate change is $\Delta(Wx)_i=\sum_j\Delta W_{ij}x_j=\Theta(\eta\, n)$ when updates and inputs are correlated (as they are after training aligns them). Holding $\Delta(Wx)_i=\Theta(1)$ requires $\eta\propto1/n$, which is μP's hidden-layer rule.
+- *Where*: $n$ = width (fan-in); $\eta$ = learning rate; $\Theta(\cdot)$ = "same order as", ignoring constants.
+- *Step by step*: Adam normalizes each entry, so $|\Delta W_{ij}|\approx\eta$ regardless of width. If the signs of $\Delta W_{ij}$ and $x_j$ are aligned, the $n$ terms add coherently: $\sum_j \eta\cdot\Theta(1)=\Theta(\eta n)$. (If they were independent random signs they would add as $\sqrt n$; training creates the alignment, so the $n$ case is the one to guard against.) Setting $\eta n=\text{const}$ gives $\eta\propto1/n$.
 
 **Worked Example (synthetic proxy-to-target transfer):**
 - *Setup*: proxy width 256 with tuned global Adam LR $\eta^*=3\times10^{-3}$; target width 4096 (16× wider).
-- *SP, copied LR*: per the derivation, the target's hidden activations move ≈16× more per step than at the proxy. If the proxy's optimum sits within 4× of its own divergence point (an assumption typical of tuned optima), the copied LR is past divergence.
+- *SP, copied LR*: per the derivation, the target's hidden activations move ≈16× more per step than at the proxy ($\eta n$ goes from $3\times10^{-3}\cdot256=0.768$ to $3\times10^{-3}\cdot4096=12.3$). If the proxy's optimum sits within 4× of its own divergence point (an assumption typical of tuned optima), the copied LR is past divergence.
 - *SP, hand-scaled*: dividing by 16 gives $1.875\times10^{-4}$ for hidden weights, but that also shrinks embedding LR, which should not scale with width. This is why a single global SP LR cannot match per-layer needs.
 - *μP*: write the hidden-layer LR as $\eta_{base}\cdot256/\text{fan\_in}$. At the target that equals $3\times10^{-3}\times256/4096=1.875\times10^{-4}$ for hidden weights, while input weights keep $3\times10^{-3}$ and the output layer gets the $1/\text{fan\_in}$ multiplier. One base LR now has the same meaning at both widths.
 - *Interpretation and limits*: the factor-16 argument is an asymptotic order, not an exact constant. Whether the optimum drifts in practice at small widths is the LAB B hypothesis (**H**, CLM-019).
@@ -260,9 +286,16 @@ The OLMo 2 paper's Table 1 gives the z-loss weight as $10^{-5}$ while Section 3.
 - z-loss gradient: $\partial(k\log^2Z)/\partial z_j = 2k\log Z\,p_j$, summing to $2k\log Z$ per position. This is a restoring force on the free shift.
 - Two-key attention with logit gap $\Delta$: weight $=1/(1+e^{-\Delta})$. Scaling $|q|$ and $|k|$ by $g$ scales $\Delta$ by $g^2$.
 
+*Where*: $z_j$ = output logit for vocabulary token $j$; $y$ = correct next token; $Z=\sum_j e^{z_j}$ (partition function), so $\log Z=\text{logsumexp}(z)$; $p_j=e^{z_j}/Z$ = softmax probability; $k$ = z-loss weight; $c$ = any constant; $\Delta$ = difference between two attention logits; $g$ = norm growth factor. This $Z$ is unrelated to compute $C$ or the Chinchilla coefficients.
+
+*Step by step*:
+1. CE $=-\log p_y=-\log(e^{z_y}/Z)=\log Z-z_y$. Adding $c$ to every logit multiplies $Z$ by $e^c$, so $\log Z$ gains $c$ and $z_y$ gains $c$: CE is unchanged, $\log Z$ is not.
+2. $\partial\log Z/\partial z_j=e^{z_j}/Z=p_j$. Chain rule: $\partial(k\log^2Z)/\partial z_j=2k\log Z\cdot p_j$. Since $\sum_j p_j=1$, the total push on the logits is $2k\log Z$, pointing toward $\log Z=0$.
+3. Softmax over two keys: weight on key 1 $=e^{s_1}/(e^{s_1}+e^{s_2})=1/(1+e^{-(s_1-s_2)})$. Logits are $s=q\cdot k$, so multiplying both $q$ and $k$ by $g$ multiplies every $s$, and hence $\Delta$, by $g^2$.
+
 **Worked Example (synthetic):**
-1. *z-loss scale*: with $\log Z = 30$ and $k=10^{-4}$, z-loss $=0.09$ per token, and the summed logit gradient is $0.006$, small next to a CE near 2 but always pointing toward $\log Z=0$. At $k=10^{-5}$ both are 10× smaller.
-2. *Attention collapse*: $\Delta=2$ gives a top weight of 0.881. If query and key norms each grow 3×, $\Delta=18$ and the top weight is $1-1.52\times10^{-8}$: the head attends to a single key, and the gradient through the softmax nearly vanishes for all others.
+1. *z-loss scale*: with $\log Z = 30$ and $k=10^{-4}$, z-loss $=10^{-4}\times30^2=0.09$ per token, and the summed logit gradient is $2\times10^{-4}\times30=0.006$, small next to a CE near 2 but always pointing toward $\log Z=0$. At $k=10^{-5}$ both are 10× smaller.
+2. *Attention collapse*: $\Delta=2$ gives a top weight of $1/(1+e^{-2})=0.881$. If query and key norms each grow 3×, $\Delta=2\times3^2=18$ and the top weight is $1-1.52\times10^{-8}$: the head attends to a single key, and the gradient through the softmax nearly vanishes for all others.
 3. *Skip-step trigger*: rolling loss mean 2.40, standard deviation 0.02, `sigma_factor` 6. The threshold is $2.40+0.12=2.52$. A step at loss 2.55 is skipped; a step at 2.50 is applied.
 4. *Interpretation and limits*: these mechanisms explain *how* logits drift and how mitigations bound them. They do not predict *when* a given run diverges. Skip-step thresholds trade missed spikes against skipped legitimate steps after a distribution change.
 
@@ -295,10 +328,13 @@ Which schedule lets you stop, extend, or compare runs without retraining from sc
 **Concepts & Definitions:**
 - **Warmup**: linear increase from ~0 to peak. Longer warmup reduces LR sensitivity (**O**, CLM-021).
 - **Cosine**: $\eta(t)=\eta_{min}+(\eta_{max}-\eta_{min})(1+\cos(\pi t/T))/2$, tied to a known length $T$. Overshooting $T$ by more than 25% degrades performance (**O**, CLM-004).
+  - *Where*: $\eta(t)$ = LR at step $t$; $\eta_{max}$ = peak LR; $\eta_{min}$ = floor; $T$ = steps in the cosine phase. With warmup of $w$ steps, $t$ is counted from the end of warmup and $T$ is total steps minus $w$ (as in the worked example below).
+  - *Reading it*: $t=0$ gives $\cos 0=1$, so $\eta=\eta_{max}$; $t=T/2$ gives $\cos(\pi/2)=0$, so $\eta$ is the midpoint; $t=T$ gives $\cos\pi=-1$, so $\eta=\eta_{min}$.
+  - *Linear warmup*: $\eta(t)=\eta_{max}\,t/w$ for $t<w$; e.g. with $w=2{,}000$, step 500 runs at 25% of peak.
 - **Warmup-Stable-Decay (WSD)**: warmup, constant peak, then a decreasing decay function over a short final phase. MiniCPM found 10% decay sufficient in its setup and uses WSD to reuse checkpoints for continued training and scaling studies (**O**, CLM-032). Hägele et al. report constant LR plus cooldown matches cosine, gains plateau near 20% cooldown, a (1-sqrt) shape beat linear, and reuse cuts scaling-sweep runs by about an order of magnitude (**O**, CLM-031).
 - **Why loss drops in the decay**: the river-valley conjecture says the high-LR phase progresses along a valley floor while oscillating across it, and the decay removes the oscillation (**O**, CLM-033; FRONTIER). A convex-optimization bound reproduces the cooldown benefit (**O**, CLM-036; FRONTIER).
 - **Decay floor**: Bergsma et al. report linear decay to zero beat cosine to 10% at compute-optimal data sizes, with a 610M model at 80 tokens/parameter beating 10×-decay at 200 tokens/parameter (**O**, CLM-034; abstract-level). OLMo 2 decays linearly to zero in mid-training (**O**, CLM-046).
-- **Schedule-aware loss law**: $L(s)=L_0+A\,S_1^{-\alpha}-C\,S_2$, with $S_1$ the LR area and $S_2$ an annealing area (**O**, CLM-035; FRONTIER).
+- **Schedule-aware loss law**: $L(s)=L_0+A\,S_1^{-\alpha}-C\,S_2$, with $S_1$ the LR area and $S_2$ an annealing area (**O**, CLM-035; FRONTIER). Here $s$ is the training step, $S_1=\sum_{i\le s}\eta_i$ (sum of LRs so far), and $L_0, A, \alpha, C$ are this law's own fitted constants, not the irreducible loss, Chinchilla coefficient, or compute budget of Lesson 25.1.
 
 **Mechanism Explanation — Pinned Schedule Trace (O, CLM-037):**
 At the same OLMo-core commit, `src/olmo_core/optim/scheduler.py`:
@@ -309,11 +345,15 @@ A cosine checkpoint at step $t<T$ is a model at an intermediate LR, so its loss 
 
 **Quantitative Model / Derivation (D, CLM-038):**
 Branch cost for budgets $T_1<\dots<T_k$ with decay fraction $f$: WSD costs $T_k(1-f)+\sum_i fT_i$ steps (the trunk plus each decay), versus $\sum_i T_i$ for independent cosine runs.
+- *Step by step*: the trunk runs at constant LR up to the start of the longest decay, $T_k-fT_k=T_k(1-f)$. Each budget $T_i$ branches at $T_i(1-f)$ (inside the trunk, so free) and pays only its decay of $fT_i$ steps. Total $=T_k(1-f)+f\sum_i T_i$.
 
 **Worked Example (synthetic run; peak $3\times10^{-4}$, 2,000 warmup steps, $T=100{,}000$):**
 1. *LR at step 50,000*: cosine to 10% gives $3\times10^{-5}+2.7\times10^{-4}(1+\cos(\pi\cdot48{,}000/98{,}000))/2\approx1.69\times10^{-4}$. WSD gives $3\times10^{-4}$.
+   - Details: $\eta_{min}=0.1\times3\times10^{-4}=3\times10^{-5}$, $\eta_{max}-\eta_{min}=2.7\times10^{-4}$; $t=50{,}000-2{,}000=48{,}000$ of $T-w=98{,}000$ cosine steps; $\cos(0.4898\pi)\approx0.032$, so the factor is $(1+0.032)/2\approx0.516$ and $\eta\approx3\times10^{-5}+2.7\times10^{-4}\times0.516$.
 2. *LR area $S_1$*: summed over all steps, ≈16.5 (cosine) versus ≈28.2 (WSD with 10% linear decay).
+   - WSD by triangles and rectangles: warmup $\tfrac12\cdot2{,}000\cdot3\times10^{-4}=0.3$; stable $88{,}000\cdot3\times10^{-4}=26.4$; decay $\tfrac12\cdot10{,}000\cdot3\times10^{-4}=1.5$; total $28.2$. Cosine: warmup $0.3$ plus $98{,}000\times$ the cosine's average LR, which is the midpoint $(3\times10^{-5}+3\times10^{-4})/2=1.65\times10^{-4}$, giving $0.3+16.17\approx16.5$.
 3. *Budgets 20k, 60k, 100k*: three cosine runs cost 180k steps. One WSD trunk to 90k plus decays of 2k (from 18k), 6k (from 54k), and 10k (from 90k) costs 108k steps, a 40% saving.
+   - Formula check with $f=0.1$: $100\text{k}\times0.9+0.1\times(20+60+100)\text{k}=90\text{k}+18\text{k}=108\text{k}$; saving $1-108/180=0.40$.
 4. *Interpretation and limits*: a larger $S_1$ does not by itself mean lower loss; the annealing term matters (CLM-035). The 40% depends on the budget set. Whether a WSD branch matches a matched cosine run within seed noise on your model is the LAB D hypothesis (**H**, CLM-049).
 
 **Knowledge Check:**
@@ -360,11 +400,12 @@ A mixture changes which loss the model is minimizing. The target metric (a weigh
 
 **Quantitative Model / Derivation (D, CLM-048):**
 - Mixture objective: $L_{tgt}(h)=\sum_d w_d L_d(h_d)$ subject to $\sum_d h_d=1$.
+  - *Where*: $d$ indexes domains; $h_d$ = training share of domain $d$ (what you choose); $w_d$ = importance of domain $d$ in the target metric (fixed by the goal, not chosen by training); $L_d(h_d)$ = held-out loss on domain $d$, which falls as its share rises. Shifting share to one domain helps it and hurts the others, so the optimum balances marginal gains $w_d\,|dL_d/dh_d|$ across domains.
 - Averaging in a toy valley $L=f(x)+5y^2$: averaging $y$ reduces the mountain term; averaging $x$ lags the river progress.
 
 **Worked Example (synthetic):**
-1. *Mixture*: $L_{web}(h)=2.0+0.30h^{-0.5}$, $L_{code}(h)=1.2+0.10h^{-0.5}$, target $=0.7L_{web}+0.3L_{code}$. Grid over code share: 0.15 → 2.0652, 0.20 → 2.0619, 0.25 → 2.0625, 0.30 → 2.0658. The optimum is ≈0.20, but 0.15–0.30 all lie within 0.004. If seed spread is 0.01, these mixtures cannot be ranked.
-2. *Averaging*: three checkpoints at $(x,y)=(1.0,+0.30),(1.1,-0.25),(1.2,+0.20)$. The last has mountain term $5\cdot0.20^2=0.20$. The average $(1.10, 0.083)$ has $0.035$ but sits 0.10 behind on the river.
+1. *Mixture*: $L_{web}(h)=2.0+0.30h^{-0.5}$, $L_{code}(h)=1.2+0.10h^{-0.5}$, target $=0.7L_{web}+0.3L_{code}$, with $h$ the code share and $L_{web}$ evaluated at the web share $1-h$. E.g. at $h=0.20$: $L_{web}(0.8)=2.0+0.30/\sqrt{0.8}\approx2.3354$, $L_{code}(0.2)=1.2+0.10/\sqrt{0.2}\approx1.4236$, target $=0.7\times2.3354+0.3\times1.4236\approx2.0619$. Grid over code share: 0.15 → 2.0652, 0.20 → 2.0619, 0.25 → 2.0625, 0.30 → 2.0658. The optimum is ≈0.20, but 0.15–0.30 all lie within 0.004. If seed spread is 0.01, these mixtures cannot be ranked.
+2. *Averaging*: three checkpoints at $(x,y)=(1.0,+0.30),(1.1,-0.25),(1.2,+0.20)$. The last has mountain term $5\cdot0.20^2=0.20$. The average $(1.10, 0.083)$ has $0.035$ but sits 0.10 behind on the river. ($\bar y=(0.30-0.25+0.20)/3\approx0.083$, $5\times0.083^2\approx0.035$; $\bar x=1.10$ versus the last $x=1.2$.) Here $x$ = position along the valley (training progress), $y$ = displacement across it (oscillation).
 3. *Interpretation and limits*: the flat region means mixture tuning is mostly about avoiding bad corners, not finding a sharp optimum. Averaging trades river progress for a smaller oscillation term, which is why it pays most at high LR. Real domains transfer to each other; this toy does not.
 
 **Knowledge Check:**

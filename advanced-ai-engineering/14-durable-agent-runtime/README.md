@@ -117,6 +117,21 @@ $$
 s_n=\operatorname{fold}(F,s_0,[e_1,\ldots,e_n]).
 $$
 
+where:
+- $s_0$ is the initial (empty) workflow state, and $s_n$ the state after the first $n$ events;
+- $e_i$ is the $i$-th persisted event, in commit order;
+- $F(s,e)$ is the reducer: it takes a state and one event and returns the next state, using nothing except its two arguments;
+- $\operatorname{fold}$ applies $F$ left to right over the list.
+
+Step-by-step, the fold is just repeated application:
+
+$$
+s_1=F(s_0,e_1),\quad s_2=F(s_1,e_2),\quad\ldots,\quad s_n=F(s_{n-1},e_n)
+\;\;\Longrightarrow\;\; s_n=F(\cdots F(F(s_0,e_1),e_2)\cdots,e_n).
+$$
+
+Two consequences follow directly. (1) Because $F$ reads only its arguments, the same events always give the same $s_n$; a reducer that also reads a clock or a random number has a hidden third argument, and replay can then disagree with the original run. (2) Because $s_n$ depends on $s_{k}$ and the suffix only, a stored state $s_k$ (a checkpoint/snapshot) plus the events $e_{k+1},\ldots,e_n$ gives the same $s_n$ as a full replay from $s_0$. Guided Practice (a) below works this fold on a four-event history.
+
 This reconstructs only state represented by the retained history and schemas (**D**, CLM-001). It does not reconstruct an external payment, message, deployment, or model response unless that observation/effect evidence was recorded.
 
 Replay runtimes compare commands produced by current workflow code with recorded history. Temporal and Azure Durable Functions both document deterministic orchestrator constraints (**O**, CLM-002); that is two runtime families, not every durable engine. Wall clocks, unrecorded random values, mutable environment/configuration, direct network/database/model calls, unordered iteration, and command-changing code edits can diverge.
@@ -141,6 +156,8 @@ For retained events, $s_n=fold(F,s_0,[e_1,\ldots,e_n])$. This is exact only for 
 1. Compare the "what the client saw" column: S1 and S2 are identical to the client, and so are T1 and T2.
 2. Compare the durable prefix: it differs within each pair. The difference is visible only to the store.
 3. Therefore the client's action must be correct in both members of a pair, and the store must make the retry converge.
+
+In plain terms: an acknowledgement travels *after* the commit, so a crash can fall between them. The client then sees a failure for something that is already durable, and the only safe client behavior is "retry with the same ID and let the store recognize it".
 
 *Result.* After recovery every case has exactly one `Started` event and at most one `SignalReceived(approve-1)`. A client may treat the operation as durable only after an acknowledgement. Without one it knows nothing, and "no acknowledgement" must not be read as "did not happen".
 
@@ -196,6 +213,8 @@ $$
 apply(apply(x,k),k)=apply(x,k).
 $$
 
+where $x$ is the receiver's protected state before the operation, $k$ is the operation key (always sent with the same canonical intent), and $apply(x,k)$ is the state after the receiver processes one delivery of that keyed operation. Read left to right: delivering the operation a second time must leave the state exactly where the first delivery left it. Numeric check with the debit used below ($x$ = balance 100, $k$ = debit 30): $apply(100,k)=70$; a second delivery must return the stored outcome, so $apply(70,k)=70$, not $40$. A plain `balance -= 30` without the key record gives $40$ and fails the property.
+
 Test it under concurrent duplicates and key reuse with different intent. A header/key is not enough unless the receiver stores key + canonical intent + outcome atomically and defines scope and retention (**D**, CLM-005).
 
 **Receiver-side idempotency contract.** This is the contract other modules reference (Module 10, Lesson 10.2 applies it to index writes). The receiver, not the sender, enforces it:
@@ -230,6 +249,13 @@ A transactional outbox stores domain change and publish intent in one local tran
 
 **Quantitative Model / Derivation:**
 The required idempotency property is $apply(apply(x,k),k)=apply(x,k)$ for the same key and canonical intent. A receiver must reject key reuse with different intent.
+
+*Delivery vocabulary used in this lesson.* Count, for one logical effect, how many times it is *delivered* (sent to the receiver) and how many times it is *applied* (changes the receiver's state):
+- **At-most-once delivery**: send once, never retry. Applied 0 or 1 times; a lost message is lost.
+- **At-least-once delivery**: retry until an outcome is recorded. Delivered 1 or more times; without receiver deduplication it may be applied more than once.
+- **Effect convergence** ("effectively once"): at-least-once delivery combined with a receiver that applies each key at most once. Delivered $\ge 1$ times, applied exactly once, but only for receivers that implement the contract and only while the key record is retained.
+
+A timeout only means the caller stopped waiting; it says nothing about whether the receiver committed. That is why the recovery below asks the receiver (by key) instead of inferring the outcome from the timeout.
 
 **Worked Example (synthetic fixture):**
 
@@ -292,12 +318,12 @@ The 1987 Sagas paper is the reference model: decompose long-lived work into subt
 
 Register compensation before or atomically with the effect intent, preserve dependency order, and expose states such as `compensation_pending`, `compensation_failed`, `partially_compensated`, and `manual_recovery`.
 
-Leases alone do not revoke a paused stale worker. If ownership epoch `q` increases on takeover, the protected resource must reject a write older than its last accepted epoch. Fencing prevents later stale writes only where enforced; it cannot undo an already accepted effect (**D**, CLM-009).
+Leases alone do not revoke a paused stale worker. A lease is a promise made by the lease service; a paused worker cannot see that its lease expired, so on resume it still acts as owner. Only a check at the resource that receives the write can stop it. If ownership epoch `q` increases on takeover, the protected resource must reject a write older than its last accepted epoch. Fencing prevents later stale writes only where enforced; it cannot undo an already accepted effect (**D**, CLM-009).
 
 The Chubby lock service paper describes the same idea as a *sequencer*: the lock holder passes the lock's name, mode, and generation number with its requests, and the recipient server rejects a request whose sequencer is no longer valid, checking it either against the lock service or against the most recent sequencer it has observed (**O**, CLM-018). The second option has a window, shown in the trace below.
 
 **Quantitative Model / Trade-off Comparison:**
-A resource with last accepted epoch $q_{last}$ accepts a write only when $q\ge q_{last}$, then sets $q_{last}\leftarrow q$. This prevents later stale writes where enforced; it cannot undo prior effects, and it rejects an old epoch only after the resource has seen a newer one.
+A resource with last accepted epoch $q_{last}$ accepts a write only when $q\ge q_{last}$, then sets $q_{last}\leftarrow q$, where $q$ is the epoch carried by the incoming write and $\leftarrow$ means "store this value". Per write, step by step: (1) compare $q$ with the stored $q_{last}$; (2) if $q<q_{last}$, reject and change nothing; (3) otherwise apply the write and store $q_{last}\leftarrow q$ (unchanged when $q=q_{last}$, raised when $q>q_{last}$). Example: with $q_{last}=7$, a write with $q=8$ is accepted and $q_{last}$ becomes 8; a later write with $q=7$ is then rejected since $7<8$. This prevents later stale writes where enforced; it cannot undo prior effects, and it rejects an old epoch only after the resource has seen a newer one.
 
 The comparison is $\ge$, not $>$, and that differs on purpose from the version rule of Module 10, Lesson 10.2, which accepts only a strictly newer version:
 
@@ -383,6 +409,8 @@ Measure workflow-history and payload growth. High fan-out, frequent signals, ver
 **Quantitative Model / Derivation:**
 For parallel child durations $T_i$, an all-of join cannot succeed before $\max_i T_i$ plus scheduling/join overhead, while total attempted work sums child attempts.
 
+Here $T_i$ is the time from dispatch until child $i$ finally completes (including its retries). The all-of join needs every child, so it waits for the slowest: latency $\ge\max_i T_i$. Work instead adds up every attempt's duration across all children, $\sum_i\sum_j d_{ij}$, where $d_{ij}$ is the running time of attempt $j$ of child $i$. Example from the five-child fixture below, if c4 were allowed to finish at 12 s: completions at 2, 3, 4, 12, 8 s give all-of latency $\ge\max=12$ s, while work is $2+3+4+12+(5+3)=29$ child-seconds. Parallelism shortens the wait, not the work.
+
 History size and replay cost follow from four declared quantities: events per activity attempt, payload size, run shape, and retention.
 
 $$
@@ -397,6 +425,15 @@ t_{replay}=\frac{H}{r_e}+\frac{B}{r_b}.
 $$
 
 $N_a$ is activity attempts per run, $H$ history events, $B$ history bytes, $R$ retained histories at steady state (start rate times time in the store), and $t_{replay}$ the time to fetch and replay one history. The formulas are bookkeeping identities for a runtime that records every attempt; every input must be measured for a real runtime.
+
+Reading each formula (symbols are defined in the input table below):
+1. $N_a$: each of $N_{steps}$ steps runs $n_{act}$ activities, and each activity takes $\bar a$ attempts on average, so attempts multiply.
+2. $H$: a fixed $e_0$ events per run, plus $e_a$ events for every attempt, plus one event per signal.
+3. $B$: every event carries metadata $m$; every attempt adds its payload $p$; every signal adds $p_{sig}$. With $m$, $p$, $p_{sig}$ in KiB, $B$ is in KiB.
+4. $R$: a run stays in the store while open ($T_{open}$) and then for $T_{retain}$; at a steady start rate $\lambda$, the number present at any moment is rate times time in store (the "arrival rate × time in system" count of Little's law). Units: runs/day × days = runs.
+5. $t_{replay}$: process $H$ events at $r_e$ events/s, plus fetch $B$ bytes at $r_b$; convert $B$ to MiB before dividing by $r_b$ in MiB/s.
+
+Symbol note: $H$ (event count) is unrelated to the intent hashes `h1`, `h2` of Lesson 14.2, $e_a$/$e_0$ are counts, not the events `e1`, `e2` of the history tables, and $R$ here is a count of histories, not a receipt.
 
 *Synthetic estimate.* All inputs below are exercise assumptions (CLM-021), not measurements of any runtime.
 
@@ -420,12 +457,20 @@ $N_a$ is activity attempts per run, $H$ history events, $B$ history bytes, $R$ r
 | replay work after a fleet restart; wall time on 16 slots | 647 s; 40.4 s | 534 s; 33.4 s |
 | growth per agent step | 15 events, 19.5 KiB | 15 events, 5.0 KiB |
 
+*Step-by-step for the table* (1 MiB = 1,024 KiB; 1 GiB = 1,024 MiB):
+1. $N_a=40\times2\times1.25=100$; $H=5+100\times6+10=615$.
+2. $B$ embedded $=615\times0.3+100\times6+10\times1=184.5+600+10=794.5$ KiB; $794.5/1024=0.776$ MiB. With references, the middle term becomes $100\times0.2=20$, so $B=214.5$ KiB $=0.209$ MiB.
+3. $R=2{,}000\times(2+30)=64{,}000$; storage $64{,}000\times794.5$ KiB $=50{,}848{,}000$ KiB $/1024^2=48.49$ GiB (embedded) and $64{,}000\times214.5$ KiB $=13.09$ GiB (references). The payloads moved out are $64{,}000\times100\times6$ KiB $=36.62$ GiB.
+4. $t_{replay}=615/5{,}000+0.776/20=0.123+0.039=0.162$ s embedded; $0.123+0.209/20=0.123+0.010=0.133$ s with references.
+5. Open runs $=\lambda T_{open}=2{,}000\times2=4{,}000$. Fleet-restart replay work $=4{,}000\times0.162\approx647$ s, and on 16 slots $647/16\approx40.4$ s; with references $4{,}000\times0.133\approx534$ s and $534/16\approx33.4$ s (computed from unrounded times).
+6. Per agent step: events $n_{act}\bar a\,e_a=2\times1.25\times6=15$; bytes $15\times0.3+2.5\times6=4.5+15=19.5$ KiB embedded, $4.5+2.5\times0.2=5.0$ KiB with references.
+
 *Interpretation and limits.*
 - References move bytes; they do not remove them. Total storage is 49.71 GiB with references against 48.49 GiB embedded, and the object store must now retain payloads at least as long as the histories that point to them.
 - The restart figures assume every open run is at full length, perfect parallelism, and no queueing. They size a bound; they do not predict a recovery time. Replay timing counts as evidence only when measured, and a synthetic value must stay labeled synthetic.
 - The replay time with references assumes orchestration code does not read the payloads. If it does, the fetch moves to the object store and returns to the total.
 - One mean history cannot bound a heavy-tailed population. Size the largest runs separately.
-- Limits are runtime-specific. One runtime documents a warning at 10,240 events or 10 MB and termination at 51,200 events or 50 MB of history per execution (**O**, CLM-020). Reading MB as MiB, this model with embedded payloads crosses the warning by size after 524 steps, before the event-count warning at 681 steps. With references, the event count binds first at 681 steps and size not until 2,045. The same documentation states that an activity's started event is written together with its terminal event, so $e_a$ per *attempt* is exactly the kind of input that must be measured rather than assumed.
+- Limits are runtime-specific. One runtime documents a warning at 10,240 events or 10 MB and termination at 51,200 events or 50 MB of history per execution (**O**, CLM-020). Reading MB as MiB, this model with embedded payloads crosses the warning by size after 524 steps, before the event-count warning at 681 steps. With references, the event count binds first at 681 steps and size not until 2,045. Derivation for $S$ agent steps: the fixed part is $e_0+N_{sig}=15$ events and $15\times0.3+10=14.5$ KiB, and each step adds 15 events and 19.5 KiB (or 5.0 KiB). Events: $15+15S\le10{,}240\Rightarrow S\le681.7$. Size embedded: $14.5+19.5S\le10{,}240\Rightarrow S\le524.4$. Size with references: $14.5+5.0S\le10{,}240\Rightarrow S\le2{,}045.1$. The smallest bound binds first. The same documentation states that an activity's started event is written together with its terminal event, so $e_a$ per *attempt* is exactly the kind of input that must be measured rather than assumed.
 
 **Worked Example (synthetic fixture):**
 
@@ -439,7 +484,7 @@ $N_a$ is activity attempts per run, $H$ history events, $B$ history bytes, $R$ r
 | c4 | 1 | nothing by 10; a completion arrives at 12 | timed out; the result at 12 is recorded as `late` |
 | c5 | 2 | attempt 1 fails at 5; attempt 2 completes at 8 | completed |
 
-*Steps.* Evaluate each join predicate over distinct child IDs in the persisted membership, at each event time.
+*Steps.* Evaluate each join predicate over distinct child IDs in the persisted membership, at each event time. Work is counted from $t=0$ to each attempt's end or cancellation: for quorum at 4 s, c1–c3 contribute 2, 3, 4, and c4 and c5 (attempt 1, still running) are cancelled at 4, contributing 4 each. For all-of, c4 runs to the 10 s deadline and c5 contributes its two attempts, $5+(8-5)=5+3$.
 
 | Join policy | Decided at | Outcome | Distinct children counted | Attempted work if cancellation is immediate |
 |---|---:|---|---:|---|
@@ -507,7 +552,7 @@ Build a crash matrix around every boundary: before/after history append, task de
 The claim that boundary-targeted injection finds more failures than generic restart tests is a hypothesis (**H**, CLM-016). Compare unique actionable failures, escaped incidents, test cost, and oracle divergence. Use a no-failure oracle for final state/effects, while acknowledging that irreversible real-world effects may require a sandbox.
 
 **Quantitative Model / Trade-off Comparison:**
-Report recovery-time distribution, duplicate/lost/unknown effects, stuck workflows, replay failures, compensation outcomes, and manual interventions by injected boundary. Counts without opportunity denominators cannot compare fault coverage.
+Report recovery-time distribution, duplicate/lost/unknown effects, stuck workflows, replay failures, compensation outcomes, and manual interventions by injected boundary. Counts without opportunity denominators cannot compare fault coverage. An *opportunity* is one injected crash at one point: opportunities $=$ boundaries $\times$ sides (before/after) $\times$ trials per point, and a rate is observed failures divided by the opportunities at the same scope. Guided Practice (a) works this out.
 
 **Worked Example (synthetic fixture):**
 *Input.* A crash is injected after the external commit and before activity completion, which is case W3 of Lesson 14.2. Two views exist: the workflow dashboard and the receiver's ledger.

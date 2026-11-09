@@ -180,6 +180,12 @@ $$
 \mathbb{E}[Y\mid Q=q]=q.
 $$
 
+where:
+- $Q$ is the confidence as a random variable over the declared population, and $q$ is one particular value it takes;
+- $Y\in\{0,1\}$ is the forecast event, so $\mathbb{E}[Y\mid Q=q]=P(Y=1\mid Q=q)$ is the true frequency of the event among items that received confidence $q$.
+
+Read it as: "of all items stamped with confidence 0.7, a fraction 0.7 actually have $Y=1$." Example: if 100 items get $q=0.7$ and 58 of them are correct, the observed frequency is $0.58$, so on that group the forecaster is overconfident by $0.12$ (up to sampling noise).
+
 This is an estimand, not a finite-sample test result. Change correctness rules, prompts, languages, time, or subgroups and the estimand changes. Aggregate calibration can coexist with severe subgroup miscalibration.
 
 For confidence bins $B_b$, a common estimator is:
@@ -187,6 +193,14 @@ For confidence bins $B_b$, a common estimator is:
 $$
 ECE=\sum_b\frac{n_b}{n}|acc(B_b)-conf(B_b)|.
 $$
+
+where:
+- $B_b$ is the set of items whose confidence falls in bin $b$ (bin edges are declared below), $n_b=|B_b|$, and $n$ is the total item count, so the weights $n_b/n$ sum to 1;
+- $acc(B_b)=\frac{1}{n_b}\sum_{i\in B_b}y_i$ is the observed event frequency in the bin (written $\bar y$ in the worked example);
+- $conf(B_b)=\frac{1}{n_b}\sum_{i\in B_b}q_i$ is the mean confidence in the bin (written $\bar q$);
+- $|\cdot|$ is the absolute gap, so over- and under-confidence both count as error.
+
+Step-by-step: (1) assign each item to a bin by its $q_i$; (2) per non-empty bin compute $\bar y$ and $\bar q$; (3) take $|\bar y-\bar q|$; (4) weight by $n_b/n$ and sum. ECE is a binned plug-in estimate of $\mathbb{E}\,|\mathbb{E}[Y\mid Q]-Q|$, which is zero under perfect calibration.
 
 ECE depends on binning and finite-sample noise. Report bin definitions/counts and uncertainty. Complement it with accuracy and ranking plus proper scores such as:
 
@@ -198,6 +212,15 @@ $$
 NLL=-\frac1n\sum_i[y_i\log q_i+(1-y_i)\log(1-q_i)].
 $$
 
+where $y_i\in\{0,1\}$ is item $i$'s label, $q_i$ its confidence, $n$ the item count, and $\log$ is the natural log (see conventions below).
+
+Per item, the NLL bracket keeps only one term because $y_i$ is 0 or 1: if $y_i=1$ the loss is $-\ln q_i$; if $y_i=0$ it is $-\ln(1-q_i)$. In words, NLL charges $-\ln(\text{probability given to what actually happened})$. Brier is the squared distance between the forecast and the 0/1 outcome, so it lies in $[0,1]$ per item; NLL is unbounded as the probability given to the realized outcome goes to 0.
+
+*Why these are proper (step-by-step).* Suppose the true probability of $Y=1$ is $p$ and the forecaster reports $q$.
+1. Expected Brier loss: $p(1-q)^2+(1-p)q^2$. Its derivative in $q$ is $-2p(1-q)+2(1-p)q=2(q-p)$, which is zero only at $q=p$, and the function is convex, so honest reporting minimizes it.
+2. Expected NLL: $-p\ln q-(1-p)\ln(1-q)$. Its derivative is $-p/q+(1-p)/(1-q)$; setting it to zero gives $p(1-q)=(1-p)q$, i.e. $q=p$.
+3. Example with $p=0.7$: reporting $q=0.7$ gives expected Brier $0.7(0.09)+0.3(0.49)=0.210$; exaggerating to $q=0.9$ gives $0.7(0.01)+0.3(0.81)=0.250$, which is worse.
+
 These scores combine calibration and sharpness; they do not localize the failure cause.
 
 *Conventions used in this module:* NLL uses the natural logarithm (units: nats). A forecast of exactly $0$ or $1$ on the wrong outcome gives infinite NLL; report that as $\infty$ with the offending item IDs instead of silently clipping. If a pipeline must clip, declare $\epsilon$ and report both clipped NLL and the count of clipped items. ECE uses equal-width bins $[0,0.2),[0.2,0.4),\dots,[0.8,1.0]$ (the last bin closed), weights each non-empty bin by $n_b/n$, and skips empty bins. Every ECE report states its bin edges.
@@ -208,11 +231,21 @@ $$
 p_T(y\mid x)=softmax(z(x)/T)_y,\quad T>0.
 $$
 
+where:
+- $x$ is the input, $y$ a candidate class/answer option (here $y$ is a class index, not the 0/1 label $y_i$ above);
+- $z(x)$ is the model's logit vector, with entry $z_y$ for class $y$;
+- $softmax(v)_y=e^{v_y}/\sum_{j}e^{v_j}$;
+- $T$ is the single fitted temperature ($T=1$ leaves the model unchanged; $T>1$ flattens, $T<1$ sharpens). Do not confuse $T$ with the threshold $t$ of Lesson 7.3.
+
+*Why argmax is preserved.* For $T>0$, $z_a>z_b \Rightarrow z_a/T>z_b/T \Rightarrow e^{z_a/T}>e^{z_b/T}$, and all classes share the same denominator, so the class order never changes; only the gaps between probabilities do.
+
+*Example.* Logits $z=(2,1,0)$ give probabilities $(0.665, 0.245, 0.090)$ at $T=1$, $(0.506, 0.307, 0.186)$ at $T=2$, and $(0.867, 0.117, 0.016)$ at $T=0.5$. Class 1 stays the argmax in all three; its probability, which is the confidence being calibrated, moves from 0.506 to 0.867. In practice $T$ is chosen to minimize NLL on the calibration split.
+
 It preserves argmax but changes probability sharpness (**O**, CLM-003). Fit $T$ only on calibration data, freeze it before testing, and repeat after shift. One scalar cannot generally correct task-, class-, language-, or subgroup-conditional errors.
 
 For free-form generation, declare how a scalar is constructed: selected-token log probability, length normalization, answer-option probability, prompted P(True), learned probe, verifier, or another signal. Jiang et al. show calibration problems in studied generative QA models (**O**, CLM-006); Kadavath et al. show promising but task-dependent P(True)/P(IK) behavior (**O**, CLM-007). Neither licenses universal self-confidence semantics.
 
-*Tokenization facts needed here (taught at first use).* A tokenizer maps text to a sequence of token IDs. The same answer can be expressed with different numbers of tokens, and one string can have more than one tokenization. A sequence log-likelihood is the sum of per-token log-probabilities (Module 01, Lesson 1.2), so it is a score for a *token sequence under one tokenizer*, not for an answer's correctness. Synthetic illustration: the answer "Paris" generated as 2 tokens with probabilities $0.9$ and $0.8$ has sequence probability $0.72$ ($-0.329$ nats). The equally correct "The capital is Paris" generated as 4 tokens with probabilities $0.9, 0.8, 0.7, 0.9$ has $0.4536$ ($-0.790$ nats). Length normalization (mean log-probability) gives $-0.164$ and $-0.198$ nats, which is closer but still different. Two consequences follow: raw and length-normalized likelihoods rank equally correct answers differently, and a tokenizer or chat-template revision changes these scores without any change in correctness. Pin the tokenizer revision with the confidence definition.
+*Tokenization facts needed here (taught at first use).* A tokenizer maps text to a sequence of token IDs. The same answer can be expressed with different numbers of tokens, and one string can have more than one tokenization. A sequence log-likelihood is the sum of per-token log-probabilities (Module 01, Lesson 1.2), so it is a score for a *token sequence under one tokenizer*, not for an answer's correctness. Synthetic illustration: the answer "Paris" generated as 2 tokens with probabilities $0.9$ and $0.8$ has sequence probability $0.72$ ($-0.329$ nats). The equally correct "The capital is Paris" generated as 4 tokens with probabilities $0.9, 0.8, 0.7, 0.9$ has $0.4536$ ($-0.790$ nats). Length normalization (mean log-probability) gives $-0.164$ and $-0.198$ nats, which is closer but still different. (Arithmetic: $\ln 0.9=-0.1054$, $\ln 0.8=-0.2231$, $\ln 0.7=-0.3567$. Two tokens: $-0.1054-0.2231=-0.3285$, mean $-0.3285/2=-0.164$. Four tokens: $-0.1054-0.2231-0.3567-0.1054=-0.7906$, mean $-0.7906/4=-0.198$. Summing logs is the same as multiplying probabilities: $e^{-0.3285}=0.72$.) Two consequences follow: raw and length-normalized likelihoods rank equally correct answers differently, and a tokenizer or chat-template revision changes these scores without any change in correctness. Pin the tokenizer revision with the confidence definition.
 
 **Worked Example (synthetic exercise data):**
 *Input.* One model answered 10 held-out questions; $y_i=1$ means the answer was labeled correct, so the answer accuracy is $6/10$ for both forecasters. Two confidence constructions, A and B, forecast the same events:
@@ -226,10 +259,10 @@ For free-form generation, declare how a scalar is constructed: selected-token lo
 *Steps.*
 
 1. Brier for A: squared errors are $0.0025, 0.0225, 0.0625, 0.4225, 0.1225, 0.3025, 0.3025, 0.1225, 0.5625, 0.0025$; the sum is $1.925$, so $Brier_A=0.1925$. For B, five items contribute $0.16$ and five contribute $0.36$, so $Brier_B=2.2/10=0.2200$.
-2. NLL (nats) for A: the per-item losses are $-\ln q_i$ when $y_i=1$ and $-\ln(1-q_i)$ when $y_i=0$; for example item 9 contributes $-\ln 0.25=1.3863$. The mean is $NLL_A=0.5447$. For B, $NLL_B=0.6325$.
-3. Five-bin ECE for A: bins hold $(n, \bar y, \bar q)$ = $(1, 0, 0.05)$, $(2, 0.5, 0.30)$, $(2, 0.5, 0.50)$, $(3, 0.667, 0.683)$, $(2, 1.0, 0.90)$. Weighted gaps: $0.1(0.05)+0.2(0.20)+0.2(0)+0.3(0.0167)+0.2(0.10)=0.0700$. For B only two bins are non-empty: $(5,0.4,0.4)$ and $(5,0.8,0.6)$, giving $0.5(0)+0.5(0.2)=0.1000$.
+2. NLL (nats) for A: the per-item losses are $-\ln q_i$ when $y_i=1$ and $-\ln(1-q_i)$ when $y_i=0$; for example item 9 contributes $-\ln 0.25=1.3863$. The mean is $NLL_A=0.5447$. For B, $NLL_B=0.6325$. (All ten A losses: $0.0513, 0.1625, 0.2877, 1.0498, 0.4308, 0.7985, 0.7985, 0.4308, 1.3863, 0.0513$, sum $5.4475$. For B every item gives either $-\ln0.6=0.5108$ (items 1, 2, 3, 5, 6, 8, 10) or $-\ln0.4=0.9163$ (items 4, 7, 9), so $NLL_B=(7\cdot0.5108+3\cdot0.9163)/10=0.6325$.)
+3. Five-bin ECE for A: bin members are $[0,0.2)$: item 10; $[0.2,0.4)$: items 8, 9; $[0.4,0.6)$: items 6, 7; $[0.6,0.8)$: items 3, 4, 5; $[0.8,1.0]$: items 1, 2. These bins hold $(n, \bar y, \bar q)$ = $(1, 0, 0.05)$, $(2, 0.5, 0.30)$, $(2, 0.5, 0.50)$, $(3, 0.667, 0.683)$, $(2, 1.0, 0.90)$. Weighted gaps: $0.1(0.05)+0.2(0.20)+0.2(0)+0.3(0.0167)+0.2(0.10)=0.0700$. For B only two bins are non-empty: $(5,0.4,0.4)$ and $(5,0.8,0.6)$, giving $0.5(0)+0.5(0.2)=0.1000$.
 4. Two-bin ECE (edges $[0,0.5),[0.5,1.0]$): A has bins $(4,0.5,0.275)$ and $(6,0.667,0.733)$, so $0.4(0.225)+0.6(0.0667)=0.1300$. B is unchanged at $0.1000$.
-5. Ranking: counting positive–negative pairs with ties as one half, AUROC is $18.5/24=0.771$ for A and $17/24=0.708$ for B.
+5. Ranking: counting positive–negative pairs with ties as one half, AUROC is $18.5/24=0.771$ for A and $17/24=0.708$ for B. AUROC is the probability that a random correct item gets a higher $q$ than a random wrong item; there are $6\times4=24$ (positive, negative) pairs. For A, the positives $0.95,0.85,0.75$ each beat all 4 negatives ($12$); $0.65$ beats $0.55,0.35,0.05$ and ties $0.65$ ($3.5$); $0.45$ beats 2 ($2$); $0.25$ beats 1 ($1$): total $18.5$. For B, the four positives at $0.60$ each beat three negatives and tie one ($4\times3.5=14$), and the two positives at $0.40$ tie three negatives ($2\times1.5=3$): total $17$.
 
 *Result.* A beats B on Brier, NLL, AUROC, and five-bin ECE. With two bins, however, B has the *lower* ECE ($0.100<0.130$). The ECE ranking depends on the binning choice, while both proper scores give the same ordering.
 
@@ -243,7 +276,7 @@ For free-form generation, declare how a scalar is constructed: selected-token lo
 (a) By hand, for $y=(1,0,1,1)$ and $q=(0.9,0.3,0.6,0.8)$, compute Brier, NLL in nats, and two-bin ECE with the edges above. (b) Fit temperature on a calibration split, freeze it, and evaluate raw and scaled scores on in-distribution and shifted test sets. Report bins, counts, uncertainty, proper scores, ranking, and slice results.
 
 **Feedback Contract:**
-- *Expected Evidence*: (a) Brier $=0.0750$; NLL $=0.2990$ nats; two-bin ECE $=0.25$, because the low bin holds only item 2 ($|0-0.3|$, weight 0.25) and the high bin holds items 1, 3, and 4 with $\bar y=1$ and $\bar q=0.767$ (gap $0.233$, weight 0.75). The sum is $0.075+0.175=0.25$. (b) Exact event and population, split lineage, fitted $T$, raw predictions, reproducible binning, and held-out results.
+- *Expected Evidence*: (a) Brier $=(0.01+0.09+0.16+0.04)/4=0.0750$; NLL $=(0.1054+0.3567+0.5108+0.2231)/4=0.2990$ nats (item 2 has $y=0$, so it contributes $-\ln(1-0.3)$); two-bin ECE $=0.25$, because the low bin holds only item 2 ($|0-0.3|$, weight 0.25) and the high bin holds items 1, 3, and 4 with $\bar y=1$ and $\bar q=0.767$ (gap $0.233$, weight 0.75). The sum is $0.075+0.175=0.25$. (b) Exact event and population, split lineage, fitted $T$, raw predictions, reproducible binning, and held-out results.
 - *Common Failure*: Using $\log_{10}$ or clipping without saying so, which makes NLL incomparable. Fitting $T$ or choosing bins on the reported test set.
 - *Diagnostic Hint*: If your ECE differs, list each bin's members; an item at exactly $0.5$ belongs to the upper bin under these edges. For (b), ask which examples determined the transformation.
 - *Concept to Revisit*: Calibration Versus Discrimination; Proper Scoring Rule.
@@ -276,6 +309,13 @@ $$
 coverage(t)=P(A_t),\qquad risk(t)=\mathbb{E}[L\mid A_t].
 $$
 
+where:
+- $s_i$ is the acceptance score of item $i$ (in the example below, $s_i=q^A_i$) and $t$ is the threshold;
+- $A_t$ is the event "the item is accepted", i.e. $s_i\ge t$;
+- $L$ is the per-item loss of the delivered answer; with 0/1 loss ($L=1$ if wrong), $risk(t)$ is the error rate among accepted items.
+
+Empirical versions on $n$ items: $coverage(t)=\#\{i: s_i\ge t\}/n$ and $risk(t)=\#\{\text{accepted and wrong}\}/\#\{\text{accepted}\}$. The risk denominator is the accepted count, not $n$, which is why risk is undefined when nothing is accepted. Raising $t$ can only shrink the accepted set, so coverage never increases with $t$; risk usually falls but is not guaranteed to be monotone.
+
 Plot risk against coverage and report prespecified operating points. A system can achieve near-zero answered risk by rejecting almost everything. Therefore record abstention/retry/escalation cost, user abandonment, queue/capacity impact, subgroup coverage, and risk among rejected cases when labels are obtainable.
 
 Calibration and ranking answer different questions. A monotone score may rank risk well but be numerically miscalibrated; a globally calibrated score can rank poorly inside a narrow operating range. Thresholds selected on the test set leak outcomes. Thresholds selected once can fail after model, prompt, traffic, or knowledge shift.
@@ -285,7 +325,7 @@ Possible actions are not only “answer” or “refuse”: retrieve evidence, i
 **Worked Example (synthetic exercise data and costs):**
 *Input.* Use the 10 items and score $q^A$ from Lesson 7.2 as the acceptance score. The exercise utility is $+1$ for an accepted correct answer, $-4$ for an accepted wrong answer, and $-0.3$ for each item routed to escalation, assuming escalation always resolves the item. The escalation queue can absorb at most 5 of every 10 items.
 
-*Steps.* For each threshold, count accepted items ($q^A\ge t$), wrong accepted items, and rejected items. Then compute total utility as $1\cdot\text{right}-4\cdot\text{wrong}-0.3\cdot\text{rejected}$.
+*Steps.* For each threshold, count accepted items ($q^A\ge t$), wrong accepted items, and rejected items. Then compute total utility as $1\cdot\text{right}-4\cdot\text{wrong}-0.3\cdot\text{rejected}$, and divide by 10 for utility per item. Example row $t=0.6$: accepted items 1–5 ($q^A\ge0.6$), of which item 4 is wrong, so right $=4$, wrong $=1$, rejected $=5$; coverage $5/10=0.5$, risk $1/5=0.20$, utility $(4-4-1.5)/10=-0.15$. Row $t=0.7$: accepted items 1–3, all right, so $(3-0-2.1)/10=+0.09$.
 
 | $t$ | coverage | accepted wrong | selective risk | rejected (of which model was right) | utility / item | within escalation capacity? |
 |---|---|---|---|---|---|---|
@@ -344,6 +384,10 @@ Evaluation must use an independent correctness label—not the same detector bei
 **Worked Example (synthetic samples; simplified estimator):**
 *Estimator used here.* Sample $m=5$ answers, group them into meaning clusters $c$ with an equivalence judge, and compute the discrete entropy $H=-\sum_c \hat p_c\ln\hat p_c$ in nats, where $\hat p_c$ is the fraction of samples in cluster $c$. This frequency-based estimate is a teaching simplification. Published estimators may weight clusters differently, for example by sequence likelihood, and this toy does not reproduce any paper's estimator.
 
+Symbols: $m$ is the sample count; $c$ ranges over clusters; $\hat p_c=(\text{samples in }c)/m$, so the $\hat p_c$ sum to 1. $H=0$ when all samples fall in one cluster ($1\cdot\ln1=0$); with $m=5$ the maximum is $\ln5=1.609$ nats, reached when all five samples are in different clusters. The symbol $H$ here is unrelated to the **H** (hypothesis) evidence tag.
+
+Case 3, step by step: $\hat p=(0.4,0.4,0.2)$; $-\ln0.4=0.9163$ and $-\ln0.2=1.6094$; $H=2(0.4)(0.9163)+0.2(1.6094)=0.7330+0.3219=1.055$ nats. Case 2: $0.6(0.5108)+0.4(0.9163)=0.3065+0.3665=0.673$.
+
 | case | five samples (paraphrased) | clusters | $H$ (nats) | independent label | what the signal says |
 |---|---|---|---|---|---|
 | 1. Correlated falsehood | "It opened in 1912", "1912", "The year was 1912", "Opened: 1912", "In 1912" | {1912}×5 | $0$ | all wrong (evidence: 1914) | maximally certain, and wrong |
@@ -384,7 +428,9 @@ What does a finite-sample coverage statement actually promise?
 
 - **Exchangeability:** the joint distribution of the $n$ calibration examples and the one test example is unchanged by any reordering. I.i.d. sampling implies it. Temporal drift, adaptive selection, or reuse of the test stream for tuning can break it.
 - **Nonconformity score $r_i$:** a scalar computed from a *labeled* calibration example, where larger means "harder to cover". It must be computed the same way for the test example.
-- **Split-conformal quantile:** with $k=\lceil (n+1)(1-\alpha)\rceil$, set $\hat q$ to the $k$-th smallest calibration score. Under exchangeability, $P(r_{n+1}\le\hat q)\ge 1-\alpha$, marginally over the calibration draw and the test draw (**O**, CLM-016).
+- **Split-conformal quantile:** with $k=\lceil (n+1)(1-\alpha)\rceil$, set $\hat q$ to the $k$-th smallest calibration score. Under exchangeability, $P(r_{n+1}\le\hat q)\ge 1-\alpha$, marginally over the calibration draw and the test draw (**O**, CLM-016). Symbols: $n$ is the calibration-set size; $\alpha\in(0,1)$ is the allowed miscoverage rate (target coverage $1-\alpha$); $\lceil\cdot\rceil$ rounds up to an integer; $r_{n+1}$ is the score of the new test example; $\hat q$ is the calibrated threshold (a score value, unrelated to the confidence $q_i$ of Lesson 7.2).
+- *Why $k=\lceil (n+1)(1-\alpha)\rceil$ (sketch).* Under exchangeability, and ignoring ties, the test score $r_{n+1}$ is equally likely to occupy each of the $n+1$ ranks among $r_1,\dots,r_{n+1}$. The event $r_{n+1}\le\hat q$ (the $k$-th smallest calibration score) happens whenever the test score's rank among all $n+1$ is at most $k$, so its probability is at least $k/(n+1)$. Requiring $k/(n+1)\ge1-\alpha$ gives the smallest valid $k=\lceil (n+1)(1-\alpha)\rceil$. Ties only push more mass onto "$\le$", so the lower bound still holds. Using $\lceil n(1-\alpha)\rceil$ instead gives $k/(n+1)<1-\alpha$ in general, which is why the $+1$ matters. Example: $n=9$, $\alpha=0.2$ gives $k=\lceil8\rceil=8$ and $8/10=0.8\ge0.8$ (the uncorrected $\lceil7.2\rceil=8$ happens to agree). At $n=10$, $\alpha=0.2$ they differ: the correct $k=\lceil8.8\rceil=9$ gives $9/11=0.818\ge0.8$, while the uncorrected $\lceil8.0\rceil=8$ gives only $8/11=0.727<0.8$. The two often coincide, so unit-test the formula rather than a few convenient cases.
+- *Reading the bound.* Rearranging $k\le n$ gives $(n+1)(1-\alpha)\le n$, i.e. $\alpha\ge1/(n+1)$; this is where the admissible range $\alpha\in[1/(n+1),1]$ and the rule "$n\ge1/\alpha-1$" in the worked example come from.
 - **Conformal factuality (Mohri and Hashimoto):** split an LM output into sub-claims, score each sub-claim, and back off by removing low-scoring claims at a threshold calibrated this way. The covered event is "the reference entails the backed-off output". The authors state a lower bound $\ge1-\alpha$ under exchangeability for $\alpha\in[1/(n+1),1]$ (**O**, CLM-012).
 
 **Executable construction taught in this module — conformal claim filter (D, CLM-017):**
@@ -393,7 +439,7 @@ What does a finite-sample coverage statement actually promise?
 
 1. **Label.** For every calibration output $i$, label each claim true or false under the label guide, with independent raters.
 2. **Score.** Set $r_i=\max\{s(c): c \text{ in output } i,\ c \text{ false}\}$, or $r_i=-\infty$ if output $i$ has no false claim. So $r_i$ is the score of the most-trusted false claim.
-3. **Rank.** Compute $k=\lceil (n+1)(1-\alpha)\rceil$ with exact rational arithmetic; floating-point $10\times0.8$ can round above 8. If $k\le n$, $\hat q$ is the $k$-th smallest $r_i$, counting tied values with multiplicity. If $k>n$, set $\hat q=+\infty$.
+3. **Rank.** Compute $k=\lceil (n+1)(1-\alpha)\rceil$ with exact rational arithmetic; floating-point arithmetic can land just above an integer and bump the ceiling (in IEEE double, $10\times(1-0.7)$ evaluates to $3.0000000000000004$, so a float `ceil` returns 4 instead of 3). If $k\le n$, $\hat q$ is the $k$-th smallest $r_i$, counting tied values with multiplicity. If $k>n$, set $\hat q=+\infty$.
 4. **Output rule.** For a new output, keep exactly the claims with $s(c)>\hat q$ (strict inequality), and drop every claim with $s(c)\le\hat q$. If nothing survives, return an abstention or escalation, never the unfiltered output. $\hat q=+\infty$ therefore means "always abstain".
 5. **Why it is valid.** Every kept claim is true $\iff$ no false claim has $s>\hat q$ $\iff$ $r_{n+1}\le\hat q$. That last event is exactly the split-conformal event above, so under exchangeability $P(\text{all kept claims true})\ge1-\alpha$.
 6. **Ties.** The strict output rule makes the equivalence in step 5 exact when a test claim's score equals $\hat q$: that claim is dropped whether it is true or false. The lower bound does not need tie-free scores. The companion upper bound $1-\alpha+1/(n+1)$ holds only without ties or with randomized tie-breaking (CLM-016), and this module does not claim it.
@@ -619,7 +665,7 @@ $$
 - **Dependent Variables:** paired behavior deltas, severity, calibration/proper scores, marginal and subgroup coverage, risk-coverage, temporal validity, evaluator agreement, and system cost.
 - **Break & Falsify:** alter exchangeability through temporal/domain shift, change evaluator revision, inject a retrieval outage, and inspect a slice whose regression is hidden by the mean. Verify whether the stated guarantee still applies before interpreting coverage.
 - **Required conformal test:** Lesson 7.5 items (i)–(iv). Item (iv) must be run on the in-distribution split and on the temporally or domain-shifted split; the shifted run is expected to be able to fail.
-- **Artifact:** release manifest, frozen thresholds/calibration set, regression report, **Conformal Filter Record** (calibration IDs and lineage, decomposer/scorer/label-guide versions, per-output $r_i$, $n$, $lpha$, $k$, $\hat q$, retained-claim fraction, abstention rate, realized coverage with a binomial interval marginally and by slice, required-test output, and the scope statement), assumption audit, incident decision, and rollback/recalibration criteria.
+- **Artifact:** release manifest, frozen thresholds/calibration set, regression report, **Conformal Filter Record** (calibration IDs and lineage, decomposer/scorer/label-guide versions, per-output $r_i$, $n$, $\alpha$, $k$, $\hat q$, retained-claim fraction, abstention rate, realized coverage with a binomial interval marginally and by slice, required-test output, and the scope statement), assumption audit, incident decision, and rollback/recalibration criteria.
 - **Alignment:** Lessons 7.5 and 7.6.
 - **Effort Estimate:** 6h (2h conformal filter and required test, 4h release regression and evaluator crossing).
 
@@ -659,7 +705,7 @@ Design an uncertainty and regression system for a multilingual assistant answeri
 5. risk-coverage and utility for every fallback, including rejected-user and capacity costs;
 6. shift tests across prompt, language, time, domain, retrieval state, and model version;
 7. a consistency/semantic-uncertainty counterexample analysis using independent labels;
-8. a conformal claim filter for the long-form answer path: $r_i$ definition, $k$ and $\hat q$ at the chosen $lpha$ with exact arithmetic, strict output rule, abstention rule when nothing survives, required-test results (Lesson 7.5 (i)–(iv)), realized coverage with an interval by slice before and after one shift, and the guarantee copied into system terms with every assumption and non-guarantee;
+8. a conformal claim filter for the long-form answer path: $r_i$ definition, $k$ and $\hat q$ at the chosen $\alpha$ with exact arithmetic, strict output rule, abstention rule when nothing survives, required-test results (Lesson 7.5 (i)–(iv)), realized coverage with an interval by slice before and after one shift, and the guarantee copied into system terms with every assumption and non-guarantee;
 9. a pinned runtime source trace explaining why generation scores are not correctness probabilities;
 10. versioned release gates, canary, rollback, evaluator audit, and post-intervention remeasurement.
 

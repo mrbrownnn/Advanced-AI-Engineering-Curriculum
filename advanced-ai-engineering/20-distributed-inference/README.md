@@ -97,6 +97,10 @@ A plan decides what is replicated and what is sharded, and therefore which commu
 **Quantitative Model / Derivation (D):**
 With absolute parameter count $P$ and $B_{param}$ bytes per parameter, weight payload is $M_w = P\,B_{param}$ bytes. Logical KV payload is $M_{kv} = 2\,L\,H_{kv}\,d_{head}\,B_{kv}\,N_{tok}$ bytes for $N_{tok}$ resident tokens (Lesson 3.1). The smallest group that fits is $g_{min} = \lceil (M_w + M_{kv}) / M_{usable} \rceil$ GPUs, before runtime and activation headroom. These are logical payloads, not measured resident footprints.
 
+where: $P$ = parameter count; $B_{param}$, $B_{kv}$ = bytes per weight element and per KV element (2 for bf16); $L$ = layers; $H_{kv}$ = KV heads; $d_{head}$ = head dimension; $N_{tok}$ = resident tokens across all sequences in the replica; $M_{usable}$ = usable bytes per GPU; $g_{min}$ = minimum GPUs per model-parallel group.
+
+Step-by-step for $M_{kv}$: each token stores one key and one value vector (factor 2) per layer ($\times L$) per KV head ($\times H_{kv}$), each of $d_{head}$ elements of $B_{kv}$ bytes; multiply by $N_{tok}$. $g_{min}$ divides total bytes by bytes per GPU and rounds up, because a fractional GPU is not available.
+
 **Worked Example (synthetic inputs):**
 - *Input*: dense decoder with $P = 70\times10^9$ parameters in bf16 (2 bytes); $L=80$ layers, $H_{kv}=8$ KV heads, $d_{head}=128$, bf16 KV; target 400,000 resident tokens per replica; 8 GPUs in one node with 76.0 GiB usable each (declared fixture value).
 - *Steps*:
@@ -104,6 +108,7 @@ With absolute parameter count $P$ and $B_{param}$ bytes per parameter, weight pa
   2. KV per token $= 2\times80\times8\times128\times2 = 327{,}680$ bytes (320 KiB). $M_{kv} = 327{,}680\times400{,}000 = 131.07$ GB $\approx 122.07$ GiB.
   3. $g_{min} = \lceil (130.39+122.07)/76.0 \rceil = \lceil 3.32 \rceil = 4$.
   4. At TP4, each GPU holds $252.46/4 \approx 63.11$ GiB, leaving $\approx 12.89$ GiB for activations and runtime.
+  5. (How Plan B's token count follows.) At TP8 with the same 12.89 GiB headroom, each GPU has $76.0-12.89 = 63.11$ GiB for payload; weights take $130.39/8 \approx 16.30$ GiB, leaving $\approx 46.81$ GiB of KV per GPU, $\approx 374.5$ GiB across 8 GPUs; $374.5\times2^{30}/327{,}680 \approx 1.23$ million tokens.
 - *Result*: two candidate plans for the node. Plan A: 2 replicas × TP4. Plan B: 1 replica × TP8, holding $\approx 31.56$ GiB of the same payload per GPU, or about 1.23 million resident tokens at the same per-GPU headroom.
 - *Interpretation / limits*: Plan A gives two failure domains and smaller collectives; Plan B gives longer contexts or more concurrent sequences per replica and a larger group to stall on one fault. Which meets the SLO is a measurement, not a consequence of this arithmetic. TP4 shards KV evenly only because $H_{kv}=8$ is divisible by 4. Headroom needs are runtime-specific and must be measured.
 
@@ -147,15 +152,23 @@ $$T_{AR}(S,n) \approx \alpha + \frac{2(n-1)}{n}\cdot\frac{S}{B_{bus}}$$
 
 with $S$ in bytes, $\alpha$ in seconds, $B_{bus}$ in bytes/s measured on the target topology at that message size. For a TP decode step $S = N_{seq}\times d_{model}\times B_{act}$. $\alpha$ is not a constant of nature: it varies with algorithm, rank count, and size, so measure it.
 
+where: $S$ = bytes of the tensor being all-reduced (the full tensor each rank holds, not a shard); $n$ = ranks in the group (the TP degree here); $\alpha$ = fixed per-collective latency (launch, synchronization, hops)—no relation to any other $\alpha$ in the course; $B_{bus}$ = bus bandwidth in bytes/s; $N_{seq}$ = sequences in the decode batch (one new token each); $d_{model}$ = hidden size; $B_{act}$ = bytes per activation element.
+
+Step-by-step for the factor $2(n-1)/n$ (ring all-reduce view, consistent with the nccl-tests factors above):
+1. All-reduce = reduce-scatter followed by all-gather.
+2. Split the tensor into $n$ chunks of $S/n$ bytes. In reduce-scatter each rank sends $n-1$ chunks, i.e. $\tfrac{n-1}{n}S$ bytes; all-gather sends the same amount again.
+3. Total bytes each rank sends: $2\cdot\tfrac{n-1}{n}\,S$. Dividing by per-link bandwidth gives the bandwidth term. Equivalently, nccl-tests' algorithm bandwidth is $S/T$ and bus bandwidth is $\tfrac{2(n-1)}{n}\cdot S/T$, so $T = \tfrac{2(n-1)}{n}\cdot S/B_{bus}$.
+4. As $n\to\infty$, $\tfrac{n-1}{n}\to1$, so the factor approaches 2: each rank sends almost twice the tensor no matter how many ranks join. Example values: $n=2$: 1; $n=4$: 1.5; $n=8$: 1.75.
+
 **Worked Example (synthetic inputs):**
 - *Input*: $d_{model}=8192$, bf16 activations, $L=80$ with two all-reduces per layer (Lesson 20.3), decode batch of 64 sequences. Intra-node: $n=4$, $\alpha=15\ \mu s$, $B_{bus}=200$ GB/s. Cross-node: $n=8$ over two nodes, $\alpha=40\ \mu s$, $B_{bus}=20$ GB/s. All link values are assumptions, not measurements.
 - *Steps*:
   1. $S = 64\times8192\times2 = 1{,}048{,}576$ bytes (1 MiB).
   2. Intra-node bandwidth term: $2\cdot\tfrac{3}{4}\cdot 1{,}048{,}576 / (200\times10^9) = 7.86\ \mu s$; $T_{AR} = 22.86\ \mu s$.
-  3. Per decode step: $160\times22.86\ \mu s = 3.66$ ms.
+  3. Per decode step: $2L = 2\times80 = 160$ all-reduces, so $160\times22.86\ \mu s = 3.66$ ms.
   4. Cross-node bandwidth term: $2\cdot\tfrac{7}{8}\cdot 1{,}048{,}576/(20\times10^9) = 91.75\ \mu s$; $T_{AR}=131.75\ \mu s$; per step $160\times131.75\ \mu s = 21.08$ ms.
-  5. Prefill chunk of 2,048 tokens intra-node: $S = 33{,}554{,}432$ bytes (32 MiB); bandwidth term $251.66\ \mu s$; $T_{AR}=266.66\ \mu s$; per chunk $160\times266.66\ \mu s = 42.67$ ms.
-- *Result*: intra-node decode communication is latency-dominated (15 of 22.86 µs); cross-node decode is bandwidth- and latency-heavier by 5.8×; prefill is bandwidth-dominated.
+  5. Prefill chunk of 2,048 tokens intra-node: $S = 2{,}048\times8192\times2 = 33{,}554{,}432$ bytes (32 MiB); bandwidth term $251.66\ \mu s$; $T_{AR}=266.66\ \mu s$; per chunk $160\times266.66\ \mu s = 42.67$ ms.
+- *Result*: intra-node decode communication is latency-dominated (15 of 22.86 µs); cross-node decode is bandwidth- and latency-heavier by 5.8× ($131.75/22.86\approx5.76$); prefill is bandwidth-dominated.
 - *Interpretation / limits*: for decode, reducing the count or latency of collectives helps more than raising bandwidth. The model ignores overlap with compute, fused or custom all-reduce paths, and congestion; it is a prediction to compare with a profiler trace.
 
 **Knowledge Check:**
@@ -166,7 +179,7 @@ with $S$ in bytes, $\alpha$ in seconds, $B_{bus}$ in bytes/s measured on the tar
 Given measured nccl-tests output of algorithm bandwidth 80 GB/s for a 4-rank AllReduce at 32 MiB, compute bus bandwidth and the time for one such all-reduce; then explain why the same link may show far lower algorithm bandwidth at 64 KiB.
 
 **Feedback Contract:**
-- *Expected Evidence*: bus bandwidth $=80\times1.5=120$ GB/s; time $=33{,}554{,}432/(80\times10^9)\approx0.42$ ms; small-message explanation in terms of the latency term.
+- *Expected Evidence*: bus bandwidth $=80\times1.5=120$ GB/s (factor $2\cdot3/4=1.5$ for $n=4$); time $=33{,}554{,}432/(80\times10^9)\approx0.42$ ms; small-message explanation in terms of the latency term.
 - *Common Failure*: Dividing size by link rate in Gb/s without converting bits to bytes.
 - *Diagnostic Hint*: What is the time for a zero-byte all-reduce?
 - *Concept to Revisit*: Honest Timing (Lesson 2.3).
@@ -199,14 +212,16 @@ What was not established: which device communicator runs on a given machine, and
 **Quantitative Model / Derivation (D):**
 If one rank alone would need $T_c$ per step and compute divides evenly, $T_{step}(n) \approx T_c/n + 2L\,T_{AR}(S,n)$ and speedup is $T_c/T_{step}(n)$. This is an upper bound on TP benefit: it assumes perfectly divisible compute and no overlap. PTD-P's Takeaway #1 is to use tensor parallelism up to the GPUs in one server and pipeline parallelism across servers (**O**, CLM-006; training). The corresponding inference prediction—intra-node TP plus replicas beats cross-node TP at equal GPU count—is a hypothesis to test (**H**, CLM-026).
 
+where: $T_c$ = compute time of one decode step if a single rank held the whole model; $n$ = TP degree; $2L$ = all-reduces per step (two per layer: after the attention output projection and after the MLP down projection); $T_{AR}(S,n)$ from Lesson 20.2. Step-by-step: compute shrinks as $T_c/n$; communication does not shrink with $n$ (the $\alpha$ term is fixed and the bandwidth factor grows toward 2), so speedup $=T_c/(T_c/n + 2L\,T_{AR})$ saturates and falls below the ideal $n$. "% of ideal" below is speedup$/n$.
+
 **Worked Example (synthetic inputs; continues Lesson 20.2):**
 - *Input*: $T_c = 60$ ms (hypothetical single-rank step time if the model fit), $L=80$, communication per step from Lesson 20.2: TP4 intra-node 3.66 ms; TP8 intra-node ($\alpha=15\ \mu s$, 200 GB/s) and TP8 across two nodes ($\alpha=40\ \mu s$, 20 GB/s). Shapes: 64 query heads, 8 KV heads, MLP width 28,672.
 - *Steps*:
-  1. Shards at TP4: 16 query heads and 2 KV heads per rank; `gate`/`up` column shards $8192\times7168$; `down` row shard $7168\times8192$; each all-reduce carries $N_{seq}\times8192$ values.
-  2. TP4: $60/4 + 3.66 = 18.66$ ms; speedup $3.22$ (80% of ideal).
-  3. TP8 intra-node: $T_{AR} = 15 + 9.18 = 24.18\ \mu s$; communication $3.87$ ms; step $7.5+3.87 = 11.37$ ms; speedup $5.28$ (66% of ideal).
+  1. Shards at TP4: $64/4=16$ query heads and $8/4=2$ KV heads per rank; `gate`/`up` column shards $8192\times7168$ ($28{,}672/4=7{,}168$); `down` row shard $7168\times8192$; each all-reduce carries $N_{seq}\times8192$ values.
+  2. TP4: $60/4 + 3.66 = 18.66$ ms; speedup $60/18.66 = 3.22$ (80% of ideal).
+  3. TP8 intra-node: bandwidth term $2\cdot\tfrac{7}{8}\cdot1{,}048{,}576/(200\times10^9) = 9.18\ \mu s$, so $T_{AR} = 15 + 9.18 = 24.18\ \mu s$; communication $160\times24.18\ \mu s = 3.87$ ms; step $7.5+3.87 = 11.37$ ms; speedup $5.28$ (66% of ideal).
   4. TP8 across nodes: $7.5 + 21.08 = 28.58$ ms; speedup $2.10$—slower than TP4 within one node.
-- *Result*: communication share of the step rises from 20% (TP4) to 34% (TP8 intra-node) to 74% (TP8 cross-node).
+- *Result*: communication share of the step (communication / step time, e.g. $3.66/18.66$) rises from 20% (TP4) to 34% (TP8 intra-node) to 74% (TP8 cross-node).
 - *Interpretation / limits*: under these assumed links, stretching TP across nodes loses to a smaller intra-node group; two TP4 replicas would also double throughput. The result is conditional on the assumed $\alpha$ and $B_{bus}$; faster inter-node fabrics or overlapped communication can falsify it (CLM-026).
 
 **Knowledge Check:**
@@ -235,7 +250,7 @@ Trace and count tensor-parallel communication in a pinned runtime and bound its 
 What do the other three model-parallel dimensions buy at inference, and what limits each?
 
 **Concepts & Definitions:**
-- **Pipeline bubble**: stage idle time. For training, GPipe gives $O((K-1)/(M+K-1))$ and found it negligible for $M\ge4K$ in its experiments (**O**, CLM-007); PTD-P gives a bubble fraction $(p-1)/m$, reduced by $v$ with an interleaved schedule at $v$ times the communication (**O**, CLM-006). Both count forward and backward work.
+- **Pipeline bubble**: stage idle time. For training, GPipe gives $O((K-1)/(M+K-1))$ and found it negligible for $M\ge4K$ in its experiments (**O**, CLM-007); PTD-P gives a bubble fraction $(p-1)/m$, reduced by $v$ with an interleaved schedule at $v$ times the communication (**O**, CLM-006). Both count forward and backward work. (Notation: GPipe's $K$ = stages, $M$ = micro-batches; PTD-P's $p$ = pipeline stages, $m$ = micro-batches, $v$ = model chunks per device. Below, $p$ and $m$ are reused for stages and circulating batches; $p$ is never a probability in this module.)
 - **Forward-only schedule**: at inference there is no backward pass. Decode adds an autoregressive dependency: a batch's next step cannot start until its previous step leaves the last stage.
 - **Expert parallelism**: MoE experts live on different ranks; tokens are dispatched to their experts and combined back by all-to-all.
 - **Context parallelism**: the sequence is split across ranks; Ring Attention exchanges key-value blocks around a ring and overlaps that communication with blockwise attention (**O**, CLM-012).
@@ -251,15 +266,24 @@ Stage $i$ takes $t_i$ per batch step; each hop, including returning the sampled 
 - Decode ring with $m$ circulating batches: cycle $= \max\big(\sum_i (t_i+x_i),\; m\cdot\max_i t_i\big)$; throughput $= m/\text{cycle}$ batch-steps; per-batch TPOT $=$ cycle; stage utilization $m\,t_i/\text{cycle}$.
 - Expert skew: with synchronous combine, the MoE layer finishes when the most-loaded rank finishes; if rank load is proportional to assigned tokens, layer time scales with $\max_r \text{share}_r \times n_{ranks}$ relative to uniform.
 
+where: $t_s$ = time of each stage when all stages are equal; $t_i$ = time of stage $i$; $x_i$ = hop time after stage $i$; $p$ = stages; $m$ = batches in flight; $\text{share}_r$ = fraction of token-to-expert assignments landing on EP rank $r$; $n_{ranks}$ = EP ranks.
+
+Step-by-step:
+1. *One-shot pass.* The first batch leaves the last stage after $p\,t_s$; each later batch follows $t_s$ behind, so $m$ batches finish at $p\,t_s + (m-1)\,t_s = (m+p-1)\,t_s$. Each stage is busy $m\,t_s$ of that time, so utilization $= m/(m+p-1)$. (Hop times are ignored in this equal-stage form.)
+2. *Decode ring, latency bound.* One batch must traverse every stage and hop before its next token can start: at least $\sum_i (t_i+x_i)$ per step.
+3. *Decode ring, resource bound.* Stage $i$ must process all $m$ batches once per cycle, taking $m\,t_i$; the slowest stage needs $m\max_i t_i$.
+4. The cycle is the larger of the two bounds. Each batch advances one step (one token per sequence) per cycle, so TPOT $=$ cycle and throughput $= m/\text{cycle}$.
+5. *Expert skew.* With uniform routing each rank has share $1/n_{ranks}$; time ratio to uniform is $\max_r\text{share}_r/(1/n_{ranks}) = \max_r\text{share}_r\times n_{ranks}$. Example: $0.30\times8 = 2.4$.
+
 **Worked Example (synthetic inputs; forward-only decode timeline):**
 - *Input*: $p=4$ stages, $t_s = 6$ ms, $x=0.5$ ms per hop, batches of 32 sequences.
 - *Steps*:
-  1. $m=1$: cycle $=4\times(6+0.5)=26$ ms; each stage is busy 6 of 26 ms (23%); throughput $1/26\text{ ms} = 38.5$ batch-steps/s $=1{,}231$ tokens/s; TPOT 26 ms.
-  2. $m=4$: cycle $=\max(26, 24)=26$ ms; utilization $24/26=92\%$; throughput $153.8$ batch-steps/s $=4{,}923$ tokens/s; TPOT still 26 ms.
+  1. $m=1$: cycle $=4\times(6+0.5)=26$ ms; each stage is busy 6 of 26 ms (23%); throughput $1/26\text{ ms} = 38.5$ batch-steps/s $=38.5\times32=1{,}231$ tokens/s; TPOT 26 ms.
+  2. $m=4$: cycle $=\max(26, 4\times6)=\max(26,24)=26$ ms; utilization $24/26=92\%$; throughput $4/26\text{ ms}=153.8$ batch-steps/s $=4{,}923$ tokens/s; TPOT still 26 ms.
   3. $m=5$: cycle $=\max(26,30)=30$ ms; utilization 100%; throughput $166.7$ batch-steps/s; TPOT rises to 30 ms.
-  4. Imbalance, stage times $6,6,6,9$ ms with $m=4$: cycle $=\max(29, 36)=36$ ms; throughput $111.1$ batch-steps/s; TPOT 36 ms (38% worse than balanced); the first three stages sit at 67%.
-  5. Expert skew: 8 EP ranks, 4,096 tokens × top-8 routing $=32{,}768$ assignments, uniform 4,096 per rank. If one rank's experts receive 30%, it gets 9,830 (2.4× the mean). Hosting redundant copies of those experts on a ninth rank and splitting the load evenly leaves 4,915 on each of the two hot ranks.
-- *Result*: PP multiplied throughput by 4 at unchanged TPOT only once four batches circulated; one slow stage cost 28% of throughput; expert redundancy halved the worst-rank load.
+  4. Imbalance, stage times $6,6,6,9$ ms with $m=4$: $\sum(t_i+x_i) = 27 + 4\times0.5 = 29$ ms and $m\max t_i = 4\times9 = 36$ ms, so cycle $=\max(29, 36)=36$ ms; throughput $4/36\text{ ms}=111.1$ batch-steps/s; TPOT 36 ms (38% worse than balanced: $36/26\approx1.38$); the first three stages sit at $4\times6/36=67\%$.
+  5. Expert skew: 8 EP ranks, 4,096 tokens × top-8 routing $=32{,}768$ assignments, uniform $32{,}768/8=4{,}096$ per rank. If one rank's experts receive 30%, it gets $0.30\times32{,}768\approx9{,}830$ (2.4× the mean). Hosting redundant copies of those experts on a ninth rank and splitting the load evenly leaves 4,915 on each of the two hot ranks.
+- *Result*: PP multiplied throughput by 4 at unchanged TPOT only once four batches circulated; one slow stage cost 28% of throughput ($1-111.1/153.8$); expert redundancy halved the worst-rank load.
 - *Interpretation / limits*: there is no backward work anywhere in this timeline. The ring model assumes one batch per stage at a time and fixed stage times; real runtimes mix prefill chunks and decode steps, so measure per-stage busy time. The skew arithmetic assumes rank time proportional to assigned tokens.
 
 **Knowledge Check:**
@@ -304,15 +328,20 @@ $$E[TTFT_{disagg}] = E[W_{prefill\ queue}] + E[T_{prefill}] + E[T_{xfer,\ non\te
 
 Sequential transfer adds $M_{xfer}/B + t_{setup}$. With layer-wise streaming on a link that keeps up, only the last layer's bytes remain after prefill ends. Aggregate link demand is $\lambda_{prefill}\times E[M_{xfer}]$ bytes/s and must stay below achieved bandwidth.
 
+where: $N_{uncached}$ = prompt tokens whose KV is not already at the decode side; $W$ terms = queueing waits; $T_{prefill}$ = prefill compute time; $T_{xfer,\ non\text{-}overlapped}$ = transfer time not hidden behind prefill; $T_{first\ step}$ = first decode step; $B$ = achieved link bandwidth in bytes/s (not bytes per parameter); $t_{setup}$ = fixed per-transfer setup time; $\lambda_{prefill}$ = requests/s leaving the prefill pool.
+
+Step-by-step for the streaming tail: if layer $\ell$'s KV is sent while layer $\ell+1$ is computed, and the whole transfer $M_{xfer}/B$ is no longer than $T_{prefill}$, every layer except the last is already sent when prefill ends. What remains is one layer: $(M_{xfer}/L)/B$, plus $t_{setup}$.
+
 **Worked Example (synthetic inputs; Lesson 20.1 model):**
 - *Input*: 327,680 bytes/token; prompt 8,000 tokens, none cached at the decode side; $E[T_{prefill}] = 300$ ms; $t_{setup}=5$ ms; achieved bandwidth 10 GB/s (a 100 Gb/s link at 80%) or 40 GB/s; TTFT budget 500 ms; queue and first-step terms set to zero to isolate transfer; prefill pool output 20 requests/s.
 - *Steps*:
+  0. Bandwidth conversion: $100\text{ Gb/s}/8 = 12.5$ GB/s; at 80%, $0.8\times12.5 = 10$ GB/s.
   1. $M_{xfer} = 327{,}680\times8{,}000 = 2.62$ GB ($\approx2.44$ GiB).
-  2. Sequential at 10 GB/s: $262.1$ ms; TTFT $=300+262.1+5 = 567.1$ ms—over budget.
-  3. Sequential at 40 GB/s: $65.5$ ms; TTFT $=370.5$ ms—within budget.
-  4. Layer-wise streaming at 10 GB/s: total transfer (262 ms) is shorter than prefill (300 ms), so the link keeps up; the tail is one layer, $2.62\text{ GB}/80 = 32.8$ MB, $3.3$ ms; TTFT $\approx 308.3$ ms.
-  5. Aggregate demand: $20\times2.62 = 52.4$ GB/s—more than either link. With 75% of each prompt already cached at the decode side, 2,000 tokens move: 0.655 GB per request, 13.1 GB/s.
-- *Result*: a single request fits the budget with streaming on the slower link, but the pool's aggregate demand is 5.2× the slower link and 1.3× the faster one unless prefix reuse or more links cut the bytes.
+  2. Sequential at 10 GB/s: $2.62\times10^9/10^{10}\text{ s} = 262.1$ ms; TTFT $=300+262.1+5 = 567.1$ ms—over budget.
+  3. Sequential at 40 GB/s: $65.5$ ms; TTFT $=300+65.5+5=370.5$ ms—within budget.
+  4. Layer-wise streaming at 10 GB/s: total transfer (262 ms) is shorter than prefill (300 ms), so the link keeps up; the tail is one layer, $2.62\text{ GB}/80 = 32.8$ MB, $32.8\text{ MB}/(10\text{ GB/s}) = 3.3$ ms; TTFT $\approx 300+3.3+5 = 308.3$ ms.
+  5. Aggregate demand: $20\times2.62 = 52.4$ GB/s—more than either link. With 75% of each prompt already cached at the decode side, $0.25\times8{,}000 = 2{,}000$ tokens move: $327{,}680\times2{,}000 = 0.655$ GB per request, $20\times0.655 = 13.1$ GB/s.
+- *Result*: a single request fits the budget with streaming on the slower link, but the pool's aggregate demand is 5.2× the slower link ($52.4/10$) and 1.3× the faster one ($52.4/40$) unless prefix reuse or more links cut the bytes.
 - *Interpretation / limits*: per-request arithmetic can pass while the fleet saturates; size links for aggregate bytes/s at peak. Payload is logical; block padding, layout conversion, and compression change wire bytes. Setting queue terms to zero hides the pool-ratio problem that Lab D measures.
 
 **Knowledge Check:**
@@ -323,7 +352,7 @@ Sequential transfer adds $M_{xfer}/B + t_{setup}$. With layer-wise streaming on 
 For a model with 131,072 bytes/token of KV, prompts of 4,000 tokens with 50% cached, 30 requests/s, and 12.5 GB/s achieved bandwidth, compute per-request sequential transfer time and aggregate link utilization.
 
 **Feedback Contract:**
-- *Expected Evidence*: uncached 2,000 tokens $=0.262$ GB; transfer $\approx 21.0$ ms; aggregate $7.86$ GB/s $=63\%$ of the link; a note that burst arrivals can exceed it.
+- *Expected Evidence*: uncached 2,000 tokens $=131{,}072\times2{,}000=0.262$ GB; transfer $0.262/12.5\approx 21.0$ ms (plus any setup time); aggregate $30\times0.262=7.86$ GB/s $=7.86/12.5=63\%$ of the link; a note that burst arrivals can exceed it.
 - *Common Failure*: Sizing the link from one request's transfer time.
 - *Diagnostic Hint*: What is bytes/s at peak arrival rate, not on average?
 - *Concept to Revisit*: Cross-Instance KV (Lesson 3.10); Prefill/Decode Interference (Lesson 4.3).
@@ -353,12 +382,18 @@ Model-parallel ranks synchronize on every step, so one failed or slow rank stall
 **Quantitative Model / Derivation (D):**
 For $G$ GPUs split into $R$ replicas of $g$ GPUs: capacity lost per GPU fault $=1/R$. If each GPU is independently unavailable with probability $q$, a replica is up with probability $(1-q)^g$, which is also the expected available capacity fraction. A rank slower by factor $s$ slows its group's step by $s$: fleet throughput loss $=(1-1/s)/R$. The independence assumption fails for shared causes (node power, switch); count those as larger domains.
 
+where: $G = R\,g$; $q$ = per-GPU unavailability probability; $s\ge1$ = straggler slowdown factor; $f$ = traffic share of a hot prefix. Step-by-step:
+1. *Per-fault loss.* One GPU fault stops its whole group, i.e. one of $R$ equal replicas: $1/R$.
+2. *Availability.* A replica runs only if all $g$ GPUs are up: $(1-q)^g$. By linearity of expectation, expected up replicas $=R(1-q)^g$, a fraction $(1-q)^g$ of capacity.
+3. *Straggler.* The affected replica's step takes $s$ times longer, so its throughput becomes $1/s$ of normal and it loses $1-1/s$ of its $1/R$ share: fleet loss $(1-1/s)/R$.
+4. *Hotspot.* Pinned load / fair share $= f/(1/R) = f\,R$; example $0.40\times4 = 1.6$.
+
 **Worked Example (synthetic inputs):**
 - *Input*: 64 GPUs; plans A: 16 × TP4; B: 8 × TP8; C: 2 × (TP8 × PP4, 32 GPUs each). $q = 0.01$. One rank runs 20% slow ($s=1.2$). Weight reload 140 GB at 2 GB/s. Hot prefix share $f=0.40$ with $R=4$ routing targets.
 - *Steps*:
-  1. Capacity lost per fault: A $6.25\%$; B $12.5\%$; C $50\%$.
-  2. Expected available capacity: A $0.99^4=96.1\%$; B $0.99^8=92.3\%$; C $0.99^{32}=72.5\%$.
-  3. Straggler loss: A $(1-1/1.2)/16 = 1.04\%$; B $2.08\%$; C $8.33\%$.
+  1. Capacity lost per fault: A $1/16=6.25\%$; B $1/8=12.5\%$; C $1/2=50\%$.
+  2. Expected available capacity ($g=4, 8, 32$): A $0.99^4=96.1\%$; B $0.99^8=92.3\%$; C $0.99^{32}=72.5\%$.
+  3. Straggler loss ($1-1/1.2 = 0.1667$): A $(1-1/1.2)/16 = 1.04\%$; B $0.1667/8=2.08\%$; C $0.1667/2=8.33\%$.
   4. Reload after a fault: $140/2 = 70$ s before warmup, for every plan; plan C reloads 32 GPUs' shards.
   5. Hotspot: the pinned replica receives $\ge40\%$ of load versus a 25% fair share—1.6×.
 - *Result*: to survive one fault at full demand, plan A needs one spare TP4 replica (6.25% extra), plan C needs a whole extra 32-GPU replica.

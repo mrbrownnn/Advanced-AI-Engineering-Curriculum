@@ -131,6 +131,13 @@ The normalized response must not destroy the raw response. Stable application fi
 **Quantitative Model / Derivation:**
 Let $R_c$ be a canonical request and $A_p$ the adapter for provider $p$. The effective request is $R_e=A_p(R_c)$. A conformance check compares required semantic fields before and after this transformation; byte equality is neither required nor sufficient.
 
+where:
+- $R_c$ — the canonical request: what the application means, written without any provider's field names.
+- $p$ — one provider/target; $A_p$ — the adapter (a function) that translates for that target.
+- $R_e$ — the effective request: the output of $A_p$, i.e. what is actually sent.
+
+In plain terms, the adapter is a translator. "Not required" means $R_e$ may use different names or shapes (row 6 below renames a field and still preserves meaning). "Not sufficient" means two payloads that look alike can still differ in meaning (rows 1–2 below). The check therefore asks, field by required field, "does the target still do what $R_c$ asked?", not "are the bytes the same?".
+
 **Worked Example (synthetic fixture):**
 
 *Input.* One canonical request for a funds-transfer tool call, and what a hypothetical adapter "B" sent and returned for it. Field names are illustrative and are not any provider's API.
@@ -206,6 +213,19 @@ A fallback is compatible only if it satisfies required capabilities and passes t
 **Quantitative Model / Derivation:**
 Dispatch is allowed only when $C_{req}(r)\subseteq C_{verified}(p)$ after declared emulation. This set rule is exact for a manifest; the membership evidence is empirical and can expire.
 
+where:
+- $r$ — one request; $C_{req}(r)$ — the set of capabilities that request cannot do without.
+- $p$ — one target; $C_{verified}(p)$ — the set of capabilities a probe has demonstrated on that pinned target and adapter (declared emulations included).
+- $\subseteq$ — "is a subset of": every element on the left also appears on the right.
+
+Step-by-step, the subset test is the same as checking that nothing is left over:
+
+1. Compute the missing set $M = C_{req}(r)\setminus C_{verified}(p)$ (required, but not verified).
+2. If $M=\emptyset$, then $C_{req}(r)\subseteq C_{verified}(p)$ and dispatch is allowed.
+3. If $M\neq\emptyset$, reject and name the elements of $M$, or return an explicitly degraded outcome if policy allows.
+
+Extra verified capabilities on the target do not matter; only missing required ones do. Computing $M$ rather than a yes/no answer is what makes the rejection message actionable.
+
 **Worked Example (synthetic fixture):**
 *Input.* $C_{req}$ = {JSON object output, recursive schema, parallel tool-call IDs, streaming}. Probes on the fallback target verified {JSON object output, streaming}.
 *Steps.* $C_{req}\setminus C_{verified}$ = {recursive schema, parallel tool-call IDs}. The set is not empty, so the subset rule fails.
@@ -256,6 +276,8 @@ bytes/text parse?
         -> action authorized?
           -> external postcondition observed?
 ```
+
+Read the ladder top to bottom: each stage assumes the previous one passed and reads one more input. Parse reads only the text; schema adds the schema; invariants add application rules; task/evidence adds the user's request and sources; authority adds who is calling; the postcondition adds the outside world after execution. A failure is reported at the first stage that fails, so its name says which input was violated.
 
 These predicates are not equivalent (**D**, CLM-007). Constrained decoding can keep generation inside an implemented formal language by masking invalid continuations (**O**, CLM-006); it cannot prove facts, business invariants absent from the grammar, permission, or side effects.
 
@@ -385,6 +407,10 @@ Assembly is two folds. A decoder $D$ turns the byte stream $B$ into decoded even
 - **Chunk-boundary invariance** is a property of $D$: every partition of $B$ into contiguous non-empty chunks must yield the same event sequence. A byte string of $n$ bytes has $2^{n-1}$ such partitions (**D**, CLM-021).
 - **Delta-boundary invariance** is a property of $F$: a provider may cut the same arguments into different deltas, such as `{"un` then `it":"C"}`. The event sequences differ; the completed objects and terminal state must not.
 
+where: $B$ is the raw byte stream; $D$ the decoder (framer); $E$ the resulting sequence of decoded events; $F$ the assembler; $S_0$ the empty initial state; $S_n$ the state after all events are applied. Note the symbol reuse: the $n$ in $S_n$ counts *events*, while the $n$ in $2^{n-1}$ counts *bytes*. They are different numbers.
+
+*Why $2^{n-1}$.* A string of $n$ bytes has $n-1$ internal gaps (between bytes 1 and 2, 2 and 3, and so on). A partition into contiguous non-empty chunks is fully described by which gaps get a cut. Each gap is independently "cut" or "no cut", so there are $2\times2\times\cdots\times2=2^{n-1}$ choices. Example with $n=3$ bytes `abc`: 2 gaps, $2^2=4$ partitions: `abc`, `a|bc`, `ab|c`, `a|b|c`.
+
 The count decides the test method:
 
 | Fixture | Bytes $n$ | Partitions $2^{n-1}$ | Method |
@@ -392,7 +418,9 @@ The count decides the test method:
 | `data: "Đ"` plus a blank line | 12 | 2,048 | **exhaustive**: run all of them |
 | Input B below, as serialized | 580 | $2^{579}$ | **generated**: all 579 single cuts, all $\binom{579}{2}=167{,}331$ double cuts, one byte per chunk, plus seeded random partitions |
 
-In the 12-byte fixture, 1,024 of the 2,048 partitions cut between the two bytes of `Đ`; a decoder that converts each chunk to text independently raises on exactly those. For large inputs a passing run means "no counterexample in the tested set", and the report must state the seed, the number of partitions, and which families were exhaustive. It is not a proof over all partitions.
+In the 12-byte fixture, 1,024 of the 2,048 partitions cut between the two bytes of `Đ` (that one gap is forced to "cut" and the other 10 gaps are free: $2^{10}=1{,}024$, exactly half); a decoder that converts each chunk to text independently raises on exactly those. For large inputs a passing run means "no counterexample in the tested set", and the report must state the seed, the number of partitions, and which families were exhaustive. It is not a proof over all partitions.
+
+*Sizing the generated families for $n=580$.* There are $n-1=579$ gaps. Single cuts choose 1 gap: 579 tests. Double cuts choose 2 distinct gaps: $\binom{579}{2}=\frac{579\times578}{2}=167{,}331$ tests. With the one-byte-per-chunk case that is under 170,000 deterministic runs, which is affordable, whereas $2^{579}$ is not. The "about 16 bytes" limit in LAB C corresponds to $2^{15}=32{,}768$ partitions.
 
 **Worked Example (synthetic protocol fixture):**
 
@@ -505,6 +533,12 @@ All attempts share root request ID, absolute deadline, maximum attempts, token/c
 **Quantitative Model / Derivation:**
 If layer $j$ independently permits $r_j$ attempts, hidden nesting can allow up to $\prod_j r_j$ dispatches. A root attempt budget converts this multiplication into one explicit bound.
 
+where: $j$ indexes the retry layers (for example SDK, gateway, application); $r_j$ is the attempt limit of layer $j$, counting the first attempt; $\prod_j r_j$ is the product of all the $r_j$.
+
+*Why multiply, not add.* Each attempt of an outer layer starts a fresh run of the next inner layer, which can again use all of its own attempts. So the counts nest: $r_1$ outer attempts, each with up to $r_2$ inner ones, gives $r_1 r_2$, and a third layer multiplies again. With one shared ledger, every physical dispatch decrements the same counter, so the bound is the root maximum $R$ (precisely $\min(R,\prod_j r_j)$).
+
+The same idea applies to time. With an absolute deadline $T_{dl}$ and elapsed time $t$, an attempt may use at most $\min(\text{configured timeout},\,T_{dl}-t)$. A fresh per-layer timeout ignores $t$ and can overrun the root deadline (Guided Practice (b)).
+
 **Worked Example (synthetic fixture):**
 *Input.* An SDK, a gateway, and the application each allow three attempts.
 *Steps.* Uncoordinated, each application attempt can trigger three gateway attempts, each of which can trigger three SDK attempts: $3\times3\times3$.
@@ -553,7 +587,9 @@ L_{e2e}=L_{pre}+\sum_{i=1}^{N}
 (L_{serialize,i}+L_{queue/connect,i}+L_{stream,i}+L_{validate/repair,i}+L_{backoff,i}).
 $$
 
-Use the critical path for overlapping work. Sum tokens and cost across every attempt. Track:
+where: $L_{e2e}$ is the end-to-end latency of one root request; $L_{pre}$ is the one-time work before the first attempt; $N$ is the number of attempts for this root request, indexed by $i$; each $L_{\ldots,i}$ term is the time attempt $i$ spends serializing, waiting for queue/connection, streaming, validating or repairing, and backing off before the next attempt. The plain sum is valid only because the attempts run one after another.
+
+Use the critical path for overlapping work. For example, if two fallback probes run concurrently and take 300 ms and 500 ms, the caller waits about 500 ms (the longer branch), not 800 ms. Tokens and cost, by contrast, are paid on every branch. Sum tokens and cost across every attempt. Track:
 
 $$
 A=\frac{N_{attempts}}{N_{root\ requests}},\qquad
@@ -562,13 +598,17 @@ $$
 
 State denominator policy when no output is accepted. These ratios measure amplification, not quality (**D**, CLM-013).
 
+where: $N_{attempts}$ is the total number of attempts across all root requests in the window; $N_{root\ requests}$ is the number of root (user-level) requests, successful or not; $T_{all\ attempts}$ is tokens summed over every attempt; $T_{final\ accepted}$ is tokens of only the attempts whose output was accepted. $A=1$ and $A_{tok}=1$ mean no amplification. This $A$ is unrelated to the adapter $A_p$ of Lesson 13.1, and $N_{attempts}$ is a window total, while $N$ in $L_{e2e}$ is one request's count.
+
+The wasted share of tokens follows directly: $1-T_{final\ accepted}/T_{all\ attempts}=1-1/A_{tok}$.
+
 Run conformance fixtures for canonical requests, schema vocabulary, stream splitting, errors, cancellation, usage, and raw-versus-normalized preservation. The claim that such probes catch adapter drift earlier is a hypothesis (**H**, CLM-017): compare time-to-detection and user-impacting failures against outcome-only monitoring.
 
 **Worked Example (synthetic fixture):**
 *Input.* Two root requests with one and three attempts. All attempts together consume 2,400 tokens; the final accepted attempts consume 800.
 *Steps.* $A=(1+3)/2$. $A_{tok}=2{,}400/800$.
 *Result.* $A=2$ attempts per root request and $A_{tok}=3$.
-*Interpretation and limits.* Two thirds of the tokens bought nothing that was accepted. If a root request has no accepted output, its tokens stay in the numerator and the report must say how the denominator was handled; dropping the request hides the worst cases.
+*Interpretation and limits.* Two thirds of the tokens bought nothing that was accepted: $1-1/A_{tok}=1-1/3=2/3$, i.e. 1,600 of 2,400 tokens. If a root request has no accepted output, its tokens stay in the numerator and the report must say how the denominator was handled; dropping the request hides the worst cases.
 
 **Knowledge Check:**
 1. Why can a complete manifest still fail to reproduce identical tokens?

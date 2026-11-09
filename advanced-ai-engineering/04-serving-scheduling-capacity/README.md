@@ -80,6 +80,14 @@ $$T_{e2e} = o_{N_{out}}-t_0 = T_{TTFT}+\sum_{i=2}^{N_{out}}ITL_i$$
 $$TPOT = \frac{T_{e2e}-T_{TTFT}}{N_{out}-1}=\frac{1}{N_{out}-1}\sum_{i=2}^{N_{out}}ITL_i$$
 These identities assume one observed event per token (**D**, CLM-008). If a runtime emits multiple tokens per event, event-level ITL and token-amortized TPOT differ.
 
+*Where*: $t_0$ = request arrival at the declared boundary; $t_1$ = start of prefill scheduling; $t_2=o_1$ = first output event; $o_i$ = arrival of output event $i$; $N_{out}$ = number of output events (tokens, under the one-event-per-token assumption); $ITL_i$ = gap before event $i$.
+
+*Step-by-step (why the sum and the $N_{out}-1$ appear)*:
+1. The $N_{out}$ output events define $N_{out}-1$ gaps: $o_1\to o_2,\ \dots,\ o_{N_{out}-1}\to o_{N_{out}}$. The first token has no preceding gap; its latency is already in TTFT.
+2. The gaps telescope: $\sum_{i=2}^{N_{out}}(o_i-o_{i-1}) = o_{N_{out}}-o_1$.
+3. Add $o_1-t_0=T_{TTFT}$ to both sides: $T_{TTFT}+\sum_{i=2}^{N_{out}} ITL_i = o_{N_{out}}-t_0 = T_{e2e}$.
+4. TPOT is the mean of those $N_{out}-1$ gaps, i.e. the post-first-output time divided by the gap count.
+
 *Assumptions*: $t_0$, $t_1$, and the output timestamps share a clock and explicitly defined observation boundary; generation produces $N_{out} \ge 2$ output events. A narrower engine-side decomposition must separately account for host, sampling, serialization, buffering, and network time before comparing it with client-observed TTFT.
 
 **Worked Example:**
@@ -87,7 +95,7 @@ A client issues a request with a 2,048-token prompt.
 - Queue wait time: $T_{queue} = 120\text{ ms}$.
 - Measured first-output work after queue admission: $T_{first\_output\_after\_queue} = 65\text{ ms}$.
 - Output length: $N_{out} = 200\text{ tokens}$.
-- Total autoregressive decode iterations take $4,975\text{ ms}$.
+- Total autoregressive decode iterations take $4,975\text{ ms}$. This is the post-first-output time $o_{N_{out}}-o_1=\sum_{i=2}^{N_{out}}ITL_i$, spread over $200-1=199$ gaps.
 - $T_{TTFT} = 120\text{ ms} + 65\text{ ms} = 185\text{ ms}$.
 - $TPOT = 4,975\text{ ms} / (200 - 1) = 25.0\text{ ms/token}$.
 - $T_{e2e} = 185\text{ ms} + 4,975\text{ ms} = 5,160\text{ ms}$.
@@ -142,6 +150,15 @@ As an analytical toy model, let independent generation lengths be continuous $N_
 Under static batching:
 $$\mathbb{E}[\max_{j \in [1, B]} N_{out, j}] = \frac{B}{B + 1} M$$
 $$\text{Efficiency}_{static} = \frac{\mathbb{E}[\sum_{j=1}^B N_{out, j}]}{B \cdot \mathbb{E}[\max_j N_{out, j}]} = \frac{B \cdot (M/2)}{B \cdot \frac{B}{B+1} M} = \frac{B + 1}{2B}$$
+*Where*: $B$ = batch size; $N_{out,j}$ = output length of request $j$; $M$ = maximum possible output length; $\tau_{step}$ = time of one decode iteration (assumed constant in this toy model).
+
+*Step-by-step*:
+1. Numerator: by linearity of expectation, $\mathbb{E}[\sum_j N_{out,j}]=B\,\mathbb{E}[N_{out,j}]=B\cdot M/2$ (mean of $\mathrm{Uniform}(0,M)$).
+2. CDF of the maximum: $\max_j N_{out,j}\le x$ only if every one of the $B$ independent lengths is $\le x$, so $\Pr[\max\le x]=(x/M)^B$ for $0\le x\le M$.
+3. For a nonnegative variable bounded by $M$, $\mathbb{E}[X]=\int_0^M \Pr[X>x]\,dx$. Hence $\mathbb{E}[\max]=\int_0^M\left(1-(x/M)^B\right)dx = M-\frac{M}{B+1}=\frac{B}{B+1}M$.
+4. Divide: $\frac{B M/2}{B\cdot\frac{B}{B+1}M}=\frac{B+1}{2B}$.
+5. Check: $B=1$ gives $1$ (no bubbles with one request); $B=4$ gives $5/8=62.5\%$; $B\to\infty$ gives $1/2$.
+
 For large $B$, this toy-model slot-occupancy ratio approaches $50\%$. It does not prove that half of GPU compute is wasted: masked execution, kernel shapes, memory traffic, admission gaps, and batching overhead determine measured resource waste.
 Continuous batching can refill eligible slots and improve occupancy, but it does not imply $100\%$ useful hardware utilization or a universal throughput multiplier. Admission frequency, prefill interference, KV availability, scheduler overhead, and workload shape must be measured.
 
@@ -155,6 +172,7 @@ Total useful tokens: $10 + 50 + 20 + 100 = 180\text{ tokens}$.
 Static batch duration: $100\text{ iterations}$.
 Total slots processed: $4 \times 100 = 400\text{ token slots}$.
 Bubble waste: $400 - 180 = 220\text{ wasted slots}$ ($55\%$ waste).
+Equivalently, $\text{Efficiency}_{static}=180/400=45\%$. This specific batch is not drawn from the uniform toy model, so it need not match the $B=4$ toy value of $62.5\%$.
 Under continuous batching, Req 1 vacates its slot at step 10, permitting Req 5 from the queue to start immediately.
 
 **Knowledge Check:**
@@ -199,10 +217,19 @@ The work budget limits scheduled token work, but does not create a strict wall-c
 **Quantitative Model / Derivation:**
 Use a measured step-cost function rather than treating tokens as equal-cost work:
 $$T_{step}=f(N_{prefill},N_{decode},\text{lengths},\text{cache state},\text{kernels},\text{hardware})$$
+*Where*: $T_{step}$ = wall-clock time of one scheduler iteration; $N_{prefill}$ = prompt tokens scheduled in the iteration; $N_{decode}$ = decode tokens scheduled (one per running sequence, so $N_{decode}=B_{dec}$ in the list above); $T_{budget}$ = token budget per iteration (a token count, not a time); $C_{max}$ = configured chunk limit; $C_{next}$ = prefill tokens granted to the next chunk.
+
+*Example of the budget rule*: with $T_{budget}=512$, $C_{max}=512$, and $B_{dec}=100$ running decodes, $C_{next}\le\min(512,\,512-100)=412$ prompt tokens this iteration.
+
 The scheduler enforces a work constraint such as $N_{prefill}+N_{decode}\le T_{budget}$, while experiments estimate $f$. Smaller chunks can shorten individual decode interruptions but add more scheduling steps and may reduce kernel efficiency. Larger chunks can improve prefill efficiency while worsening ITL. TTFT, ITL, throughput, fairness, and goodput must all be remeasured.
 
 **Worked Example:**
-Treat the following values as exercise inputs, not hardware facts: a decode-only step measures $18\text{ ms}$, an unchunked 4,096-token prefill step measures $120\text{ ms}$, and eight 512-token chunks measure $35\text{ ms}$ each when mixed with the same decode load. Compare the longest injected step and cumulative prompt-processing time. Exact request TTFT and ITL require the arrival order, batch composition, and scheduling timeline, so construct that timeline before calculating them. Then test whether the measurements reproduce across randomized runs and include a counterexample workload with short prompts or high chunk overhead.
+Treat the following values as exercise inputs, not hardware facts: a decode-only step measures $18\text{ ms}$, an unchunked 4,096-token prefill step measures $120\text{ ms}$, and eight 512-token chunks measure $35\text{ ms}$ each when mixed with the same decode load. Compare the longest injected step and cumulative prompt-processing time.
+- Chunk count: $\lceil 4{,}096/512\rceil = 8$.
+- Longest step a running decode can be stuck behind: $120\text{ ms}$ unchunked vs. $35\text{ ms}$ chunked (vs. $18\text{ ms}$ with no prompt in flight).
+- Cumulative time of steps containing the prompt: $120\text{ ms}$ unchunked vs. $8\times35=280\text{ ms}$ chunked. Those chunked steps also advance decodes, so this is not pure prefill cost, but the prompt's own processing span grows.
+
+Exact request TTFT and ITL require the arrival order, batch composition, and scheduling timeline, so construct that timeline before calculating them. Then test whether the measurements reproduce across randomized runs and include a counterexample workload with short prompts or high chunk overhead.
 
 **Knowledge Check:**
 1. Does chunking necessarily increase mathematical model FLOPs? Which implementation costs can nevertheless increase measured work or elapsed time?
@@ -234,6 +261,7 @@ Under which assumptions does queueing delay grow nonlinearly near capacity, and 
 - **Traffic Intensity / Utilization ($\rho$)**: In the stated single-server model, $\rho=\lambda\mathbb{E}[S]=\lambda/\mu$ and stationarity requires $\rho<1$. GPU utilization counters and token throughput are different quantities.
 - **Little's Law**: Fundamental queueing theorem:
   $$L = \lambda W$$
+  *Intuition*: draw each request as a bar from entry to exit. Area under the "requests present" curve over a window $[0,T]$ equals the summed bar lengths. Divide both by $T$: left side is $L$; right side is $(\text{arrivals}/T)\times(\text{mean bar length})=\lambda W$. Example: 4 req/s each staying 0.5 s means $L=2$ requests present on average.
   The average number of requests in the system ($L$) equals arrival rate ($\lambda$) multiplied by average residence time ($W = T_{e2e}$).
   Similarly, for the waiting queue alone: $L_q = \lambda W_q$, where $L_q$ is average queue depth and $W_q$ is average queue wait time ($T_{queue}$).
   *Conditions* ([Little, 2011, §2 and §3](https://pubsonline.informs.org/doi/10.1287/opre.1110.0940)):
@@ -248,6 +276,15 @@ Approximating the serving system as an M/G/1 queue (Poisson arrivals, general se
 According to the **Pollaczek-Khinchine (P-K) formula** (**D**, CLM-005):
 $$W_q = \frac{\lambda (\sigma^2 + 1/\mu^2)}{2(1 - \rho)} = \frac{\rho \cdot \frac{1}{\mu} \left(1 + C_v^2\right)}{2(1 - \rho)}$$
 where $C_v = \sigma / (1/\mu) = \sigma \mu$ is the coefficient of variation of service time.
+
+*Where*: $S$ = service time of one request; $\mathbb{E}[S]=1/\mu$; $\sigma^2=\mathrm{Var}(S)$; $\rho=\lambda/\mu$; $W_q$ = mean time waiting before service starts. Mean time in system is $W=W_q+1/\mu$.
+
+*Step-by-step (from the first form to the second)*:
+1. The standard P-K form is $W_q=\dfrac{\lambda\,\mathbb{E}[S^2]}{2(1-\rho)}$.
+2. Second moment from variance: $\mathbb{E}[S^2]=\mathrm{Var}(S)+\mathbb{E}[S]^2=\sigma^2+1/\mu^2$. This gives the first expression above.
+3. Factor out $1/\mu^2$: $\sigma^2+1/\mu^2=\frac{1}{\mu^2}(\sigma^2\mu^2+1)=\frac{1}{\mu^2}(1+C_v^2)$.
+4. Then $\lambda\cdot\frac{1}{\mu^2}=\frac{\lambda}{\mu}\cdot\frac{1}{\mu}=\rho\cdot\frac{1}{\mu}$, which gives the second expression.
+5. Special cases: deterministic service ($C_v=0$, M/D/1) halves the wait of exponential service ($C_v=1$, M/M/1) at the same $\rho$.
 Notice two critical dynamics:
 1. **The $(1 - \rho)$ Denominator**: In the M/G/1 model, mean waiting diverges as $\rho \to 1$. This is model behavior, not a percentile guarantee for a batching LLM server (**D**, CLM-009).
 2. **The Variance Term ($C_v^2$ or $\sigma^2$)**: Under the model assumptions, higher service-time variance increases mean queue wait. Real LLM service demand depends on prompt/output lengths, batching, cache state, and scheduler decisions, so the distribution must be measured rather than inferred from output length alone.
@@ -264,7 +301,9 @@ Workload has standard deviation $\sigma = 0.1\text{ s}$ ($C_v = 1.0$).
 - At $\lambda = 9.5\text{ req/s}$ ($\rho = 0.95$):
   $$W_q = \frac{0.95 \cdot 0.1 \cdot (1 + 1)}{2(1 - 0.95)} = \frac{0.19}{0.10} = 1.90\text{ s} = 1,900\text{ ms}$$
   $$L_q = 9.5 \times 1.90 = 18.05\text{ requests in queue}$$
-Notice: Moving from $\rho = 0.80$ to $\rho = 0.95$ (an 18% increase in arrival rate) causes queue wait time to jump by nearly $5\times$ ($400\text{ ms} \to 1,900\text{ ms}$).
+Notice: Moving from $\rho = 0.80$ to $\rho = 0.95$ (a $9.5/8-1\approx19\%$ increase in arrival rate) causes queue wait time to jump by nearly $5\times$ ($400\text{ ms} \to 1,900\text{ ms}$, a factor of $4.75$).
+Why: the numerator grows only by $0.95/0.80\approx1.19$, while the denominator shrinks from $2(1-0.80)=0.40$ to $2(1-0.95)=0.10$, a factor of $4$. The product $1.1875\times4=4.75$ is the jump.
+Mean time in system adds the $100\text{ ms}$ service time: $W=W_q+1/\mu=200$, $500$, and $2{,}000\text{ ms}$ at the three loads.
 
 **Knowledge Check:**
 1. If your average response time is $W = 2.5\text{ seconds}$ and your target peak arrival rate is $\lambda = 40\text{ req/s}$, what is the average concurrency $L$ that your cluster must maintain in steady state?
@@ -309,11 +348,12 @@ This pseudocode is explanatory; the required artifact must cite the actual pinne
 **Quantitative Model / Trade-off Comparison:**
 - *Idealized cost of transferring state*:
   $$T_{swap\_roundtrip} = \frac{2 \times \text{KV\_Size\_Bytes}}{\text{PCIe\_Effective\_Bandwidth}} + 2 \times \text{DMA\_Overhead}$$
+  *Where*: $\text{KV\_Size\_Bytes}$ = KV state of the preempted request(s); the factor 2 counts one copy out (device to host) and one copy back; $\text{PCIe\_Effective\_Bandwidth}$ = measured bytes/s of the host link, not the link's nominal rate; $\text{DMA\_Overhead}$ = fixed setup/synchronization cost per transfer.
   For an illustrative $4\text{ GiB}$ state and a measured $25\text{ GiB/s}$ effective transfer path, the payload-only round-trip lower bound is:
   $$T_{swap\_roundtrip} \ge \frac{2 \times 4\text{ GiB}}{25\text{ GiB/s}} = 0.32\text{ s} = 320\text{ ms}$$
 - *Idealized cost of recomputation*:
   $$T_{recompute} = T_{prefill}(N_{in} + N_{gen\_so\_far}) \approx \frac{2 \cdot P \cdot (N_{in} + N_{gen\_so\_far})}{\text{Peak\_Compute\_FLOPs}}$$
-  Here $P$ is the absolute parameter count, not billions. $2P$ FLOP per token is the dense matrix-multiply approximation and excludes attention-score work, which grows with context length. The denominator is in FLOP/s, so the result is in seconds.
+  Here $N_{in}$ = prompt length and $N_{gen\_so\_far}$ = tokens already generated before preemption; both must be reprocessed because the KV for all of them was freed. $P$ is the absolute parameter count, not billions. $2P$ FLOP per token is the dense matrix-multiply approximation and excludes attention-score work, which grows with context length. The denominator is in FLOP/s, so the result is in seconds.
 These are lower-bound comparisons. Effective bandwidth, overlap, serialization, current load, kernel efficiency, and timeout/cancellation behavior must be measured. Keep binary and decimal units apart: 1 GiB $=2^{30}$ bytes and 1 GB $=10^9$ bytes.
 
 **Worked Example:**
@@ -367,7 +407,7 @@ How do we prevent a serving system from entering goodput collapse when incoming 
 - **Load Shedding**: The deliberate, early rejection of excess requests when queues exceed a safe threshold, preserving full service capacity for already-admitted requests.
 
 **Mechanism Explanation:**
-Admission control algorithms employ three primary strategies:
+Admission control algorithms employ four primary strategies:
 1. **Concurrency Limits ($L_{max}$)**: Bound the total active requests in the serving engine:
    $$\text{If } |Queue_{waiting}| + |Queue_{running}| \ge L_{max} \implies \text{apply the configured admission outcome}$$
 2. **Time-in-Queue Bounding (Virtual Deadline)**:
@@ -378,6 +418,13 @@ Admission control algorithms employ three primary strategies:
 **Quantitative Model / Trade-off Comparison:**
 For an initially empty deterministic fluid queue with fixed rates and no drops:
 $$\lambda>\mu \implies Q(t)=(\lambda-\mu)t,\qquad \widehat{W}_q(t)=Q(t)/\mu$$
+*Where*: $Q(t)$ = queue depth at time $t$ after overload begins; $\widehat{W}_q(t)$ = wait of a request that joins at $t$.
+
+*Step-by-step*:
+1. Requests enter at rate $\lambda$ and leave at rate $\mu$, so $dQ/dt=\lambda-\mu$. With $Q(0)=0$, integrating gives $Q(t)=(\lambda-\mu)t$.
+2. Under FIFO a new arrival waits until the $Q(t)$ requests ahead of it drain at rate $\mu$: $\widehat{W}_q(t)=Q(t)/\mu$.
+3. Combining: $\widehat{W}_q(t)=\frac{\lambda-\mu}{\mu}\,t$. Wait grows linearly and without bound while $\lambda>\mu$. A client timeout $T_{out}$ is first exceeded at $t^*=T_{out}\,\mu/(\lambda-\mu)$.
+
 Client timeouts can reduce user-visible goodput when stale work is not cancelled, but neither the fluid model nor $\lambda>\mu$ alone proves goodput goes to zero. In a simplified steady-rate exercise, admitted rate cannot sustainably exceed measured completion capacity. Real goodput additionally depends on SLO attainment, failures, cancellations, retries, and output quality. Load shedding trades rejected-user utility for protection of selected objectives; it does not create 100% reliability.
 
 **Worked Example:**
@@ -387,9 +434,10 @@ A traffic spike arrives at $\lambda = 250\text{ req/s}$ for 60 seconds.
   Queue accumulates $(250 - 100) = 150\text{ req/s}$.
   After 15 seconds, queue depth reaches $15 \times 150 = 2,250\text{ requests}$.
   Wait time in queue for newly scheduled requests $= 2,250 / 100 = 22.5\text{ seconds}$.
+  The modeled wait first crosses the $2.0\text{ s}$ timeout at $t^*=2.0\times100/150\approx1.33\text{ s}$ (queue depth $200$).
   Requests at the tail of this modeled backlog exceed the timeout. Exact goodput requires the arrival/departure timeline and cancellation semantics; it is not automatically zero.
 - *Scenario B (Strict Admission Control with Load Shedding)*:
-  Gateway limits queue size to 50 requests ($0.5\text{ s}$ max queue delay).
+  Gateway limits queue size to 50 requests ($0.5\text{ s}$ max queue delay, from $\widehat{W}_q=50/100$).
   Gateway sheds the offered excess using the configured rejection contract.
   The admitted $100\text{ req/s}$ are processed with $T_{queue} < 500\text{ ms}$.
   The model predicts up to $100\text{ req/s}$ completions; measured SLO-compliant goodput may be lower.
@@ -456,6 +504,12 @@ The non-KV term and allocator/headroom policy are measured for the selected runt
 Per request $r$ with $N_r\ge2$ output events at one observation boundary, Lesson 4.1 gives the exact identity $T_{e2e,r}=TTFT_r+(N_r-1)\,TPOT_r$. A request with $N_r=1$ has $T_{e2e,r}=TTFT_r$ and no TPOT, so report it as a separate class; do not assign it a TPOT of zero. Averaging over the same population of $N\ge2$ requests:
 $$\mathbb{E}[T_{e2e}] = \mathbb{E}[TTFT] + \mathbb{E}[(N_{out}-1)\,TPOT]$$
 $$\mathbb{E}[(N_{out}-1)\,TPOT]=(\mathbb{E}[N_{out}]-1)\,\mathbb{E}[TPOT]+\mathrm{Cov}(N_{out},TPOT)$$
+*Step-by-step*:
+1. Take expectations of the per-request identity; expectation is linear, so $\mathbb{E}[T_{e2e}]=\mathbb{E}[TTFT]+\mathbb{E}[(N_{out}-1)TPOT]$.
+2. For any two random variables, $\mathrm{Cov}(X,Y)=\mathbb{E}[XY]-\mathbb{E}[X]\mathbb{E}[Y]$. Rearranged: $\mathbb{E}[XY]=\mathbb{E}[X]\mathbb{E}[Y]+\mathrm{Cov}(X,Y)$.
+3. Set $X=N_{out}-1$ and $Y=TPOT$. Since $\mathbb{E}[N_{out}-1]=\mathbb{E}[N_{out}]-1$ and subtracting a constant does not change covariance, this gives the second line.
+4. Gap-weighted case: $(N_r-1)\,TPOT_r=T_{e2e,r}-TTFT_r$ by definition. Averaging over $n$ requests, $\frac{1}{n}\sum_r(T_{e2e,r}-TTFT_r)=\frac{\sum_r(N_r-1)}{n}\cdot\frac{\sum_r(T_{e2e,r}-TTFT_r)}{\sum_r(N_r-1)}=(\bar N_{out}-1)\,\overline{ITL}_{gap}$ with no covariance term.
+
 The product of means $(\bar N_{out}-1)\times\overline{TPOT}$ is therefore exact only in two cases:
 - the covariance is zero, for example when TPOT does not vary with output length; or
 - $\overline{TPOT}$ is replaced by the gap-weighted mean over the same population, $\overline{ITL}_{gap}=\sum_r (T_{e2e,r}-TTFT_r)/\sum_r (N_r-1)$.
@@ -470,7 +524,7 @@ Otherwise it is an approximation, and its error is the covariance term (**D**, C
 | B | 4 | 2 ms | 6 ms |
 
 - True mean post-first-output time: $(10+6)/2=8\text{ ms}$.
-- Product of request means: $\overline{N_{out}-1}=2$ and $\overline{TPOT}=6\text{ ms}$, which gives $12\text{ ms}$. That overstates the mean by 50%. The population covariance is $-4\text{ ms}$, and $12-4=8$.
+- Product of request means: $\overline{N_{out}-1}=2$ and $\overline{TPOT}=6\text{ ms}$, which gives $12\text{ ms}$. That overstates the mean by 50%. The population covariance is $-4\text{ ms}$, and $12-4=8$. (Deviations from the means: A has $N_{out}-1=1$, i.e. $-1$, and $TPOT$ $+4$; B has $+1$ and $-4$. $\mathrm{Cov}=\frac{(-1)(+4)+(+1)(-4)}{2}=-4\text{ ms}$.)
 - Gap-weighted mean: $\overline{ITL}_{gap}=16\text{ ms}/4\text{ gaps}=4\text{ ms}$. Then $2\times4=8\text{ ms}$, which is correct.
 
 Target average concurrency:
@@ -482,6 +536,8 @@ Per-request peak KV memory demand:
 $$KV_{req} = 2 \times N_{layers} \times N_{kv\_heads} \times d_{head} \times B_{elem} \times (\bar{N}_{in} + \bar{N}_{out})$$
 Maximum concurrent sequences supported by memory:
 $$L_{KV\_max} = \frac{M_{KV\_available}}{KV_{req}}$$
+*Where*: the leading 2 counts one K and one V tensor; $N_{layers}$ = transformer layers; $N_{kv\_heads}$ = KV heads (fewer than query heads under grouped-query attention); $d_{head}$ = head dimension; $B_{elem}$ = bytes per stored element (2 for FP16/BF16). Everything before $(\bar N_{in}+\bar N_{out})$ is the per-token footprint; the last factor is the token count at the end of generation, when the request's KV is largest. Round $L_{KV\_max}$ down, because a partial sequence cannot be resident.
+
 If the rough $L_{KV\_max}$ estimate is below required resident concurrency, KV capacity is a candidate constraint. Mean sequence length, allocator overhead, weights, activations, prefix reuse, batching, and routing can invalidate the estimate; confirm with runtime measurements before selecting an intervention.
 
 **Worked Example:**
@@ -495,6 +551,7 @@ If the rough $L_{KV\_max}$ estimate is below required resident concurrency, KV c
 - Logical KV payload per request: $2,560 \times 128\text{ KiB}=320\text{ MiB}=0.3125\text{ GiB}$, before allocator metadata, block rounding, and prefix sharing.
 - Maximum memory concurrency:
   $$L_{KV\_max,logical}=\left\lfloor\frac{60\text{ GiB}}{0.3125\text{ GiB}}\right\rfloor=192\text{ concurrent requests}$$
+  Unit check: $131{,}072/1024=128$ KiB; $2{,}560\times128\text{ KiB}=327{,}680\text{ KiB}=320\text{ MiB}$; $320/1024=0.3125$ GiB; $60/0.3125=192$ exactly.
 Suppose the workload has an admitted rate of $\lambda = 50\text{ req/s}$ and a mean *resident* time of $\mathbb{E}[T_{resident}] = 5\text{ s}$, measured from KV allocation to release (exercise assumption). Then $L_{resident} = 50 \times 5 = 250$ resident sequences on average. Only the resident count is comparable with the KV ceiling. An end-to-end $W$ of 5 s would include queue time and overstate the resident count. The exact time-average KV demand is $\lambda\,\mathbb{E}[\int KV_r(t)\,dt]$ over each request's residency. The screening product $L_{resident}\times KV_{req}(\bar N_{in}+\bar N_{out})$ differs from it in two opposing ways:
 - It overstates demand, because KV grows during decode and does not sit at its final size for the whole residency.
 - It can understate demand, because longer requests both hold more KV and stay resident longer (positive covariance, the same issue as in Step 2).
@@ -705,7 +762,7 @@ The trace must map out:
 Reviewers use these values to check arithmetic, not to grade a design. A submission with different declared inputs is checked against its own inputs.
 
 - **Weights**: $70\times10^9\times2=140\times10^9$ bytes $=140$ GB $\approx130.39$ GiB. Per GPU at $t=2/4/8$: $\approx65.19/32.60/16.30$ GiB.
-- **KV pool**, from $76.0-130.39/t-6.0$:
+- **KV pool**, from $76.0-130.39/t-6.0$ (usable memory minus this GPU's weight shard minus non-KV/headroom; per replica multiply by $t$, and $8/t$ replicas fit on 8 GPUs):
   - per GPU at $t=2/4/8$: $\approx4.81/37.40/53.70$ GiB;
   - per replica: $\approx9.61/149.61/429.61$ GiB, with $4/2/1$ replicas.
   - The 16,800-token document footprint alone ($\approx5.13$ GiB) exceeds a single $t=2$ GPU's KV pool. It fits only when sharded across the replica's pool of $\approx9.61$ GiB, so a $t=2$ replica holds at most one resident document at a time.
@@ -715,7 +772,7 @@ Reviewers use these values to check arithmetic, not to grade a design. A submiss
 - **Little's Law, long-run means**:
   - Voice: $40\times3.2=128$ end-to-end and $40\times3.0=120$ resident.
   - Documents: $2\times30=60$ end-to-end and $2\times28=56$ resident.
-  - The resident screening demand at mean lengths is $\approx20.14+287.11=307.25$ GiB. That is below the single $t=8$ pool but above the $\approx299.23$ GiB total of two $t=4$ replicas. The caveats from Lesson 4.7 apply, and burst-window and tail demand must be analyzed separately.
+  - The resident screening demand at mean lengths is $\approx20.14+287.11=307.25$ GiB ($120\times171.875\text{ MiB}=20{,}625\text{ MiB}$ and $56\times5{,}250\text{ MiB}=294{,}000\text{ MiB}$, each divided by 1,024). That is below the single $t=8$ pool but above the $\approx299.23$ GiB total of two $t=4$ replicas. The caveats from Lesson 4.7 apply, and burst-window and tail demand must be analyzed separately.
 - **Step costs**: The fixture's 175 ms unchunked-prefill step is *consistent with* the 180 ms P99 ITL spike. It supports the prefill-interference hypothesis but does not prove it. At a 512-token chunk the mixed step is 27 ms, and at 1,024 tokens it is 34 ms, which already exceeds a 30 ms ITL target before any other overhead. With one 512-token chunk per step, a 16,000-token prompt needs $\lceil16{,}000/512\rceil=32$ steps, so at least $32\times27=864$ ms of document prefill span. That is the TTFT/throughput cost to weigh.
 
 ### Rubric Dimensions
