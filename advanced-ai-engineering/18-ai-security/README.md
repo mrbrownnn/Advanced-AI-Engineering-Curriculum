@@ -92,11 +92,15 @@ Because no architectural instruction/data separation exists inside the model, ri
 **Quantitative Model / Derivation:**
 Attack paths $\approx |S_{untrusted}|\times|K_{reachable}|$ after authorization filtering, where $K_{reachable}$ are sinks callable after untrusted content enters context. Removing a source class or sink class removes every path through it; adding a detector only lowers the probability on each path.
 
+- *where:* $S_{untrusted}$ is the set of untrusted source classes; $K_{reachable}$ is the set of sinks still callable once untrusted text is in context; $|\cdot|$ is the number of elements in a set.
+- *Why a product.* A candidate path is one (source, sink) pair, so the count is the number of pairs. The product is exact only when every untrusted source can reach every listed sink; otherwise count the reachable pairs one by one, and the product is an upper bound.
+- *Why removal beats detection.* Removing one source class takes away $|K_{reachable}|$ pairs (a whole row); removing one sink class takes away $|S_{untrusted}|$ pairs (a whole column). A detector removes no pair: each pair stays in the count with a lower, attacker-searchable success probability.
+
 **Worked Example** (a design exercise; no measurement):
 - *Input.* An email assistant.
   - Sources: user message (trusted), inbox messages (untrusted), attachments (untrusted), web fetch (untrusted).
   - Sinks: `send_email` (external egress), `read_files` (sensitive read), Markdown renderer (image URLs are egress), calendar write (low sensitivity, not counted below).
-- *Steps.* Count untrusted source × egress-or-sensitive sink: $3\times3=9$ candidate paths. Requiring explicit user confirmation of recipients on `send_email` cuts its 3 paths. Rendering images only through the policy proxy of Lesson 18.5 cuts the renderer's 3 paths to unauthorized hosts.
+- *Steps.* Count untrusted source × egress-or-sensitive sink: $|S_{untrusted}|=3$ (inbox, attachments, web fetch) and $|K_{reachable}|=3$ (`send_email`, `read_files`, renderer), so $3\times3=9$ candidate paths. Requiring explicit user confirmation of recipients on `send_email` cuts its 3 paths. Rendering images only through the policy proxy of Lesson 18.5 cuts the renderer's 3 paths to unauthorized hosts.
 - *Result.* $9-3-3=3$ residual paths, all through `read_files`.
 - *Interpretation and limits.*
   - `read_files` cannot send data out by itself. It matters because it puts sensitive data in context for any egress sink that remains, so a sensitive read and an egress sink must be analysed as a pair.
@@ -160,17 +164,22 @@ $$
 P(T)=P(R)\,P(T\mid R)+P(\neg R)\,P(T\mid\neg R).
 $$
 
+*where:* $R$, $T$ are the events defined above; $\neg R$ is "no poisoned passage in the delivered context", so $P(\neg R)=1-P(R)$; $P(T\mid R)$ is the probability of $T$ among trials where $R$ occurred; $\wedge$ means "and" (both events in the same trial).
+
+*Step-by-step.* Every trial falls in exactly one of $R$ or $\neg R$, so the target-match trials split into two disjoint groups: $P(T)=P(T\wedge R)+P(T\wedge\neg R)$. By the definition of conditional probability, $P(T\wedge R)=P(R)\,P(T\mid R)$ and $P(T\wedge\neg R)=P(\neg R)\,P(T\mid\neg R)$. Substituting gives the equation. In counts: target matches $=$ (matches with $R$) $+$ (matches without $R$).
+
 - $P(R)$ has all trials as its denominator.
 - $P(T\mid R)$ has only the trials where $R$ occurred as its denominator. This is the "follow" rate. Dividing target matches by *all* trials gives $P(T)$, which is a different number.
 - The retrieved path contributes $P(R)\,P(T\mid R)$. The older shorthand $p_r\,p_f$ equals $P(T)$ only when $p_f$ means $P(T\mid R)$ and $P(T\mid\neg R)=0$.
 - With $m$ poisoned passages, $P(R)=1-\prod_i(1-p_{r,i})$ holds only if the passages are retrieved independently. Passages crafted for the same query are similar, so measure $R$ per trial instead of composing per-passage rates.
+  - *where:* $p_{r,i}$ is the per-trial retrieval rate of poisoned passage $i$, and $\prod_i$ multiplies over $i=1,\dots,m$. *Steps:* $1-p_{r,i}$ is the chance passage $i$ is missed; under independence all $m$ are missed with probability $\prod_i(1-p_{r,i})$; $R$ is the complement. Example: two passages at 0.5 each give $1-0.5\times0.5=0.75$. If the two are near-duplicates that are retrieved together or not at all, the true $P(R)$ is 0.5, so the formula overstates it.
 
 Two controls give the alternate-path terms a value:
 
 - **No-poison control**: the same queries, seeds, and decoding settings on the clean corpus. Its target-match rate $P_0(T)$ is what prior knowledge and other documents produce without the attack.
 - **No-retrieval control**: the same queries with retrieval disabled and the cache bypassed. Its target-match rate is what the model produces from its own parameters.
 
-The attributable effect of poisoning is estimated by $P(T)-P_0(T)$ on matched trials. "Adoption without retrieval is impossible" is true only by definition: it holds if $A$ is defined as causation through the retrieval path *and* that path is the only way poisoned text reaches the answer. A cache breaks the second condition.
+The attributable effect of poisoning is estimated by $P(T)-P_0(T)$ on matched trials. Here $P(T)$ is the target-match rate on the poisoned corpus and $P_0(T)$ the rate on the clean corpus with the same queries, seeds, and decoding; the subtraction removes the matches that would have happened without the attack. "Adoption without retrieval is impossible" is true only by definition: it holds if $A$ is defined as causation through the retrieval path *and* that path is the only way poisoned text reaches the answer. A cache breaks the second condition.
 
 **Worked Example** (synthetic counts, registry CLM-020; no system was measured):
 - *Input.* A 10,000-document sandbox corpus is seeded with 5 passages written for "What is the refund window?" that assert "90 days"; the true policy is 30 days. Retrieval is top-5. There are 50 paraphrases × 4 seeds = 200 trials, each logging the delivered context, passage IDs, cache status, and answer.
@@ -187,10 +196,10 @@ The attributable effect of poisoning is estimated by $P(T)-P_0(T)$ on matched tr
   - $P(T\mid R)=96/120=0.80$.
   - Retrieved-path contribution: $0.60\times0.80=0.48$ (96 of 200).
   - $P(T\mid\neg R)=4/80=0.05$.
-  - Check: $0.48+0.40\times0.05=0.50=P(T)=100/200$.
+  - Check: $0.48+0.40\times0.05=0.50=P(T)=100/200$. Here $0.40=P(\neg R)=80/200$, and $0.40\times0.05=0.02$ is the 4 of 200 matches without retrieval; $96+4=100$.
 - *Step 3 — controls.* No-poison control: 6 of 200 answers say 90 days, so $P_0(T)=0.03$. No-retrieval control: 5 of 200, so $0.025$.
 - *Step 4 — provenance of the four $T\wedge\neg R$ trials.* Two were served from a response cache filled by earlier poisoned trials; the cache key ignored the corpus version. One cites a stale legitimate page that still says 90 days. One has no supporting passage.
-- *Result.* Poisoning raised target match from 0.03 to 0.50, an estimated attributable difference of 0.47. Of the 100 matches, 96 had a poisoned passage in context in that trial and 2 were replayed from the cache.
+- *Result.* Poisoning raised target match from 0.03 to 0.50, an estimated attributable difference of 0.47 ($0.50-0.03$, i.e. about 94 of 200 trials). Of the 100 matches, 96 had a poisoned passage in context in that trial and 2 were replayed from the cache.
 - *Interpretation and limits.*
   - Multiplying $P(R)$ by the unconditional $P(T)$ gives $0.60\times0.50=0.30$. That number describes nothing in the table.
   - The 24 trials with $R$ but not $T$ show retrieval without a target match. That is consistent with model-side resistance or with competing passages, and the table alone cannot tell which.
@@ -240,6 +249,7 @@ What do prompt-level defenses and detectors actually buy, and how must they be e
 - **More adaptive evidence (2025–2026)**:
   - Zhan et al. re-tested eight indirect-injection defenses (two detectors, perplexity filtering, three prompt-level defenses, paraphrasing, adversarial fine-tuning) on a 100-case InjecAgent subset with white-box adaptive strings trained for up to 500 steps, and report ASR above 50% against every one (**O**, CLM-029; EC-10). Their adaptive attacker knows and can differentiate through the defense, which is a stronger assumption than a remote attacker usually has.
   - LLMail-Inject ran a public challenge in which participants knew the deployed defenses and could submit freely. Of 370,724 phase-1 submissions, 3,018 (0.8%) were end-to-end successes; the funnel shows the deeper stages are where most attempts failed (**O**, CLM-030; EC-11). A low per-submission rate is not a low risk: one success is enough, and the organisers report that some defenses needed a few hundred attempts before the first success.
+    - *Why a low rate still means high risk (illustrative arithmetic, not from the paper).* If each attempt independently succeeds with probability $p$, the chance of at least one success in $n$ attempts is $1-(1-p)^n$. With $p=0.008$ and $n=100$: $1-0.992^{100}\approx0.55$. Real attackers learn from feedback, so attempts are not independent and the true chance is usually higher.
   - Narisetty et al. re-ran one out-of-band defense (Progent) on an AgentDojo subsample with a hand-crafted, defense-aware template and report mean ASR 25.8% undefended, 4.2% defended, 2.6% under their adaptive template, at a utility cost from about 45% to about 26% (**O**, CLM-031; EC-12). The authors themselves call it one small data point that does not establish robustness against an optimized attack.
 
 **Mechanism Explanation:**
@@ -248,16 +258,23 @@ Defenses that rely on the model or a classifier recognizing malice are probabili
 **Quantitative Model / Derivation:**
 If detectors had independent miss rates $1-d_i$, residual $=\prod_i(1-d_i)$. Independence is an assumption to test on the joint data, not a default. An adaptive attacker searches for inputs that evade all layers jointly, creating correlated misses; the residual must be measured on the composition (**D**, CLM-008). Also account for the benign false-positive rate $f$ of the *composed* stack: at request volume $V$, $fV$ legitimate requests are blocked or degraded. If either of two detectors can block, the composed $f$ lies between the larger single rate and the sum of the two.
 
+*where:* $d_i$ is detector $i$'s catch (detection) rate on attack inputs, so $1-d_i$ is its miss rate; $\prod_i$ multiplies over the stacked detectors; "residual" is the fraction of attack inputs that pass every layer; $f_i$ is detector $i$'s false-positive rate on benign requests, $f$ the stack's; $V$ is benign requests per period.
+
+*Step-by-step.*
+1. An attack input gets through the stack only if *every* layer misses it. If misses were independent, the joint miss probability would be the product of the single miss probabilities.
+2. A benign request is blocked if *any* layer flags it. The stack flags at least as many as its busiest single detector, so $f\ge\max(f_1,f_2)$. Adding the two rates counts requests flagged by both twice, so $f\le f_1+f_2$. In short: $\max(f_1,f_2)\le f\le f_1+f_2$.
+3. The overlap is recoverable: requests flagged by both $=f_1+f_2-f$. Independence would predict $f=1-(1-f_1)(1-f_2)$.
+
 **Worked Example** (synthetic counts, registry CLM-020; no detector was measured):
 - *Input.*
   - Static set: 400 attack inputs, each tried once. Detector 1 misses 20 and detector 2 misses 20, so each catches 95%.
   - Adaptive run: 50 scenarios, 500 queries per scenario, with the attacker shown both detectors' block/allow decisions.
   - Benign traffic: 1,000,000 requests per day. Each detector alone flags 1.0%; the stack flags 1.6%.
 - *Steps.*
-  1. Independence predicts a joint miss rate of $0.05\times0.05=0.0025$, which is 1 input in 400.
+  1. Each detector misses $20/400=0.05$, so $d_1=d_2=0.95$. Independence predicts a joint miss rate of $0.05\times0.05=0.0025$, which is 1 input in 400.
   2. The joint log shows 6 inputs missed by both: $6/400=1.5\%$, six times the prediction. The misses are correlated even before any adaptation.
   3. The adaptive search finds at least one input that passes both detectors and achieves the attacker goal in 30 of 50 scenarios: ASR@500 $=60\%$.
-  4. Benign cost: $0.016\times1{,}000{,}000=16{,}000$ legitimate requests blocked or degraded per day. The bounds are 10,000 and 20,000.
+  4. Benign cost: $0.016\times1{,}000{,}000=16{,}000$ legitimate requests blocked or degraded per day. The bounds are 10,000 and 20,000 ($\max(0.01,0.01)\times V$ and $(0.01+0.01)\times V$). Overlap: $0.01+0.01-0.016=0.004$, so 4,000 benign requests per day are flagged by both detectors; independence would predict $1-0.99^2=0.0199$, i.e. only 100 flagged by both.
 - *Result.* Static joint residual 1.5%, adaptive ASR@500 60%, benign false positives 1.6%.
 - *Interpretation and limits.* The stack is useful depth against opportunistic traffic and is not a boundary. The 60% and the 1.5% have different denominators (scenarios against inputs) and different attacker budgets, so their ratio means nothing. A different budget or different feedback would give a different adaptive number. An undefended adaptive baseline is needed before crediting the stack with any reduction.
 
@@ -303,7 +320,7 @@ A tool gateway sits between model and tools. For each call it checks: (1) scope�
 What the guarantee covers must be read from the design, not from the headline. CaMeL's stated threat model excludes attacks that change only the text shown to the user, and its authors report side channels and leave formal verification of the interpreter to future work (EC-4). A gateway has the same shape of limit: it constrains actions, and it does not make a summary truthful.
 
 **Quantitative Model / Trade-off Comparison:**
-Report each configuration as (benign utility, utility under attack, ASR), with the attack protocol stated. For CaMeL, $84.5\%\to77.3\%$ on 97 user tasks is 82 → 75 tasks, a cost of 7 tasks for that model on that benchmark (**D** from the reported percentages). The same design costs another model in the same table 32 points, including a fall from 60% to 0% on the travel suite. Your cost depends on how often tasks need untrusted data to choose the next action, and on how well the planning model handles undocumented tool outputs. Hypothesis to test (**H**, CLM-015): cutting one leg of source–sensitive data–sink removes more adaptive exfiltration than adding another detector at matched utility cost.
+Report each configuration as (benign utility, utility under attack, ASR), with the attack protocol stated. For CaMeL, $84.5\%\to77.3\%$ on 97 user tasks is 82 → 75 tasks, a cost of 7 tasks for that model on that benchmark (**D** from the reported percentages; $0.845\times97=81.97\approx82$ and $0.773\times97=74.98\approx75$). The same design costs another model in the same table 32 points, including a fall from 60% to 0% on the travel suite. Your cost depends on how often tasks need untrusted data to choose the next action, and on how well the planning model handles undocumented tool outputs. Hypothesis to test (**H**, CLM-015): cutting one leg of source–sensitive data–sink removes more adaptive exfiltration than adding another detector at matched utility cost.
 
 **Attack-to-Defense Analysis for Agent Channels** (attack and paper-defense columns **O** from cards EC-3 and EC-6 to EC-14; control column **D**, CLM-032; any claim that a control holds under adaptive attack is **H**, CLM-033):
 
@@ -414,9 +431,17 @@ $$
 C_{max}=N\,(T_{in,max}\,p_{in}+T_{out,max}\,p_{out})+N\,F\,(1+k_s)\,c_{tool}.
 $$
 
+*where:* $N$ is the maximum number of model calls per episode; $T_{in,max}$, $T_{out,max}$ are the per-call input and output token caps; $p_{in}$, $p_{out}$ are USD per token; $F$ is the maximum tool calls per iteration; $k_s$ is the maximum SDK retries per tool call, so $1+k_s$ is the maximum physical attempts; $c_{tool}$ is the maximum price of one attempt. $N_{iter}$, $C_{call}$, $C_{tool}$ in the estimate are typical iterations, typical cost per model call, and typical tool cost per iteration.
+
+*Step-by-step.* (1) One model call costs at most $T_{in,max}p_{in}+T_{out,max}p_{out}$; there are at most $N$ calls. (2) Each iteration follows one model call, so there are at most $N$ iterations, each with at most $F$ tool calls of at most $1+k_s$ attempts at most $c_{tool}$ each: $N\,F\,(1+k_s)\,c_{tool}$. (3) Adding the two worst cases gives $C_{max}$. Every factor is a maximum, so no episode can exceed it; drop any one cap and that factor, hence the product, is unbounded.
+
+*Symbol note.* In this lesson $C$ and $R$ are ledger amounts (committed and reserved USD) and $T_{in}$, $T_{out}$ are token counts; they are unrelated to the events $R$ and $T$ of Lesson 18.2, and $k_s$, $k_c$ are retry counts, not the retrieval top-$k$.
+
 If any one is not enforced, $C_{max}$ is not a bound and must be labelled an estimate. The classification of hard and estimated resources is the one in Module 12, Lesson 12.3: cost is hard only if every billed token is covered by the exact input count and the output cap, and every tool has a per-attempt price cap.
 
-The enforced form is the Module 12 reservation ledger: limit $B$, committed $C$, reserved $R$, invariant $C+R\le B$, reservation of the worst case before dispatch, atomic admission, reconciliation afterwards. Under that invariant, spend is at most $B$ whatever the model proposes. Module 18 adds two security requirements that Module 12 does not need:
+The enforced form is the Module 12 reservation ledger: limit $B$, committed $C$, reserved $R$, invariant $C+R\le B$, reservation of the worst case before dispatch, atomic admission, reconciliation afterwards. Under that invariant, spend is at most $B$ whatever the model proposes.
+
+*How one action is admitted.* Before dispatch, compute the worst-case reservation $q$ of the action. Admit only if $C+R+q\le B$; then $R\leftarrow R+q$. After the action finishes with actual cost $a\le q$: $R\leftarrow R-q$, $C\leftarrow C+a$, and the refund is $q-a$. Since actual spend $C$ never exceeds $C+R$, and $C+R\le B$ at every step, spend stays at most $B$. With two ledgers (episode and principal), the check must pass in both, in one atomic step. Module 18 adds two security requirements that Module 12 does not need:
 
 1. **The ledger key is the authenticated principal.** It comes from the verified session at the gateway. It is never taken from model output, a tool argument, a retrieved document, or a client-supplied field, because attacker-written text can set all of those.
 2. **There is a per-principal limit across episodes.** An episode budget alone resets whenever a new episode starts, so an attacker who can trigger episodes multiplies it. Each admission must satisfy the episode ledger and the principal's window ledger (for example, per day) in one atomic step. Parallel episodes of one principal share the same principal ledger. Traffic with no authenticated principal draws from a shared pool with its own limit.
@@ -428,10 +453,11 @@ The enforced form is the Module 12 reservation ledger: limit $B$, committed $C$,
   - Budgets: episode $B_{ep}=0.40$ USD; principal $B_{pr}=1.00$ USD per day, with 0.70 already committed by this principal's earlier episodes today.
   - A retrieved page tells the agent to keep fetching every linked page.
 - *Step 1 — estimate against bound.*
-  - A typical-case estimate with 4,000 input and 500 output tokens per call and one fetch per iteration: $5\times(0.0195+0.01)=0.1475$ USD.
-  - The bound under the caps: $5\times(0.060+0.015)+5\times3\times3\times0.01=0.375+0.45=0.825$ USD.
-  - Used as a ceiling, the estimate is 5.6 times too low. The bound itself (0.825) is above the episode budget (0.40), so the caps alone do not keep the episode inside its budget. The ledger does.
+  - A typical-case estimate with 4,000 input and 500 output tokens per call and one fetch per iteration: $5\times(0.0195+0.01)=0.1475$ USD. Here $0.0195=4{,}000\times3/10^6+500\times15/10^6=0.012+0.0075$, and $0.01$ is one fetch attempt.
+  - The bound under the caps: $5\times(0.060+0.015)+5\times3\times3\times0.01=0.375+0.45=0.825$ USD. Mapping to $C_{max}$: $T_{in,max}p_{in}=20{,}000\times3/10^6=0.060$; $T_{out,max}p_{out}=1{,}000\times15/10^6=0.015$; $N\,F\,(1+k_s)\,c_{tool}=5\times3\times(1+2)\times0.01$.
+  - Used as a ceiling, the estimate is 5.6 times too low ($0.825/0.1475\approx5.6$). The bound itself (0.825) is above the episode budget (0.40), so the caps alone do not keep the episode inside its budget. The ledger does.
 - *Step 2 — ledger trace.* $C_{ep}$ and $C_{pr}$ are committed cost in USD after the row.
+  - *How to read a row.* A model-call reservation is (exact input count) $\times p_{in}$ $+$ $T_{out,max}\times p_{out}$, because input is counted before dispatch but output is known only afterwards. Row 1: $6{,}000\times3/10^6=0.018$ plus $1{,}000\times15/10^6=0.015$, so $q=0.033$. Actual with 400 output tokens: $0.018+400\times15/10^6=0.018+0.006=0.024$; refund $0.033-0.024=0.009$. The "Check" column is $C+R+q$ for the ledger that is closest to its limit, including any still-open reservations (row 6c: $0.9315+0.06+0.03=1.0215$).
 
 | # | Proposed action | Reservation $q$ | Check | Decision | Actual | $C_{ep}$ / $C_{pr}$ |
 |---|---|---|---|---|---|---|
@@ -452,11 +478,11 @@ The enforced form is the Module 12 reservation ledger: limit $B$, committed $C$,
 - *Result.* Three model calls, 10 fetch attempts, 0.2515 USD in the episode, 0.9515 USD for the principal's day. Four proposed actions were refused before dispatch, each with the resource that failed.
 - *Reading the trace as four tests.*
   - **Multi-tool iteration** (rows 2a–2d): one iteration asked for four tools. The simple product assumes one.
-  - **Nested retry** (row 2e): one logical fetch used 3 physical attempts. The reservation already covered them. With a controller retry on top ($k_c=2$), one logical fetch could reach $2\times(1+2)=6$ attempts, and each controller attempt needs its own reservation.
-  - **Context growth** (rows 3, 5a, 5b): the input went from 6,000 to 18,000 to 31,000 tokens. The reservation grew with it, and the call that exceeded the token cap was refused, although its cost (0.108 USD) would still have fitted the principal's budget.
+  - **Nested retry** (row 2e): one logical fetch used 3 physical attempts. The reservation already covered them. With a controller retry on top ($k_c=2$), one logical fetch could reach $2\times(1+2)=6$ attempts, and each controller attempt needs its own reservation. (Here $k_c=2$ counts controller *attempts*, one original plus one retry. In the $1+k$ convention used for $k_s$, that is one controller retry; the general count is (controller attempts) $\times(1+k_s)$, and with two controller *retries* it would be $3\times3=9$.)
+  - **Context growth** (rows 3, 5a, 5b): the input went from 6,000 to 18,000 to 31,000 tokens. The reservation grew with it, and the call that exceeded the token cap was refused, although its cost (0.108 USD) would still have fitted the principal's budget ($31{,}000\times3/10^6+0.015=0.108$; $0.867+0.108=0.975\le1.00$).
   - **Budget rejection** (rows 6c, 7): the episode ledger had room both times. Only the principal ledger stopped the loop.
 - *Interpretation and limits.*
-  - With an episode-only key, the attacker restarts and receives a fresh 0.40 USD each time: ten episodes are 4.00 USD. With the principal ledger, 0.0485 USD remains for the day. A new episode's first call (reservation 0.033) is admitted and its next action is not.
+  - With an episode-only key, the attacker restarts and receives a fresh 0.40 USD each time: ten episodes are 4.00 USD. With the principal ledger, 0.0485 USD remains for the day ($1.00-0.9515$). A new episode's first call (reservation 0.033) is admitted and its next action is not.
   - If the page had contained text claiming to be a different user, nothing changes. The key was fixed by the gateway from the session before any content was read.
   - The trace bounds cost only. It does not bound wall-clock time or side effects, and it holds across a crash only if the ledger is durable (Module 14).
   - The cost column is hard only because every price in this fixture is capped by a controller-set parameter.
@@ -539,7 +565,7 @@ Lesson: utility and attack success are separate outcomes. An abort can lower ASR
 **Quantitative Model / Trade-off Comparison** (**D**, CLM-019):
 Compare rows only when they share the model and harness manifest, benign task set, security cases, and attack protocol. A static protocol names its fixed attacks. An adaptive protocol names method, queries per case, attacker knowledge, and feedback. Every configuration, including no added defense, gets both columns.
 
-For vector (benign utility ↑, utility under attack ↑, static ASR ↓, adaptive ASR ↓), check dominance pairwise. If several points remain, choose by a predeclared objective. Saying "X dominates" while X is worse on one declared metric is an arithmetic error.
+For vector (benign utility ↑, utility under attack ↑, static ASR ↓, adaptive ASR ↓), check dominance pairwise. The arrows give the better direction: ↑ means higher is better, ↓ means lower is better. To check whether X dominates Y, compare each metric in its own direction; X dominates only if it is never worse and at least once strictly better. If several points remain, choose by a predeclared objective. Saying "X dominates" while X is worse on one declared metric is an arithmetic error.
 
 **Worked Example** (synthetic counts, registry CLM-020; no system was measured):
 - *Input.* One model and manifest; 100 benign tasks; 400 security cases. Static protocol: fixed templates, one attempt per case. Adaptive protocol: search with 200 queries per case and gateway/detector decisions visible. Objective fixed in advance: benign utility ≥75%, adaptive ASR@200 ≤10%, then maximize utility under attack.
@@ -647,10 +673,10 @@ Papers quoted with a number were opened in full text (arXiv HTML) on 2026-10-01.
 *EC-4 — CaMeL* (CLM-011)
 - *Version/full-text pointers*: arXiv:2503.18813v2, 24 Jun 2025; §§3, 3.1, 6, 7, 9.3; Tables 1, 2, 4. Version 1 not read.
 - *System*: privileged planner, quarantined model without tool access, custom data-flow interpreter, policies before each tool call.
-- *Tasks/denominator*: AgentDojo; 97 benign tasks and 949 attack cases. AgentDojo v3 reports 629, so exact suite version is `TODO_VERIFY`.
+- *Tasks/denominator*: AgentDojo; 97 benign tasks and 949 attack cases. AgentDojo v3 reports 629; the CaMeL v2 text does not state which AgentDojo suite version produced 949 (full text re-searched 2026-11-09).
 - *Attacker knowledge/budget*: AgentDojo built-in attack; no adaptive attack against CaMeL.
 - *Metric/baseline/result*: task success versus same model's native tool-calling API. Table 2 native → CaMeL: o3 high 84.5→77.3%; o4-mini 79.4→76.3%; Claude 4 Sonnet 86.6→74.2%; Gemini 2.5 Pro 73.2→41.2%; Gemini 2.5 Flash 55.7→35.1%. Table 4 successful attacks out of 949: 0 for o3/Gemini Pro, 1 for o4-mini, 11 for Claude 4 Sonnet. Median token ratios 2.82× input and 2.73× output.
-- *Status/limits*: author-reported, not reproduced. Meaning of Table 2 ± values was not confirmed (`TODO_VERIFY`). Text-only attacks are out of scope; side channels remain; interpreter verification is future work; data-dependent actions reduce utility.
+- *Status/limits*: author-reported, not reproduced. Table 2's caption does not define its ± values (re-checked 2026-11-09); they are not interpreted here. Text-only attacks are out of scope; side channels remain; interpreter verification is future work; data-dependent actions reduce utility.
 
 *EC-5 — AgentDojo* (CLM-013)
 - *Version/full-text pointers*: arXiv:2406.13352v3, 24 Nov 2024; §§3–5; Tables 1, 3–5.
@@ -846,8 +872,9 @@ Reference answers: (2) injection-task check; `True` means attack goal executed. 
 ### Reference Checks for Deliverable 4
 - Worst-case model call: $30{,}000\times3/10^6+2{,}000\times15/10^6=0.12$ USD.
 - $C_{max}=8\times0.12+8\times4\times2\times0.02=2.24$ USD; at most 64 physical tool attempts.
+  - Mapping: $N=8$, $F=4$, one inner retry so $1+k_s=2$, $c_{tool}=0.02$. Model term $8\times0.12=0.96$; tool term $8\times4\times2\times0.02=1.28$; sum $2.24$. Attempts $=N\,F\,(1+k_s)=8\times4\times2=64$.
 - Since 2.24 > 1.50, caps alone do not enforce episode budget; ledger must.
-- Principal with 9.20 USD committed has 0.80 remaining. Six 0.12 reservations fit; seventh does not.
+- Principal with 9.20 USD committed has 0.80 remaining. Six 0.12 reservations fit; seventh does not ($6\times0.12=0.72\le0.80$; $7\times0.12=0.84>0.80$).
 - Any ledger key writable by request field, tool argument, model, or document fails regardless of arithmetic.
 
 ### Rubric Dimensions
@@ -889,6 +916,11 @@ A learner must be able to:
 - **Path**: untrusted source → context → proposed action → principal/provenance/risk/budget check → sandboxed, destination-authorized, budgeted, audited effect.
 - Detectors lower probabilities; architecture removes paths. Evaluate after attacker adapts.
 - A number needs denominator, protocol, baseline. A ceiling is a bound only when every factor is enforced.
+
+### Cost & Telemetry Hook
+- [Lesson 22.1](../22-ai-economics/README.md): report defense cost per offered task, including blocked, confirmed, and retried actions.
+- [Lesson 23.3](../23-observability-reliability/README.md): count blocked or aborted actions as offered outcomes, not dropped requests.
+- [Lesson 23.6](../23-observability-reliability/README.md): govern audit-trail and ledger telemetry; keep security-sensitive content out of general traces.
 
 ## 12 Competency Targets
 

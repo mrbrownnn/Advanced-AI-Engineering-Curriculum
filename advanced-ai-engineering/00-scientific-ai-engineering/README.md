@@ -157,6 +157,8 @@ For one observation, the measured interval is
 
 $$Y_i=t_{end,i}-t_{start,i}.$$
 
+where: $i$ indexes one observation (e.g., one request); $t_{start,i}$ and $t_{end,i}$ are the timestamps of the two declared boundary events, read from the *same* clock; $Y_i$ is the measured interval in that clock's units. Changing which events $t_{start,i}$ and $t_{end,i}$ denote changes the measurand, as the worked example below shows.
+
 This identity is exact only for the declared clocks and boundaries. It does not prove that $Y_i$ is GPU execution time, user-visible latency, or service time. Timer resolution, clock domain, asynchronous queues, batching, buffering, and instrumentation overhead can change the meaning.
 
 **Warmup is part of the question.** Cold-start and steady-state performance are different estimands. Do not discard early samples merely because they are slower; declare which state matters and report transition behavior when it matters operationally.
@@ -211,6 +213,16 @@ $$\bar d\pm t_{1-\alpha/2,n-1}\frac{s_d}{\sqrt n},$$
 
 under the stated independence and distribution assumptions for the block-level differences.
 
+where:
+- $i=1,\dots,n$ indexes blocks, and $n$ is the number of independent blocks (not requests);
+- $Y_{A,i}$, $Y_{B,i}$ are the block-level results (e.g., block mean latency) for baseline A and treatment B in block $i$;
+- $\bar d$ is the mean paired difference; a positive $\bar d$ means B is larger (slower, for latency);
+- $s_d=\sqrt{\frac{1}{n-1}\sum_i (d_i-\bar d)^2}$ is the sample standard deviation of the differences ($n-1$ in the denominator);
+- $SE(\bar d)$ is the standard error of $\bar d$;
+- $\alpha$ is one minus the confidence level ($\alpha=0.05$ for 95%), and $t_{1-\alpha/2,n-1}$ is the $1-\alpha/2$ quantile of Student's t distribution with $n-1$ degrees of freedom.
+
+Why pairing helps: the nuisance level shared by A and B inside block $i$ appears in both $Y_{A,i}$ and $Y_{B,i}$, so it cancels in $d_i$. The interval is then built from the spread of the differences, $s_d$, rather than from the larger block-to-block spread of the raw results.
+
 **Worked Example (synthetic differences):**
 - *Input*: four independent fresh-process blocks, each running A and B in random order, give paired differences $d=[1.2,0.9,1.1,0.8]$ ms.
 - *Steps*: $\bar d=4.0/4=1.0$ ms; squared deviations $0.04+0.01+0.01+0.04=0.10$, so $s_d=\sqrt{0.10/3}\approx0.183$ ms; $SE=0.183/\sqrt4\approx0.091$ ms; $t_{0.975,3}=3.182$.
@@ -256,9 +268,21 @@ If $q=0.01$, achieving a 95% chance of seeing at least one such event requires
 
 $$n\ge\frac{\ln(0.05)}{\ln(0.99)},$$
 
-so $n=299$ after rounding upward ($\ln0.05/\ln0.99=298.07$). This is only an exposure check (**D**, CLM-007). It does not produce a precise confidence interval for P99.
+so $n=299$ after rounding upward ($\ln0.05/\ln0.99=298.07$).
+
+where: $q$ is the per-trial probability of the event (here, landing in the slowest 1%); $n$ is the number of independent trials; $(1-q)^n$ is the probability that all $n$ trials miss the event.
+
+*Step-by-step*:
+1. Require $1-(1-q)^n\ge0.95$, i.e. $(1-q)^n\le0.05$.
+2. Take natural logs of both sides (log is increasing, so the inequality keeps its direction): $n\ln(1-q)\le\ln0.05$.
+3. Divide by $\ln(1-q)$, which is **negative** for $0<q<1$, so the inequality flips: $n\ge\ln0.05/\ln(1-q)$.
+4. With $q=0.01$: $\ln0.05\approx-2.9957$ and $\ln0.99\approx-0.010050$, giving $n\ge298.07$; $n$ must be an integer, so $n=299$.
+5. Check: $0.99^{298}\approx0.0500$ (just above 0.05, fails) and $0.99^{299}\approx0.0495$, so $P(\text{at least one})\approx0.9505\ge0.95$.
+
+This is only an exposure check (**D**, CLM-007). It does not produce a precise confidence interval for P99.
 
 **Worked Example (synthetic run; nearest-rank quantile, rank $=\lceil qn\rceil$):**
+- *Convention*: sort the $n$ observations ascending; the nearest-rank $q$-quantile is the observation at 1-based rank $\lceil qn\rceil$ (round $qn$ up to an integer). Here $q$ is the quantile level (0.95 for P95), not the event probability of the previous formula.
 - *Input*: 100 issued requests: 94 successes and 6 timeouts at a 2,000 ms timeout. Among the successes, the 90th smallest latency is 240 ms.
 - *Steps*: success-only P95 uses $n=94$: rank $\lceil0.95\times94\rceil=90$, so 240 ms. All-issued P95 uses $n=100$ with timeouts ordered last: rank 95 falls among the 6 timeouts (ranks 95–100).
 - *Result*: success-only P95 $=240$ ms; all-issued P95 $\ge2{,}000$ ms (censored at the timeout); failure rate $=6\%$.
@@ -294,6 +318,8 @@ For independent observations from a normal population with unknown variance, the
 
 $$\bar x\pm t_{1-\alpha/2,n-1}\frac{s}{\sqrt n}.$$
 
+where: $n$ is the number of independent observations; $\bar x$ is their sample mean; $s$ is their sample standard deviation (denominator $n-1$); $s/\sqrt n$ is the standard error of $\bar x$; $\alpha$ and $t_{1-\alpha/2,n-1}$ are as in Lesson 0.3. The term $t\cdot s/\sqrt n$ is the **half-width**: the interval extends that far on each side of $\bar x$.
+
 A 95% confidence procedure has approximately 95% long-run coverage under its assumptions. It does not mean there is a 95% posterior probability that the fixed parameter lies inside this realized interval (**O**, CLM-005).
 
 **Worked Example (synthetic summary statistics):**
@@ -305,6 +331,10 @@ A 95% confidence procedure has approximately 95% long-run coverage under its ass
 For known $\sigma$ and target absolute half-width $E$:
 
 $$n\ge\left(\frac{z_{1-\alpha/2}\sigma}{E}\right)^2.$$
+
+where: $\sigma$ is the (assumed known) population standard deviation; $E$ is the largest acceptable half-width, in the same units as $\sigma$; $z_{1-\alpha/2}$ is the standard normal quantile ($1.96$ for 95%).
+
+*Step-by-step*: with known $\sigma$ the half-width is $z_{1-\alpha/2}\,\sigma/\sqrt n$. Require it to be at most $E$: $z\sigma/\sqrt n\le E \iff \sqrt n\ge z\sigma/E \iff n\ge(z\sigma/E)^2$ (both sides are positive, so squaring keeps the direction). Round up, because $n$ is an integer and rounding down would make the half-width exceed $E$. Note that halving $E$ multiplies $n$ by 4.
 
 With $\sigma=2$ ms, $E=0.5$ ms, and 95% confidence, the normal approximation gives $n\ge(1.96\times2/0.5)^2=61.47$, hence 62 (**D**, CLM-006). If $\sigma$ came from a small pilot, 62 is a planning approximation. This formula does not size P99, ratios, clustered data, multiple comparisons, or statistical power for a minimum effect.
 
@@ -358,7 +388,7 @@ Other communities have used the last two terms differently, so never rely on the
 **Worked Example (static source reading):**
 - *Input*: MLCommons Inference commit `3fbc329939999c13d0a7b5e67fb2092287e06047`, question: “what interval is a LoadGen sample latency, and how is its percentile chosen?”
 - *Steps*: (1) `loadgen/loadgen.cc::StartTest` through sanitized settings and scenario/mode dispatch; (2) `IssueQueries` to `loadgen/issue_query_controller.cc::IssueQueryController::StartIssueQueries` (**O**, CLM-011); (3) SUT completion through `loadgen/loadgen.cc::QuerySamplesComplete`, which reads `PerfClock::now()` once on entry and passes that timestamp to each sample's `SampleComplete`; (4) in `ResponseDelegateDetailed::SampleComplete` the recorded latency is `sched.delta(complete_begin_time)`, where `sched` is built from `query->scheduled_time`; (5) `loadgen/results.cc::PerformanceSummary::ProcessLatencies` sorts the latencies and indexes `sample_latencies[sample_count * percentile]`.
-- *Result*: at this revision a sample latency runs from the query's *scheduled* time to the completion-callback timestamp, and a percentile is the sorted element at the truncated index $\lfloor n\cdot p\rfloor$ (0-based) (**O**, CLM-014).
+- *Result*: at this revision a sample latency runs from the query's *scheduled* time to the completion-callback timestamp, and a percentile is the sorted element at the truncated index $\lfloor n\cdot p\rfloor$ (0-based) (**O**, CLM-014). For example, with $n=1{,}000$ sorted latencies and $p=0.99$, the index is $\lfloor990\rfloor=990$, i.e. the 991st smallest value; the nearest-rank rule of Lesson 0.4 would instead take rank $\lceil0.99\times1000\rceil=990$, the 990th smallest. Here $n$ is the sample count, $p$ the percentile as a fraction, and $\lfloor\cdot\rfloor$ rounds down.
 - *Interpretation / limits*: measuring from scheduled rather than actual issue time is the property that keeps issue delay inside the latency (Lesson 0.2). The index rule is one quantile convention among several, so the same data can give a slightly different “P99” in another tool. This is static inspection of one upstream snapshot; it is not an executed run, and MLPerf's workload contract is not the universal definition of inference performance.
 
 **Knowledge Check:** Why is a commit hash insufficient when generated artifacts or the worktree differ, and which path establishes completion timing?
@@ -430,7 +460,7 @@ Competing hypotheses include cache warmup, batching changes, thermal drift, retr
 - Mytkowicz et al. (ASPLOS 2009), [*Producing Wrong Data Without Doing Anything Obviously Wrong*](https://research.ibm.com/publications/producing-wrong-data-without-doing-anything-obviously-wrong): setup-induced measurement bias (CLM-002).
 - Georges, Buytaert, and Eeckhout (OOPSLA 2007), [*Statistically Rigorous Java Performance Evaluation*](https://doi.org/10.1145/1297027.1297033): startup, steady state, and repeated execution (CLM-004).
 - Kalibera and Jones (ISMM 2013), [*Rigorous Benchmarking in Reasonable Time*](https://kar.kent.ac.uk/33611/): hierarchical variance and experiment dimensioning (CLM-004).
-- Wasserstein and Lazar (2016), [*The ASA's Statement on p-Values*](https://doi.org/10.1080/00031305.2016.1154108): limits of p-value interpretation (CLM-012).
+- Wasserstein and Lazar (2016), [*The ASA Statement on p-Values: Context, Process, and Purpose*](https://doi.org/10.1080/00031305.2016.1154108): limits of p-value interpretation (CLM-012).
 - ACM, [*Artifact Review and Badging – Current*](https://www.acm.org/publications/policies/artifact-review-and-badging-current): repeatability, reproducibility, replicability (CLM-010).
 
 These references were accessed 2026-09-25 and were not re-read in the WP-F1 review. They are canonical methods sources, not evidence about 2025–2026 practice; this module makes no frontier or current-default claim about benchmarking practice.
@@ -607,6 +637,12 @@ A learner can exit Module 00 when they can:
 ### Module Wrap-Up (Final Mental Model Reconstruction)
 
 The final invariant is simple: **a precise number is not strong evidence unless the measurement contract, design, assumptions, and failure semantics make it answer the intended question.**
+
+### Cost & Telemetry Hook
+
+- [Lesson 22.1](../22-ai-economics/README.md): cost per experiment uses the declared estimand's denominator (successful task, not raw request); failed and excluded runs stay in the ledger.
+- [Lesson 22.3](../22-ai-economics/README.md): record dated hardware/runtime prices beside each benchmark manifest so a cost comparison can be recomputed.
+- [Lesson 23.2](../23-observability-reliability/README.md): treat dropped, timed-out, and censored samples as telemetry loss to report, not rows to delete.
 
 ## 12 Competency Targets
 

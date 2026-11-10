@@ -9,6 +9,8 @@ $$
 \to\text{filter/fuse}\to\text{rerank}\to\text{top-}k.
 $$
 
+*Notation note.* The letter $k$ is overloaded in retrieval. In this module, $k$ alone (top-$k$, Recall@$k$, nDCG@$k$) is the result-list cutoff; $k_1$ is the BM25 saturation parameter; the RRF paper's constant (also written $k$ there) is renamed $c$ here; and Lucene's "per-leaf $k$" is the number of hits requested from one index segment. Likewise $c$ in Lesson 9.3 (the popped HNSW candidate) is unrelated to the RRF constant $c$ in Lesson 9.4.
+
 This module covers lexical and dense retrieval, exact and approximate nearest neighbors, HNSW, hybrid fusion, reranking, late interaction, metrics, and latency–quality trade-offs. Document ingestion and lineage belong to Module 08. Query rewriting, generation, citations, freshness orchestration, and RAG failure handling belong to Module 10.
 
 **Research cutoff:** 2026-09-27 for the original revision. Sources added in the 2026-09-30 revision (IDF conventions, HNSW Algorithm 2, MaxSim, RRF constants, frontier items) were searched through 2026-09-30, and the pinned Lucene files were re-read on 2026-09-30. Claims not listed as changed in the registry were not re-verified.
@@ -109,6 +111,24 @@ IDF(t)\cdot\frac{f(t,d)(k_1+1)}
 {f(t,d)+k_1(1-b+b|d|/avgdl)}.
 $$
 
+where:
+
+- $t$ is one analyzed query term and $d$ is one document; the document score is the sum of this contribution over the query terms $t$.
+- $f(t,d)$ is the term frequency: how many times $t$ occurs in $d$ after analysis.
+- $IDF(t)$ is one of the two IDF conventions above (this module states which one each example uses).
+- $|d|$ is the document length in analyzed tokens, and $avgdl$ is the mean $|d|$ over the $N$ documents in the field.
+- $k_1\ge0$ and $b\in[0,1]$ are the tuning constants ($k_1$ is not the top-$k$ cutoff).
+
+*Step-by-step reading of the formula.*
+
+1. Write $K=k_1(1-b+b\,|d|/avgdl)$, the "length-adjusted saturation constant". The contribution becomes $IDF(t)\cdot\frac{f(k_1+1)}{f+K}$.
+2. *Length normalization.* If $b=0$, then $K=k_1$ for every document (no length effect). If $b=1$, then $K=k_1|d|/avgdl$ (full proportional penalty). An average-length document ($|d|=avgdl$) gets $K=k_1$ for any $b$; longer documents get a larger $K$ and therefore a smaller contribution.
+3. *Saturation.* For fixed $K$, $\frac{f(k_1+1)}{f+K}$ is $0$ at $f=0$, increases with $f$, and approaches $k_1+1$ as $f\to\infty$. So repeated occurrences help with diminishing returns; with $k_1=0$ the term part is $1$ for any $f\ge1$ (pure presence/absence).
+4. *Why the RSJ IDF can be zero or negative.* $\ln x=0$ when $x=1$, i.e. $N-n_t+0.5=n_t+0.5$, i.e. $n_t=N/2$. For $n_t>N/2$ the ratio is below 1 and the logarithm is negative. Lucene adds 1 inside the logarithm, so its argument is always greater than 1 and its IDF is always positive.
+5. *Why dropping $(k_1+1)$ preserves ranking.* With fixed $k_1$, every term contribution of every document is multiplied by the same positive constant $k_1+1$, so all document scores are scaled by the same factor and their order is unchanged; only the absolute values differ.
+
+Small check with this module's constants ($k_1=1.2$, $b=0.75$) at $|d|=avgdl$, so $K=1.2$: $f=1$ gives $2.2/2.2=1.0$, $f=2$ gives $4.4/3.2=1.375$, $f=10$ gives $22/11.2=1.964$, all below the ceiling $k_1+1=2.2$.
+
 At the pinned commit, Lucene's scorer computes $\text{boost}\cdot IDF\cdot \frac{f}{f+k_1(1-b+b\,|d|/avgdl)}$, without the $(k_1+1)$ factor. That constant does not change rankings for a fixed $k_1$, but it changes absolute scores. Lucene also stores $|d|$ in a lossy one-byte norm, so its scores can differ slightly from a hand calculation (**O**, CLM-013).
 
 **Mechanism Explanation:**
@@ -128,6 +148,7 @@ The formula is incomplete without analyzer, token positions/overlaps, fields/boo
 | d4 | printer 200 dpi setup guide |
 
 *Steps with analyzer K (lowercase, split on whitespace only).* Lengths are $(4,7,2,5)$, so $avgdl=4.5$. The query terms are `xj-200` ($n=2$) and `firmware` ($n=2$). Lucene IDF is $\ln(1+2.5/2.5)=\ln2=0.6931$ for both. For d1: norm $=1.2(0.25+0.75\cdot4/4.5)=1.1$, tf part $=1\cdot2.2/(1+1.1)=1.0476$, so each term contributes $0.7262$ and the total is $1.4523$. Likewise d3 $=0.8970$ (norm 0.70), d2 $=0.5648$ (norm 1.70), and d4 $=0$.
+Here "norm" is $K=k_1(1-b+b|d|/avgdl)$ and $1-b=0.25$. Expanded: d3 has only `xj-200` with $f=1$, norm $=1.2(0.25+0.75\cdot2/4.5)=0.70$, tf part $=2.2/1.70=1.2941$, score $=0.6931\cdot1.2941=0.8970$. d2 has only `firmware` with $f=1$, norm $=1.2(0.25+0.75\cdot7/4.5)=1.70$, tf part $=2.2/2.70=0.8148$, score $=0.6931\cdot0.8148=0.5648$. d4 contains neither query term, so it scores 0. The shorter d3 beats the longer d2 because both match one term with the same IDF, and only the length normalization differs.
 Ranking: **d1 > d3 > d2 > d4**.
 
 *Steps with analyzer S (also split on `-`).* Now `xj-200` becomes `xj` and `200`. Lengths become $(5,7,3,5)$, so $avgdl=5.0$. The term `200` now also matches d4 ("200 dpi"), so $n_{200}=3$ and Lucene IDF $=\ln(1+1.5/3.5)=0.3567$. Totals: d1 $=1.7430$, d3 $=1.2552$, d2 $=0.5957$, d4 $=0.3567$.
@@ -165,7 +186,17 @@ Dense retrieval encodes query $q$ and document $d$ separately, then scores inner
 
 **Mechanism Explanation:**
 
-Cosine and inner product are equivalent in ranking only under compatible unit normalization. Under unit vectors, $\|q-d\|^2=2-2\,q\cdot d$, so L2 ranking is the reverse of inner-product ranking; without normalization, no such identity holds. Do not switch metrics by name. First run exact vector search on a representative subset: if exact search misses relevance, increasing ANN effort cannot repair the encoder.
+Cosine and inner product are equivalent in ranking only under compatible unit normalization. Under unit vectors, $\|q-d\|^2=2-2\,q\cdot d$, so L2 ranking is the reverse of inner-product ranking; without normalization, no such identity holds. Do not switch metrics by name.
+
+where $q,d\in\mathbb{R}^m$ are the query and document embeddings ($m$ is the embedding dimension), $q\cdot d=\sum_i q_i d_i$ is the inner product, $\|x\|=\sqrt{x\cdot x}$ is the L2 norm, and $\cos(q,d)=\frac{q\cdot d}{\|q\|\,\|d\|}$.
+
+*Step-by-step.*
+
+1. Expand the squared distance: $\|q-d\|^2=(q-d)\cdot(q-d)=\|q\|^2+\|d\|^2-2\,q\cdot d$.
+2. With unit vectors, $\|q\|=\|d\|=1$, so $\|q-d\|^2=2-2\,q\cdot d$, and also $\cos(q,d)=q\cdot d$.
+3. $2-2x$ decreases as $x$ increases, and $\sqrt{\cdot}$ is increasing, so the smallest L2 distance is the largest inner product, which is the largest cosine: all three rankings coincide.
+4. Without normalization, step 1 keeps the term $\|d\|^2$, which varies by document. Inner product then rewards large $\|d\|$, L2 penalizes it, and cosine ignores it, so the three rankings can disagree (see the example check in the Feedback Contract below).
+5. For a fixed query, $\|q\|$ is the same for every document, so normalizing only the query never changes an inner-product or L2 ranking; what matters is whether the *document* vectors are normalized. First run exact vector search on a representative subset: if exact search misses relevance, increasing ANN effort cannot repair the encoder.
 
 **Worked Example:**
 Run exact search over the same normalized vectors and metric. If the relevant item is absent from exact top-$k$, raising HNSW search effort cannot repair that representation ranking.
@@ -175,7 +206,7 @@ Run exact search over the same normalized vectors and metric. If the relevant it
 **Guided Practice:** Cross normalized/unnormalized embeddings with cosine, inner product, and L2; record ranking changes and invalid combinations.
 
 **Feedback Contract:**
-- *Expected Evidence*: A pinned encoder/tokenizer/pooling/metric manifest plus exact ranks. Example check: query $(1,0)$, documents $a=(2,2)$ and $b=(0.9,0.1)$. Inner product ranks $a$ first ($2$ vs $0.9$). Cosine ranks $b$ first ($0.994$ vs $0.707$), and so does L2 ($0.141$ vs $2.236$). After unit-normalizing both documents, all three metrics rank $b$ first.
+- *Expected Evidence*: A pinned encoder/tokenizer/pooling/metric manifest plus exact ranks. Example check: query $(1,0)$, documents $a=(2,2)$ and $b=(0.9,0.1)$. Inner product ranks $a$ first ($2$ vs $0.9$). Cosine ranks $b$ first ($0.994$ vs $0.707$), and so does L2 ($0.141$ vs $2.236$). After unit-normalizing both documents, all three metrics rank $b$ first. Step-by-step: $\|a\|=\sqrt{8}=2.828$ and $\|b\|=\sqrt{0.82}=0.906$. Cosines are $2/2.828=0.707$ and $0.9/0.906=0.994$. L2 distances are $\sqrt{(2-1)^2+2^2}=\sqrt5=2.236$ and $\sqrt{0.1^2+0.1^2}=0.141$. Unit-normalized, $\hat a=(0.707,0.707)$ and $\hat b=(0.994,0.110)$; inner products equal the cosines ($0.707$, $0.994$), and $\|q-\hat d\|^2=2-2\,q\cdot\hat d$ gives $0.586$ and $0.012$ (distances $0.765$ and $0.111$), so $b$ wins under every metric.
 - *Common Failure*: Blaming ANN before exact comparison, or indexing normalized vectors while querying with unnormalized ones.
 - *Diagnostic Hint*: Is the missing item in the *exact* top-$k$ under the served metric? If not, the problem is upstream of the index.
 - *Concept to Revisit*: Representation vs Approximation Loss.
@@ -208,6 +239,8 @@ For exact top-$k$ set $E_k$ and approximate set $A_k$ under identical vectors, m
 $$
 Recall^{ANN}@k=\frac{|A_k\cap E_k|}{|E_k|}.
 $$
+
+where $E_k$ is the set of $k$ items returned by exact (brute-force) search, $A_k$ is the set of $k$ items returned by the ANN index for the same query, and $|\cdot|$ counts set elements. Normally $|E_k|=k$, so the value is "how many of the true $k$ nearest neighbors the ANN index found, divided by $k$"; it ranges from 0 to 1, and order inside the top-$k$ is ignored. The search effort $ef$ in the algorithm above is a separate knob: $ef\ge k$ is needed to return $k$ results from the base layer.
 
 This measures approximation, not relevance (**D**, CLM-004). A system can have perfect ANN recall and poor retrieval relevance.
 
@@ -276,6 +309,14 @@ $$
 RRF(d)=\sum_r\frac{w_r}{c+rank_r(d)}.
 $$
 
+where:
+
+- $d$ is a candidate document (after identity normalization) and $r$ ranges over the input rankings (here, the lexical and dense branches).
+- $rank_r(d)\in\{1,2,\dots\}$ is $d$'s 1-based position in ranking $r$; if $d$ is absent from ranking $r$, that term is taken as 0 in this module.
+- $w_r\ge0$ is the weight of ranking $r$, and $c\ge0$ is the smoothing constant.
+
+*Step-by-step reading.* Each ranking contributes $w_r/(c+rank)$, which is largest at rank 1 and decays slowly. The gap between ranks 1 and 2 is $\frac{1}{c+1}-\frac{1}{c+2}=\frac{1}{(c+1)(c+2)}$: with $c=1$ that is $1/2-1/3=0.167$, with $c=60$ it is only $1/3782=0.00026$. A large $c$ therefore flattens rank differences, so *how many* rankings contain $d$ matters more than *where*. Only ranks enter the formula, never raw scores, which is why branch score scales do not need to be comparable.
+
 In the original paper, $w_r=1$, $c=60$ (the paper calls it $k$) was fixed in a pilot, and each input ranking is a permutation over all documents (**O**, CLM-005). The weights, a document absent from a truncated list (contributing 0 in this module), and duplicate-identity rules are engineering extensions that must be declared. RRF avoids treating incomparable raw score scales as comparable. Fusion cannot recover an item missing from all branches. Compare each branch, union oracle opportunity, fusion, and latency at equal budgets.
 
 **Worked Example (synthetic rankings):**
@@ -292,7 +333,7 @@ In the original paper, $w_r=1$, $c=60$ (the paper calls it $k$) was fixed in a p
 
 *Result.* Fused order: **d2, d1, d3, d5, d7, d8, d9**. The top three are separated by less than $2.5\times10^{-4}$. With $c=1$ the order becomes d2 (0.700), d3 (0.667), d1 (0.583), and so on, so $c$ decides d1 vs d3.
 
-*Interpretation and limits.* With $c=60$, appearing in both lists dominates rank position within the top 5: every document in both lists outranks every single-list document. The union has 7 distinct documents; if the relevant ones are d4 and d6, no fusion setting can find them. That is branch opportunity loss, not fusion loss.
+*Interpretation and limits.* With $c=60$, appearing in both lists dominates rank position within the top 5: every document in both lists outranks every single-list document. Check: the weakest possible two-list score in two top-5 lists is $2/(60+5)=0.0308$, and the strongest single-list score is $1/(60+1)=0.0164$. The union has 7 distinct documents; if the relevant ones are d4 and d6, no fusion setting can find them. That is branch opportunity loss, not fusion loss.
 
 **Knowledge Check:** Can fusion recover an item absent from every branch?
 
@@ -317,7 +358,7 @@ How much candidate opportunity should be purchased before reranking cost and tru
 
 - **Cross-encoder reranker:** encodes the query and one candidate *together* in a single forward pass and outputs a score, so every query–candidate pair needs a new forward pass. It can reorder only the candidate pool it receives, and its cost grows with candidate count and sequence shapes (**D**, CLM-006). Truncation can remove the only relevant span.
 - **Late interaction (ColBERT):** encodes the query and the document *separately* into one contextual vector per token, then scores with MaxSim. Document vectors can therefore be precomputed offline (**O**, CLM-007). It is **not** a cross-encoder, because no query token attends to document tokens inside the encoder.
-- **MaxSim:** $S(q,d)=\sum_{i\in q}\max_{j\in d} E_{q_i}\cdot E_{d_j}$. ColBERT L2-normalizes the token embeddings, so each dot product is a cosine, and it pads queries with `[mask]` tokens to a fixed length (**O**, CLM-016).
+- **MaxSim:** $S(q,d)=\sum_{i\in q}\max_{j\in d} E_{q_i}\cdot E_{d_j}$. ColBERT L2-normalizes the token embeddings, so each dot product is a cosine, and it pads queries with `[mask]` tokens to a fixed length (**O**, CLM-016). Here $i$ indexes query tokens, $j$ indexes document tokens, and $E_{q_i}$, $E_{d_j}$ are their output token embeddings. Read it in two steps: (1) for each query token, find the single document token most similar to it (the inner $\max_j$); (2) add those best matches over all query tokens (the outer $\sum_i$). With unit vectors each term is at most 1, so the score is at most the number of query tokens.
 - **Single-vector dual encoder:** one pooled vector per side; for example, cosine of mean-pooled normalized vectors.
 
 **Mechanism Explanation:**
@@ -329,7 +370,7 @@ For each depth, record candidate recall before reranking, reranker nDCG/MRR afte
 **Worked Example 1 (synthetic 2-D token vectors, all unit-normalized):**
 *Input.* Query tokens $q_1=(1,0)$ and $q_2=(0,1)$. Document d1 tokens: $(0.995,0.0995)$, $(0.196,0.981)$, $(0.707,0.707)$. Document d2 tokens: $(0.707,0.707)$, $(0.743,0.669)$.
 
-*Steps.* For d1, $\max_j q_1\cdot d_j=0.995$ and $\max_j q_2\cdot d_j=0.981$, so MaxSim $=1.976$. For d2, the maxima are $0.743$ and $0.707$, so MaxSim $=1.450$. For contrast, mean-pooling each side and normalizing gives single-vector cosines of $0.9995$ for d1 and $0.9997$ for d2.
+*Steps.* For d1, $\max_j q_1\cdot d_j=0.995$ and $\max_j q_2\cdot d_j=0.981$, so MaxSim $=1.976$. For d2, the maxima are $0.743$ and $0.707$, so MaxSim $=1.450$. For contrast, mean-pooling each side and normalizing gives single-vector cosines of $0.9995$ for d1 and $0.9997$ for d2. (Since $q_k=(1,0)$ or $(0,1)$, each dot product $q_1\cdot d_j$ is just the first coordinate of $d_j$ and $q_2\cdot d_j$ the second. The pooled query is $(0.5,0.5)$; the pooled d1 is $(0.633,0.596)$ and the pooled d2 is $(0.725,0.688)$, and the cosine of each with $(0.5,0.5)$ gives the two values above.)
 
 *Result.* The pooled single-vector score slightly prefers d2. MaxSim clearly prefers d1, which has a token matching each query token, while d2 has only "in-between" tokens.
 
@@ -363,6 +404,15 @@ Which relevance and service measurements support a production retrieval decision
 - $RR=1/r$ uses the first relevant rank $r$ ($RR=0$ if no relevant item is retrieved); MRR averages queries.
 - $DCG@k=\sum_{i=1}^k g(rel_i)/\log_2(i+1)$; nDCG divides by ideal DCG computed from **all** judged items for the query, not only the retrieved ones (**D**, CLM-009).
 
+where:
+
+- $Rel$ is the set of judged-relevant documents for the query and $Top_k$ is the set of the system's first $k$ results.
+- $r$ is the 1-based rank of the first relevant result; over a query set $Q$, $MRR=\frac{1}{|Q|}\sum_{q\in Q}RR_q$.
+- $i$ is a rank position, $rel_i$ is the judged grade of the document at rank $i$, and $g(\cdot)$ maps a grade to a gain.
+- $IDCG@k$ is the DCG@$k$ of the ideal list: all judged documents for the query sorted by grade, highest first, then cut at $k$. $nDCG@k=DCG@k/IDCG@k$, so $0\le nDCG@k\le1$.
+
+*Step-by-step for DCG.* Rank 1 has discount $\log_2 2=1$, rank 2 has $\log_2 3=1.585$, rank 3 has $\log_2 4=2$, rank 4 has $\log_2 5=2.322$, rank 5 has $\log_2 6=2.585$. Each gain is divided by its rank's discount and the results are summed; dividing by IDCG makes queries with different numbers of relevant documents comparable.
+
 *Conventions used in this module:* the gain is linear, $g(rel)=rel$, and the discount is $\log_2(i+1)$. **Unjudged** documents get gain 0, and the unjudged count in the top $k$ is reported alongside the metric. **Zero IDCG** (no relevant judgment) makes nDCG undefined: such queries are excluded from the nDCG and MRR means, and their count is reported. **Ties** in system score are broken by ascending document ID before any metric is computed. Ties inside the ideal ordering do not change IDCG.
 
 **Mechanism Explanation:**
@@ -379,13 +429,13 @@ End-to-end latency includes query processing/embedding, branch searches, filters
 
 *Steps for q1.* Gains are $(0,3,0,1,0)$, with d7 treated as 0. $DCG=3/\log_2 3+1/\log_2 5=1.8928+0.4307=2.3235$. The ideal gains are $(3,2,1,0,0)$, so $IDCG=3+2/\log_2 3+1/\log_2 4=3+1.2619+0.5=4.7619$ and $nDCG=0.4879$. The first relevant document is at rank 2, so $RR=0.5$. Recall@5 counting $rel\ge1$ is $2/3$. The unjudged count is 1.
 
-*Steps for q2.* $DCG=2/\log_2 4=1.0$ and $IDCG=2$, so $nDCG=0.5$ and $RR=1/3$.
+*Steps for q2.* $DCG=2/\log_2 4=1.0$ and $IDCG=2$, so $nDCG=0.5$ and $RR=1/3$. (Here $k=5$ but only 3 results are returned, so ranks 4–5 contribute 0; the ideal list is $(2,0,0)$, so $IDCG=2/\log_2 2=2$. The only relevant document, d3, is at rank 3.)
 
 *Steps for q3.* $IDCG=0$, so nDCG is undefined; q3 is excluded and reported as "1 of 3 queries has no relevant judgment".
 
-*Result.* Mean nDCG@5 is $0.494$ and MRR is $0.417$ over 2 scored queries, with 1 excluded. Had q3 been scored as 0, the means would be $0.329$ and $0.278$. The policy moves the headline by about a third.
+*Result.* Mean nDCG@5 is $0.494$ and MRR is $0.417$ over 2 scored queries, with 1 excluded: $(0.4879+0.5)/2=0.494$ and $(0.5+1/3)/2=0.417$. Had q3 been scored as 0, the means would be $0.329$ and $0.278$ (the same sums divided by 3). The policy moves the headline by about a third.
 
-*Sensitivity to the unjudged document.* If d7 were actually relevant with grade 2, q1's gains become $(0,3,2,1,0)$ and IDCG uses $(3,2,2,1,0)$, giving $nDCG=0.584$ instead of $0.488$. A single unjudged document in the top 5 is worth reporting.
+*Sensitivity to the unjudged document.* If d7 were actually relevant with grade 2, q1's gains become $(0,3,2,1,0)$ and IDCG uses $(3,2,2,1,0)$, giving $nDCG=0.584$ instead of $0.488$ ($DCG=3/1.585+2/2+1/2.322=3.3235$ and $IDCG=3+2/1.585+2/2+1/2.322=5.6926$). A single unjudged document in the top 5 is worth reporting.
 
 *Interpretation and limits.* The metric definition includes the zero-IDCG, unjudged, and tie rules; change any of them and the headline changes. Comparisons between systems must use identical rules and query sets, and paired uncertainty across queries.
 
@@ -558,6 +608,12 @@ A learner passes when they can reproduce BM25 behavior, validate embedding/metri
 ### Module Wrap-Up (Final Mental Model Reconstruction)
 
 Retrieval is a chain of lossy transformations. Instrument every candidate and lifecycle boundary, compare approximation with exact search, compare rankings with relevance judgments, and accept complexity only where it improves the declared production frontier.
+
+### Cost & Telemetry Hook
+
+- [Lesson 22.1](../22-ai-economics/README.md): cost per query that meets the declared recall/nDCG target, including reranker and fusion stages.
+- [Lesson 22.4](../22-ai-economics/README.md): a query or embedding cache hit counts only if it passes the same index/embedding-version check as a miss.
+- [Lesson 23.1](../23-observability-reliability/README.md) and [Lesson 23.4](../23-observability-reliability/README.md): emit index and embedding version, candidate depth per stage, and ANN-versus-exact audit results; burn alerts on end-to-end latency, not per-stage microbenchmarks.
 
 ## 12 Competency Targets
 

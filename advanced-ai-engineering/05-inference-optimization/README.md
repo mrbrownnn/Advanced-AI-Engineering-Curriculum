@@ -109,6 +109,14 @@ $$
 S = QK^T/\sqrt{d}, \qquad P=\operatorname{softmax}(S), \qquad O=PV.
 $$
 
+where:
+- $Q\in\mathbb{R}^{N_q\times d}$, $K\in\mathbb{R}^{N_k\times d}$, $V\in\mathbb{R}^{N_k\times d}$ — query, key, and value rows for $N_q$ queries and $N_k$ keys;
+- $d$ — the head dimension (written $d_h$ in the source-trace paragraph below; same quantity), so $1/\sqrt{d}=d_h^{-1/2}$ is the default score scale;
+- $S,P\in\mathbb{R}^{N_q\times N_k}$ — scaled scores and attention probabilities; softmax is applied to each row: $P_{ij}=e^{S_{ij}}/\sum_{j'}e^{S_{ij'}}$;
+- $O\in\mathbb{R}^{N_q\times d}$ — the output; row $i$ is $o_i=\sum_jP_{ij}V_j$, a probability-weighted average of value rows.
+
+The intermediate $S$ and $P$ each hold $N_q N_k$ entries, which is what a naive implementation writes to and reads back from HBM.
+
 A straightforward implementation can materialize the $N_q\times N_k$ score or probability matrix in HBM. FlashAttention instead tiles Q, K, and V, maintains online softmax statistics, and avoids full intermediate materialization. The original paper classifies this as an exact dense-attention algorithm: it does not prune attention entries or approximate the softmax (**O**, CLM-001). “Exact” does not mean bitwise-identical results because tiling and reduction order change floating-point behavior. Two implementations are *semantically equivalent* when they compute the same mathematical function and agree within a declared numerical tolerance; they are *bitwise identical* only if every floating-point operation happens in the same order and precision.
 
 **Online softmax: the state carried between tiles**
@@ -133,7 +141,20 @@ $$
 o=\tilde o_T/\ell_T .
 $$
 
+where $s^{(t)}_j$ is the $j$-th scaled score in tile $t$ (one row of $S$, split into $T$ tiles), $V^{(t)}_j$ the matching value row, $\tilde p^{(t)}_j$ an unnormalized probability relative to the current maximum, $\tilde o_t$ the unnormalized output accumulator, and $\alpha_t$ the rescale factor. ($\alpha_t$ here is unrelated to the acceptance parameter $\alpha$ of Lesson 5.5.)
+
+*Why subtract the maximum.* Softmax is unchanged by subtracting any constant $c$ from every score: $e^{s_j-c}/\sum_{j'}e^{s_{j'}-c}=e^{-c}e^{s_j}/(e^{-c}\sum_{j'}e^{s_{j'}})=e^{s_j}/\sum_{j'}e^{s_{j'}}$. Choosing $c=\max_j s_j$ makes every exponent $\le0$, so no term overflows.
+
+*Why multiplying by $\alpha_t$ is the right correction.* A term stored relative to the old maximum is $e^{s_j-m_{t-1}}$. Multiplying by $\alpha_t$ gives $e^{m_{t-1}-m_t}\,e^{s_j-m_{t-1}}=e^{s_j-m_t}$, the same term relative to the new maximum. Because $\ell_{t-1}$ and $\tilde o_{t-1}$ are sums of such terms, one multiplication rescales the whole sum.
+
 Here $\alpha_1=e^{-\infty}=0$. The factor $\alpha_t$ re-expresses the old state relative to the new maximum; it equals 1 when the maximum did not change. This is the unscaled-accumulator form described in FlashAttention-2 Section 3.1.1, which divides by $\ell$ once at the end. FlashAttention Algorithm 1 instead keeps a normalized accumulator and rescales it on every tile, $o_t=(\ell_{t-1}\alpha_t\,o_{t-1}+\sum_j\tilde p^{(t)}_jV^{(t)}_j)/\ell_t$ (**O**, CLM-017). Both produce $\operatorname{softmax}(s)V$ in exact arithmetic: by induction, after tile $t$ the state is $\ell_t=\sum_{\text{seen}}e^{s_j-m_t}$ and $\tilde o_t=\sum_{\text{seen}}e^{s_j-m_t}V_j$, so their ratio is the softmax-weighted sum over all keys once every tile is processed (**D**, CLM-018).
+
+*Step-by-step induction (unscaled form).*
+1. Claim after tile $t$: $\ell_t=\sum_{\text{seen}}e^{s_j-m_t}$ and $\tilde o_t=\sum_{\text{seen}}e^{s_j-m_t}V_j$. It holds trivially before any tile ($\ell_0=0$, $\tilde o_0=0$).
+2. Assume it for $t-1$. Then $\alpha_t\ell_{t-1}=\sum_{\text{old}}e^{s_j-m_t}$ by the rescaling identity above, and $\sum_j\tilde p^{(t)}_j=\sum_{\text{tile }t}e^{s_j-m_t}$. Their sum is $\sum_{\text{seen}}e^{s_j-m_t}$; the same argument applies to $\tilde o_t$.
+3. After the last tile, $\tilde o_T/\ell_T=\sum_je^{s_j-m_T}V_j/\sum_{j'}e^{s_{j'}-m_T}=\sum_j\operatorname{softmax}(s)_jV_j$, since $m_T=\max_js_j$ cancels.
+
+*Normalized form.* Writing $o_t=\tilde o_t/\ell_t$ and substituting $\tilde o_t=\alpha_t\tilde o_{t-1}+\sum_j\tilde p^{(t)}_jV^{(t)}_j$ with $\tilde o_{t-1}=\ell_{t-1}o_{t-1}$ gives exactly the Algorithm 1 update $o_t=(\ell_{t-1}\alpha_t\,o_{t-1}+\sum_j\tilde p^{(t)}_jV^{(t)}_j)/\ell_t$.
 
 **Mechanistic invariants**
 
@@ -142,16 +163,16 @@ Here $\alpha_1=e^{-\infty}=0$. The factor $\alpha_t$ re-expresses the old state 
 - Backward support, dropout, head dimension, dtype, device generation, sequence shape, and variable-length packing are implementation capabilities, not properties implied by the name.
 - A kernel can win its attention microbenchmark while leaving end-to-end inference unchanged if MLP, collectives, sampling, host work, or queueing dominates.
 
-**Pinned interface path (static inspection, not executed).** At `Dao-AILab/flash-attention` commit `e9cf2c1651d2303191eb40a739a3c135fda00999`, `flash_attn_func` calls `FlashAttnFunc.apply`. `FlashAttnFunc.forward` sets the default scale to $d_h^{-1/2}$, pads the head dimension to a multiple of 8 when needed, and calls the wrapped `_flash_attn_forward`, which invokes `flash_attn_gpu.fwd`. `flash_attn_gpu` is bound at import time to the compiled `flash_attn_2_cuda` module, or to a Triton implementation when `FLASH_ATTENTION_TRITON_AMD_ENABLE=TRUE` or when a ROCm build cannot import the compiled module. The forward call returns the output together with `softmax_lse`, the per-row log-sum-exp of the scaled scores, which is the stored form of the $(m,\ell)$ statistics ($m+\log\ell$). `flash_attn_with_kvcache` calls `flash_attn_gpu.fwd_kvcache` directly and its docstring states that it does not support the backward pass (**O**, CLM-014). This shows which Python symbol dispatches to which backend object. It does not show which CUDA kernel variant ran for a given shape; that needs an executed trace.
+**Pinned interface path (static inspection, not executed).** At `Dao-AILab/flash-attention` commit `e9cf2c1651d2303191eb40a739a3c135fda00999`, `flash_attn_func` calls `FlashAttnFunc.apply`. `FlashAttnFunc.forward` sets the default scale to $d_h^{-1/2}$, pads the head dimension to a multiple of 8 when needed, and calls the wrapped `_flash_attn_forward`, which invokes `flash_attn_gpu.fwd`. `flash_attn_gpu` is bound at import time to the compiled `flash_attn_2_cuda` module, or to a Triton implementation when `FLASH_ATTENTION_TRITON_AMD_ENABLE=TRUE` or when a ROCm build cannot import the compiled module. The forward call returns the output together with `softmax_lse`, the per-row log-sum-exp of the scaled scores, which is the stored form of the $(m,\ell)$ statistics ($m+\log\ell$, because $\log\sum_je^{s_j}=\log\bigl(e^{m}\sum_je^{s_j-m}\bigr)=m+\log\ell$; in the worked example below, $5+\log1.2034380\approx5.18518$). `flash_attn_with_kvcache` calls `flash_attn_gpu.fwd_kvcache` directly and its docstring states that it does not support the backward pass (**O**, CLM-014). This shows which Python symbol dispatches to which backend object. It does not show which CUDA kernel variant ran for a given shape; that needs an executed trace.
 
 **Currentness:** the original IO-aware exact-attention mechanism is **REFERENCE**, while selection of a particular backend is **WORKLOAD-DEPENDENT**. FlashAttention-3 targets Hopper GPUs and FlashAttention-4 (arXiv v1, March 2026) targets Blackwell GPUs; both are **FRONTIER** designs scoped to those hardware generations (**O**, CLM-002). Neither paper establishes portable speedups across other accelerators, and this module retains none of their reported speedup figures as general numbers.
 
 **Worked Example (synthetic values).** One query row, four keys, two tiles of two keys each. Values are scalars so that the output is a single number.
 
 - *Input*: scaled scores $s=[1,3\mid 2,5]$ and values $v=[10,20\mid 30,40]$.
-- *Direct reference*: $m=5$; $e^{s-m}=[0.0183156,\,0.1353353,\,0.0497871,\,1]$; $\ell=1.2034380$; $p=[0.01522,\,0.11246,\,0.04137,\,0.83095]$; $o=\sum_jp_jv_j=36.88057$.
-- *Tile 1*, $s=[1,3]$: $m_1=3$, $\alpha_1=0$, $\tilde p=[0.1353353,\,1]$, $\ell_1=1.1353353$, $\tilde o_1=0.1353353\cdot10+1\cdot20=21.3533528$.
-- *Tile 2*, $s=[2,5]$: $m_2=5$, $\alpha_2=e^{3-5}=0.1353353$, $\tilde p=[0.0497871,\,1]$.
+- *Direct reference*: $m=\max s=5$; $e^{s-m}=[0.0183156,\,0.1353353,\,0.0497871,\,1]$; $\ell=1.2034380$; $p=e^{s-m}/\ell=[0.01522,\,0.11246,\,0.04137,\,0.83095]$; $o=\sum_jp_jv_j=36.88057$.
+- *Tile 1*, $s=[1,3]$: $m_1=\max(-\infty,3)=3$, $\alpha_1=e^{-\infty-3}=0$, $\tilde p=[e^{1-3},\,e^{3-3}]=[0.1353353,\,1]$, $\ell_1=1.1353353$, $\tilde o_1=0.1353353\cdot10+1\cdot20=21.3533528$.
+- *Tile 2*, $s=[2,5]$: $m_2=\max(3,5)=5$, $\alpha_2=e^{3-5}=0.1353353$, $\tilde p=[e^{2-5},\,e^{5-5}]=[0.0497871,\,1]$.
   - $\ell_2=0.1353353\cdot1.1353353+1.0497871=1.2034380$.
   - $\tilde o_2=0.1353353\cdot21.3533528+(0.0497871\cdot30+1\cdot40)=2.8898621+41.4936121=44.3834741$.
 - *Result*: $o=44.3834741/1.2034380=36.88057$. It equals the direct reference, and $\ell_2$ equals the direct normalizer, which is the normalization check ($\sum_jp_j=1$).
@@ -195,6 +216,8 @@ $$
 T_{candidate}=T_{launch}+T_{loads}+T_{compute}+T_{stores}+T_{sync}+T_{conversion}+T_{compile\ amortized}.
 $$
 
+where each $T$ is a time contribution for one candidate implementation: kernel launch overhead, HBM loads, arithmetic, HBM stores, synchronization, dtype/layout conversion, and compilation time divided by the number of calls that reuse the compiled kernel. A first-order traffic term is $T_{loads}+T_{stores}\approx\text{bytes moved}/\text{effective bandwidth}$.
+
 This is an accounting decomposition, not a guarantee that terms add independently. Fusion targets launch and intermediate-memory terms, while potentially increasing register use, shared-memory use, synchronization, code size, compilation, or shape specialization.
 
 **Required measurements**
@@ -209,6 +232,7 @@ This is an accounting decomposition, not a guarantee that terms add independentl
 
 - *Input*: $N$ FP16 elements (2 bytes each); assumed launch cost 8 µs per kernel; assumed effective memory bandwidth 400 GB/s; compute time ignored.
 - *Traffic*: unfused reads $x$, writes a temporary, reads it back, and writes $y$: $4\times2N$ bytes. Fused reads $x$ and writes $y$: $2\times2N$ bytes.
+- *Time per term*: $T_{traffic}=\text{bytes}/(400\times10^9\ \text{B/s})$ and $T_{launch}=8\ \mu\text{s}\times\text{kernel count}$. For example, $8\times10^6\ \text{B}/(4\times10^{11}\ \text{B/s})=2\times10^{-5}$ s $=20\ \mu$s.
 - *Large tensor*, $N=10^6$: unfused $8\times10^6$ B $\to$ 20 µs traffic + 16 µs launch = 36 µs. Fused $4\times10^6$ B $\to$ 10 µs + 8 µs = 18 µs.
 - *Tiny tensor*, $N=10^3$: unfused 0.02 µs + 16 µs = 16.02 µs. Fused 0.01 µs + 8 µs = 8.01 µs. The whole gain is the removed launch.
 - *Result*: this lower-bound ledger predicts a factor of two in both cases, for different reasons.
@@ -243,6 +267,18 @@ q=\operatorname{clamp}(\operatorname{round}(x/s)+z,q_{min},q_{max}),
 \qquad \hat{x}=s(q-z).
 $$
 
+where:
+- $x$ — the real value being quantized; $\hat x$ — its dequantized reconstruction;
+- $s>0$ — the scale (real units per integer step); $z$ — the integer zero point, the code that represents real 0;
+- $q$ — the stored integer code; $[q_{min},q_{max}]$ — the representable integer range, e.g. $[-8,7]$ for signed INT4 or $[0,255]$ for unsigned INT8;
+- $\operatorname{round}$ — the rounding rule (e.g. round-to-nearest); $\operatorname{clamp}(v,a,b)=\min(\max(v,a),b)$.
+
+*Step-by-step.* (1) Divide by $s$ to express $x$ in integer steps. (2) Round to the nearest step and shift by $z$. (3) Clamp into the code range. (4) Dequantize by undoing the shift and multiplying back by $s$. Two error regimes follow:
+- *Inside the range* $s(q_{min}-z)\le x\le s(q_{max}-z)$: only rounding acts, so with round-to-nearest $|x-\hat x|\le s/2$.
+- *Outside the range*: clamping acts, and the error is the distance from $x$ to the nearest endpoint, which can be arbitrarily large.
+
+A larger $s$ widens the range (less clipping) but coarsens each step (more rounding error). For signed INT4 with $z=0$ and $s=0.05$, the range is $[-8s,7s]=[-0.40,0.35]$ and the rounding error is at most $0.025$; the worked example below shows one value of each regime.
+
 The scale $s$, zero point $z$, clipping range, rounding rule, and granularity may be per tensor, channel, group, token, or block. Symmetric quantization often fixes $z=0$. Floating formats instead define exponent/mantissa encodings and are still commonly paired with scaling policies. FP8 E4M3 and E5M2 trade precision and dynamic range differently; “FP8” alone is incomplete (**O**, CLM-008). More generally, a bit-width label does not identify a quantized configuration (**D**, CLM-004).
 
 For $N$ logical weights at $w$ packed payload bits:
@@ -250,6 +286,8 @@ For $N$ logical weights at $w$ packed payload bits:
 $$
 M_{payload}=\frac{Nw}{8}\ \text{bytes}.
 $$
+
+Here $Nw$ is the total payload in bits and dividing by 8 converts bits to bytes. With per-group metadata of $b_{meta}$ bits shared by a group of $g$ weights, the effective width is $w_{eff}=w+b_{meta}/g$ bits per weight and the total is $Nw_{eff}/8$ bytes. Unit reminder: 1 GB $=10^9$ B, 1 GiB $=2^{30}$ B $\approx1.0737\times10^9$ B, so GiB $=$ B$/2^{30}$.
 
 This is a nominal lower bound. Add scales, zero points, padding, alignment, codebooks, duplicated weights, runtime workspaces, allocator fragmentation, and KV/activation memory before predicting device capacity. Do not convert the storage ratio into a latency ratio.
 
@@ -268,9 +306,9 @@ This is a nominal lower bound. Add scales, zero points, padding, alignment, code
 **Worked Example (hypothetical model; exercise assumptions).**
 
 - *Input*: $N=8\times10^9$ weights, densely packed at $w=4$ bits; symmetric INT4 range $[-8,7]$; scale $s=0.05$, $z=0$; groups of 128 weights, each storing one 16-bit scale and one 16-bit zero point.
-- *Step 1 — payload* (**D**, CLM-009): $M_{payload}=8\times10^9\times4/8=4\times10^9$ bytes $=4$ GB $\approx3.725$ GiB.
-- *Step 2 — per-group metadata*: $32/128=0.25$ extra bits per weight, so $8\times10^9\times4.25/8=4.25\times10^9$ bytes $\approx3.958$ GiB. The "4-bit" artifact already costs 4.25 bits per weight before padding, unquantized layers, or runtime workspace.
-- *Step 3 — one value*: $x=0.37\Rightarrow x/s=7.4\Rightarrow q=7\Rightarrow\hat x=0.35$, rounding error $0.02$. $x=0.52\Rightarrow x/s=10.4\Rightarrow$ clamp to $7\Rightarrow\hat x=0.35$, clipping error $0.17$.
+- *Step 1 — payload* (**D**, CLM-009): $M_{payload}=8\times10^9\times4/8=4\times10^9$ bytes $=4$ GB; $4\times10^9/2^{30}\approx3.725$ GiB.
+- *Step 2 — per-group metadata*: $b_{meta}=16+16=32$ bits per group, so $32/128=0.25$ extra bits per weight and $w_{eff}=4.25$, so $8\times10^9\times4.25/8=4.25\times10^9$ bytes $\approx3.958$ GiB. The "4-bit" artifact already costs 4.25 bits per weight before padding, unquantized layers, or runtime workspace.
+- *Step 3 — one value*: $x=0.37\Rightarrow x/s=7.4\Rightarrow q=7\Rightarrow\hat x=0.35$, rounding error $0.02$. $x=0.52\Rightarrow x/s=10.4\Rightarrow$ clamp to $7\Rightarrow\hat x=0.35$, clipping error $0.17$. (The first value is inside $[-0.40,0.35]$, so its error obeys $\le s/2=0.025$; the second is outside, so the bound does not apply.)
 - *Result*: bit width fixes neither total bytes nor error. The same $w=4$ gives different bytes under a different group size and different error under a different scale or clipping range.
 - *Interpretation and limits*: these numbers do not establish checkpoint size, device allocation, quality, or speed. Each needs its own measurement on the deployed artifact and runtime.
 
@@ -279,7 +317,7 @@ This is a nominal lower bound. Add scales, zero points, padding, alignment, code
 **Guided Practice:** (a) For $N=7\times10^9$ weights at 4 bits with groups of 64, each storing a 16-bit scale and a 4-bit zero point, compute payload bytes, effective bits per weight, and total bytes in GB and GiB. (b) Build a complete quantization manifest for two artifacts and reconcile packed payload, metadata, file bytes, device allocation, selected kernels, and quality gates.
 
 **Feedback Contract:**
-- *Expected Evidence*: (a) payload $3.5\times10^9$ B $\approx3.260$ GiB; metadata $20/64=0.3125$ bits per weight; total $3.7734375\times10^9$ B $\approx3.514$ GiB. (b) a manifest with every field in the list above filled or marked unknown, and file bytes reconciled against payload plus metadata. Knowledge check: bit width names storage width only; scale, granularity, coverage, accumulator dtype, packing, and kernel support are separate fields.
+- *Expected Evidence*: (a) payload $7\times10^9\times4/8=3.5\times10^9$ B $\approx3.260$ GiB; metadata $(16+4)/64=20/64=0.3125$ bits per weight, so $w_{eff}=4.3125$; total $7\times10^9\times4.3125/8=3.7734375\times10^9$ B $\approx3.514$ GiB. (b) a manifest with every field in the list above filled or marked unknown, and file bytes reconciled against payload plus metadata. Knowledge check: bit width names storage width only; scale, granularity, coverage, accumulator dtype, packing, and kernel support are separate fields.
 - *Common Failure*: reporting GB as GiB, omitting per-group metadata, or converting a 4× payload ratio into a 4× memory or latency claim.
 - *Diagnostic Hint*: divide the artifact's file bytes by the logical weight count. If the answer is not close to your effective bits per weight, which byte category is missing?
 - *Concept to Revisit*: quantization manifest; nominal payload as a lower bound.
@@ -319,9 +357,9 @@ These methods solve different problems. SmoothQuant is not “GPTQ for activatio
 
 - *Input*: activations $x=[40,\,0.5]$, weights $w=[0.1,\,0.2]$, per-channel smoothing factors $s=[8,\,1]$ (chosen by hand for the exercise, not by the paper's rule).
 - *Step 1 — original*: $y=40\cdot0.1+0.5\cdot0.2=4.1$. Activation channel range ratio is $40/0.5=80$; weight ratio is $0.2/0.1=2$.
-- *Step 2 — rescale*: $x'_j=x_j/s_j=[5,\,0.5]$ and $w'_j=s_jw_j=[0.8,\,0.2]$.
-- *Step 3 — check*: $y'=5\cdot0.8+0.5\cdot0.2=4.1$. The function is unchanged in exact arithmetic (**D**).
-- *Result*: the activation range ratio fell from 80 to 10, and the weight range ratio rose from 2 to 4. Difficulty moved from activations to weights; it did not disappear.
+- *Step 2 — rescale*: $x'_j=x_j/s_j=[5,\,0.5]$ and $w'_j=s_jw_j=[0.8,\,0.2]$. (Here $s_j$ is a smoothing factor, not the quantization scale of Lesson 5.3.)
+- *Step 3 — check*: $y'=5\cdot0.8+0.5\cdot0.2=4.1$. The function is unchanged in exact arithmetic (**D**). In general, $\sum_jx'_jw'_j=\sum_j(x_j/s_j)(s_jw_j)=\sum_jx_jw_j$ for any nonzero $s_j$, because each $s_j$ cancels.
+- *Result*: the activation range ratio fell from 80 to $5/0.5=10$, and the weight range ratio rose from 2 to $0.8/0.2=4$. Difficulty moved from activations to weights; it did not disappear.
 - *Interpretation and limits*: the identity holds before quantization. Whether the rescaled tensors quantize with acceptable error depends on the smoothing factors, calibration data, and granularity, and is an empirical question. A weight-only artifact from GPTQ or AWQ is a different case: it can reduce nominal weight bytes yet regress a small-batch workload if the selected path repeatedly converts or unpacks weights (**H**; verify from selected-operator logs).
 
 **Knowledge Check:** Which method targets activation outliers, and why does a compatible checkpoint format not prove an optimized kernel executes?
@@ -362,7 +400,16 @@ These methods solve different problems. SmoothQuant is not “GPTQ for activatio
    $$p'(x)=\frac{\max(0,\,p_{n+1}(x)-q_{n+1}(x))}{\sum_{x'}\max(0,\,p_{n+1}(x')-q_{n+1}(x'))}$$
    and discard all later draft tokens. If all $\gamma$ were accepted, sample from $p_{\gamma+1}$ unchanged.
 
-**Why the emitted token is distributed as the target** (**D**, CLM-020, following Appendix A.1 of Leviathan et al.). For one position, token $x$ can be emitted in two ways: drafted and accepted, with probability $q(x)\min(1,p(x)/q(x))=\min(p(x),q(x))$; or after a rejection, with probability $(1-\beta)\,p'(x)$. The residual normalizer is $\sum_x\max(0,p-q)=1-\sum_x\min(p,q)=1-\beta$, so the second term is $p(x)-\min(p(x),q(x))$. The sum is $p(x)$ for every $x$ and for any $q$. Applying the rule position by position, with every draft after the first rejection discarded, gives a sequence distributed as target-only sampling.
+**Why the emitted token is distributed as the target** (**D**, CLM-020, following Appendix A.1 of Leviathan et al.). For one position, token $x$ can be emitted in two ways: drafted and accepted, with probability $q(x)\min(1,p(x)/q(x))=\min(p(x),q(x))$; or after a rejection, with probability $(1-\beta)\,p'(x)$. The residual normalizer is $\sum_x\max(0,p-q)=1-\sum_x\min(p,q)=1-\beta$, so the second term is $p(x)-\min(p(x),q(x))$. The sum is $p(x)$ for every $x$ and for any $q$.
+
+*Step-by-step.*
+1. Accept term: $P(\text{draft }x)\cdot P(\text{accept}\mid x)=q(x)\min\bigl(1,p(x)/q(x)\bigr)$. If $p(x)\ge q(x)$ this is $q(x)$; otherwise it is $p(x)$. Either way it equals $\min(p(x),q(x))$.
+2. Rejection probability: summing step 1 over $x$ gives $P(\text{accept})=\beta$, so $P(\text{reject})=1-\beta$.
+3. Residual normalizer: for each $x$, $\max(0,p-q)=p-\min(p,q)$ (check both cases $p\ge q$ and $p<q$). Summing, $\sum_x\max(0,p-q)=1-\beta$.
+4. Rejection term: $(1-\beta)\,p'(x)=(1-\beta)\,\dfrac{p(x)-\min(p(x),q(x))}{1-\beta}=p(x)-\min(p(x),q(x))$.
+5. Total: $\min(p(x),q(x))+p(x)-\min(p(x),q(x))=p(x)$. (If $\beta=1$, then $p=q$ and rejection never happens.)
+
+ Applying the rule position by position, with every draft after the first rejection discarded, gives a sequence distributed as target-only sampling.
 
 **Assumptions behind the guarantee**
 
@@ -396,9 +443,20 @@ $$
 \text{time/token}=\frac{\mathbb{E}[T_{cycle}]}{\mathbb{E}[A]}.
 $$
 
-This is not generally $\mathbb{E}[T_{cycle}/A]$. For a finite set of measured cycles, the aggregate time per committed token is $\sum_cT_c/\sum_cA_c$, which equals the *token-weighted* mean of $T_c/A_c$, not the unweighted cycle mean. “Acceptance rate” is insufficient unless its denominator and proposal structure are defined. Record proposed tokens, committed tokens, first-rejection position, target calls, draft/verify times, synchronization, memory, and scheduler/batch context.
+where $T_{draft}(\gamma)$ is the time to produce $\gamma$ draft tokens, $T_{verify}(\gamma)$ the time of the target pass over $\gamma+1$ positions, $T_{bookkeeping}$ acceptance, cache, and scheduling work, and $\mathbb{E}[\cdot]$ an expectation over cycles.
+
+*Why a ratio of expectations.* Over $C$ cycles, total time is $\sum_{c=1}^{C}T_c$ and total output is $\sum_{c=1}^{C}A_c$. Dividing numerator and denominator by $C$ gives $\bigl(\tfrac1C\sum T_c\bigr)/\bigl(\tfrac1C\sum A_c\bigr)$, which tends to $\mathbb{E}[T_{cycle}]/\mathbb{E}[A]$ as $C$ grows under the stated assumptions.
+
+This is not generally $\mathbb{E}[T_{cycle}/A]$. For a finite set of measured cycles, the aggregate time per committed token is $\sum_cT_c/\sum_cA_c$, which equals the *token-weighted* mean of $T_c/A_c$, not the unweighted cycle mean. (Weight cycle $c$ by its token share $A_c/\sum_{c'}A_{c'}$: $\sum_c\frac{A_c}{\sum A}\cdot\frac{T_c}{A_c}=\frac{\sum_cT_c}{\sum A}$.) “Acceptance rate” is insufficient unless its denominator and proposal structure are defined. Record proposed tokens, committed tokens, first-rejection position, target calls, draft/verify times, synchronization, memory, and scheduler/batch context.
 
 **What the reference paper's analytical model assumes.** If the per-position acceptance probabilities are treated as i.i.d. with mean $\alpha$, then $A$ is a capped geometric variable and $\mathbb{E}[A]=(1-\alpha^{\gamma+1})/(1-\alpha)$ (Leviathan et al., Eq. 1). If, in addition, $\gamma+1$ positions verify in the time of one target step and one draft step costs $c$ target steps, the expected wall-time improvement is $(1-\alpha^{\gamma+1})/((1-\alpha)(\gamma c+1))$ for long generations (their Theorem 3.8) (**O**, CLM-019). This is an analytical model, not a measurement. The same paper's Appendix A.3 compares it with measured run times, reports cases where the measured improvement is below the prediction, and attributes the gap to implementation differences and to the i.i.d. simplification.
+
+*Step-by-step for the two model formulas.* Here $\alpha$ plays the role of an average $\beta$, and $c=$ (time of one draft step)/(time of one target step).
+1. $A\ge k$ (for $k=1,\dots,\gamma+1$) happens exactly when the first $k-1$ drafts are all accepted, so $P(A\ge k)=\alpha^{k-1}$.
+2. For a positive integer variable, $\mathbb{E}[A]=\sum_{k\ge1}P(A\ge k)=\sum_{k=1}^{\gamma+1}\alpha^{k-1}=\dfrac{1-\alpha^{\gamma+1}}{1-\alpha}$ (finite geometric series, $\alpha<1$).
+3. Point probabilities: $P(A=k)=\alpha^{k-1}(1-\alpha)$ for $k\le\gamma$, and $P(A=\gamma+1)=\alpha^{\gamma}$ (the cap).
+4. Cost of one cycle in target-step units: $\gamma$ draft steps cost $\gamma c$, plus one target step for verification, total $\gamma c+1$.
+5. Target-only decoding commits one token per target step, so the improvement factor is (tokens per cycle)/(target steps per cycle) $=\mathbb{E}[A]/(\gamma c+1)$, which is the Theorem 3.8 expression.
 
 **Adversarial regimes**
 
@@ -421,11 +479,12 @@ This is not generally $\mathbb{E}[T_{cycle}/A]$. For a finite set of measured cy
 | c | 0.2 | 0.6 | 1/3 | 0.2 | 0 | 0 | 0 | 0.2 |
 | Sum | 1 | 1 | — | $\beta=0.6$ | 0.4 | 1 | 0.4 | 1 |
 
+- *Row c, step by step*: accept probability $\min(1,0.2/0.6)=1/3$; drafted-and-accepted $0.6\cdot1/3=0.2=\min(0.2,0.6)$; $\max(0,0.2-0.6)=0$, so c is never emitted after a rejection. Row a: $\max(0,0.5-0.2)=0.3$, residual $0.3/0.4=0.75$.
 - *Result*: the Total column equals $p$. The rejection mass $1-\beta=0.4$ equals the residual normalizer, which is the normalization check.
-- *Counterexample 1 — resample from $p$ instead of the residual*: output $=\min(p,q)+(1-\beta)p=[0.40,\,0.32,\,0.28]\ne p$. Token c is over-produced because it can arrive both ways.
-- *Counterexample 2 — draft by argmax but use the full $q$ in the ratio*: the draft is always c, accepted with probability $1/3$, else the residual is sampled: output $=[0.5,\,1/6,\,1/3]\ne p$.
+- *Counterexample 1 — resample from $p$ instead of the residual*: output $=\min(p,q)+(1-\beta)p=[0.2+0.4\cdot0.5,\;0.2+0.4\cdot0.3,\;0.2+0.4\cdot0.2]=[0.40,\,0.32,\,0.28]\ne p$. Token c is over-produced because it can arrive both ways.
+- *Counterexample 2 — draft by argmax but use the full $q$ in the ratio*: the draft is always c, accepted with probability $1/3$, else the residual is sampled: output $=\tfrac13[0,0,1]+\tfrac23[0.75,0.25,0]=[0.5,\,1/6,\,1/3]\ne p$.
 - *Greedy contract*: argmax processing turns $p$ into $[1,0,0]$ and $q$ into $[0,0,1]$. The draft c is always rejected ($p/q=0$), the residual is $[1,0,0]$, and a is emitted. The output is the target's greedy token and the reward is $A=1$ in every such cycle: correct, with no speculative gain.
-- *Under the i.i.d. model*, $\alpha=0.6$ and $\gamma=2$ give $P(A=1,2,3)=0.4,\,0.24,\,0.36$ and $\mathbb{E}[A]=(1-0.6^3)/0.4=1.96$. The model's wall-time factor is $1.96/(2c+1)$: $1.63$ at $c=0.1$ and $0.98$ at $c=0.5$. The same acceptance gives a predicted gain or a predicted loss depending on draft cost.
+- *Under the i.i.d. model*, $\alpha=0.6$ and $\gamma=2$ give $P(A=1,2,3)=0.4,\,0.24,\,0.36$ (that is, $1-\alpha$, $\alpha(1-\alpha)$, $\alpha^2$) and $\mathbb{E}[A]=(1-0.6^3)/0.4=0.784/0.4=1.96$; check: $1\cdot0.4+2\cdot0.24+3\cdot0.36=1.96$. The model's wall-time factor is $1.96/(2c+1)$: $1.96/1.2\approx1.63$ at $c=0.1$ and $1.96/2=0.98$ at $c=0.5$. The same acceptance gives a predicted gain or a predicted loss depending on draft cost.
 - *Interpretation and limits*: the table proves the single-position identity for these distributions; the algebra above proves it for any $p$, $q$. It says nothing about speed. LAB D extends the check to two positions by exact enumeration.
 
 **Worked Example B — two cycles with different reward and time (synthetic records).**
@@ -484,7 +543,7 @@ Treat Medusa, EAGLE, and later variants as **WORKLOAD-DEPENDENT** or **FRONTIER*
 **Worked Example (synthetic cycle summaries for two hypothetical drafts on one workload).**
 
 - *Input*: draft X commits $\mathbb{E}[A]=3.2$ tokens per cycle with $\mathbb{E}[T_{cycle}]=70$ ms. Draft Y commits $\mathbb{E}[A]=2.4$ with $\mathbb{E}[T_{cycle}]=48$ ms. Both use the exact acceptance rule.
-- *Steps*: X costs $70/3.2=21.875$ ms/token. Y costs $48/2.4=20$ ms/token.
+- *Steps*: time per token is $\mathbb{E}[T_{cycle}]/\mathbb{E}[A]$ (Lesson 5.5 cost model). X costs $70/3.2=21.875$ ms/token. Y costs $48/2.4=20$ ms/token. Equivalently, X yields $3.2/0.070\approx45.7$ tokens/s and Y $2.4/0.048=50$ tokens/s.
 - *Result*: the draft with the higher committed reward is slower per token, because its wider tree or larger draft makes each cycle more expensive.
 - *Interpretation and limits*: this compares single-request time per token only. If X also holds more draft parameters, tree workspace, or KV state, it can lower the number of concurrent sequences the device can hold. That effect is a hypothesis (**H**) until memory and loaded throughput are measured on the target stack. If X used typical acceptance instead, the two would not even share an output contract, and a quality gate would be needed before any speed comparison.
 
@@ -517,6 +576,10 @@ For identical boundaries:
 $$
 S_{e2e}=\frac{T_{baseline}}{T_{optimized}}.
 $$
+
+where $S_{e2e}$ is the end-to-end speedup and $T_{baseline}$, $T_{optimized}$ are times for the same work measured at the same boundary ($S>1$ is a gain, $S<1$ a regression).
+
+*Amdahl-style bound, step by step.* Let $f$ be the target's fraction of baseline time and $k$ its local speedup. If everything else is unchanged, $T_{optimized}=T_{baseline}\bigl((1-f)+f/k\bigr)$, so $S_{e2e}=1/\bigl((1-f)+f/k\bigr)$. As $k\to\infty$ (the target costs nothing), $S_{e2e}\to1/(1-f)$. In the worked example below, $f=10/40=0.25$ and $k=2$ give $1/(0.75+0.125)\approx1.143$, with ceiling $1/0.75\approx1.333$.
 
 An Amdahl-style upper bound is useful only if non-target work remains unchanged. Quantization can change kernel selection; fusion can change layouts; speculation changes decode shapes and scheduler work; attention kernels can change memory headroom. These interactions violate a naïve fixed-fraction assumption.
 
@@ -587,7 +650,8 @@ Each entry states what was read on 2026-10-01 and what the module uses it for. "
 
 - [AWQ](https://arxiv.org/abs/2306.00978) — Lin et al. (MLSys 2024; arXiv v6). *Read*: abstract and the scaling-search passage. *Scope*: activation-aware per-channel scaling, with system results that include its own runtime (CLM-007).
 - [Medusa](https://arxiv.org/abs/2401.10774) — Cai et al. (ICML 2024; arXiv v3). *Read*: abstract, Section 2 overview, Section 2.3.1 (typical acceptance). *Scope*: heads plus tree verification; Medusa-1 versus Medusa-2; typical acceptance does not target the original distribution (CLM-012, CLM-021).
-- [EAGLE](https://arxiv.org/abs/2401.15077) — Li et al. (arXiv v3, March 2025). *Read*: abstract and the passages stating that it keeps the speculative-sampling rule, including for its draft tree. *Scope*: feature-level drafting and the paper's own distribution statement (CLM-012, CLM-021). The tree-verification proof it cites was not opened: `TODO_VERIFY`.
+- [EAGLE](https://arxiv.org/abs/2401.15077) — Li et al. (arXiv v3, March 2025). *Read*: abstract and the passages stating that it keeps the speculative-sampling rule, including for its draft tree. *Scope*: feature-level drafting and the paper's own distribution statement (CLM-012, CLM-021). EAGLE attributes its tree verifier to SpecInfer (below).
+- [SpecInfer: Accelerating Generative Large Language Model Serving with Tree-based Speculative Inference and Verification](https://arxiv.org/abs/2305.09781) — Miao et al. (arXiv v4; proof in v3). *Read*: Theorem 4.2 statement (multi-step speculative sampling equals the LLM's sampling distribution) and its proof in Appendix A.3 of [arXiv v3](https://arxiv.org/abs/2305.09781v3). *Scope*: the cited proof exists and covers SpecInfer's `VerifyStochastic`; not re-derived here and not evidence about any runtime's tree verifier (CLM-021).
 - [Triton documentation](https://triton-lang.org/main/index.html) — project landing page and the vector-addition tutorial, unversioned `main` docs as served on 2026-10-01. *Scope*: the program-instance, masked load/store, and `constexpr` block-size model in Lesson 5.2 (CLM-013). The docs are not pinned to a release.
 - [PyTorch compiler FAQ](https://docs.pytorch.org/docs/main/user_guide/torch_compiler/torch.compiler_faq.html) — `main` docs as served on 2026-10-01. *Read*: the sections on how compilation speeds up code (vertical and horizontal fusion), graph breaks, and guard-triggered recompilation. *Scope*: the fusion vocabulary and failure conditions in Lesson 5.2 (CLM-003). The `torch.compile` API page cited in the registry was not re-read in this pass.
 - Triton and compiler fusion are tool/mechanism families. No claim is made here that either is a default in any runtime; an implementation is selected only after correctness and workload-specific measurement.
@@ -795,6 +859,12 @@ A learner passes when they can:
 ### Module Wrap-Up (Final Mental Model Reconstruction)
 
 Inference optimization is constrained resource transformation. It changes bytes, operations, launch structure, precision, or serial target calls, then hands a new workload to the rest of the system. Validate semantics and quality first; measure the transformed bottleneck at the end-to-end boundary; retain the optimization only where its full cost ledger improves the declared objective.
+
+### Cost & Telemetry Hook
+
+- [Lesson 22.2](../22-ai-economics/README.md): an optimization's cost ledger includes calibration, kernel build, draft-model training/memory, and rollback, not only per-token savings.
+- [Lesson 22.6](../22-ai-economics/README.md): report the speedup flip point — batch size or acceptance rate below which a speculative or quantized path stops paying.
+- [Lesson 23.1](../23-observability-reliability/README.md) and [Lesson 23.5](../23-observability-reliability/README.md): emit backend/kernel path, precision, and acceptance length per request; treat offline quality deltas as proxy quality until labeled traffic confirms them.
 
 ## 12 Competency Targets
 

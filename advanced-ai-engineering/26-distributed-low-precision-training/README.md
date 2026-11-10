@@ -315,7 +315,7 @@ A blocking checkpoint pauses useful work, persists state, and resumes. A failure
 **Quantitative Model / Derivation:**
 Under independent exponential failures and first-order assumptions,
 $$W(\tau)\approx C/\tau+\tau/(2M)+R/M.$$
-Differentiating gives $\tau^*=\sqrt{2CM}$ (**D**, CLM-030). Young's commonly stated first-order result is used only as a planning approximation; its primary-source statement and exact Daly higher-order variants remain `TODO_VERIFY` because publisher full text was inaccessible (CLM-026).
+Differentiating gives $\tau^*=\sqrt{2CM}$ (**D**, CLM-030). The primary-source statements of Young and Daly were not verified (publisher full text inaccessible); neither formula is quoted (`TODO_VERIFY`).
 
 **Worked Example (derived; synthetic):**
 Let $C=120$ s, $M=24$ h $=86{,}400$ s, and $R=600$ s. $\tau^*=\sqrt{2\cdot120\cdot86{,}400}=4{,}553.7$ s = 75.9 min. Waste is $120/4553.7 + 4553.7/(172800)+600/86400=5.97\%$. If asynchronous staging reduces exposed $C$ to 15 s and persistence keeps up, $\tau^*=1{,}609.9$ s=26.8 min and waste is $2.56\%$. If upload needs 45 min, a 26.8-min cadence accumulates writes; the assumption fails and the policy needs backpressure or a longer interval.
@@ -326,7 +326,7 @@ Let $C=120$ s, $M=24$ h $=86{,}400$ s, and $R=600$ s. $\tau^*=\sqrt{2\cdot120\cd
 3. Why is $54$ days divided by interruption count not automatically an exponential MTBF estimate?
 
 **Guided Practice:**
-Fit empirical intervals from a supplied synthetic interruption log; compare exponential and bursty traces. Sweep $C$, $R$, persistence bandwidth, and maximum in-flight snapshots. Choose a policy with a durability SLO and identify where Young's assumptions break.
+Fit empirical intervals from a supplied synthetic interruption log; compare exponential and bursty traces. Sweep $C$, $R$, persistence bandwidth, and maximum in-flight snapshots. Choose a policy with a durability SLO and identify where the first-order assumptions break.
 
 **Feedback Contract:**
 - *Expected Evidence*: Failure-trace summary, units, waste curve, chosen interval, staging/persistence timeline, completion checks, backpressure, and restore drill.
@@ -347,7 +347,7 @@ Choose and validate checkpoint cadence and asynchronous persistence from observe
 - [Megatron-LM](https://arxiv.org/abs/1909.08053) — Shoeybi et al., 2019; tensor parallelism.
 - [Efficient Large-Scale Language Model Training](https://arxiv.org/abs/2104.04473) — Narayanan et al., 2021; 1F1B and interleaving.
 - [FP8 Formats for Deep Learning](https://arxiv.org/abs/2209.05433) — Micikevicius et al., 2022; FP8 encodings and mixed-precision recipe.
-- Young (1974), DOI `10.1145/361147.361115`; first-order checkpoint interval. Daly's exact higher-order formula is not quoted.
+- Young (1974), *A first order approximation to the optimum checkpoint interval*, CACM, DOI `10.1145/361147.361115` (metadata only; full text not opened). Daly's higher-order formula is not quoted.
 
 **CURRENT DEFAULT**
 - FSDP/ZeRO-style sharding chosen from a full memory and collective ledger; activation recomputation selected from tensor evidence; topology-aware multidimensional meshes; timeline-based overlap measurement; mixed precision specified as a full recipe; checkpoint completion verified by restore. “Current default” is an engineering baseline, not a universal adoption claim.
@@ -360,7 +360,7 @@ Choose and validate checkpoint cadence and asynchronous persistence from observe
 - [PACI](https://arxiv.org/abs/2606.07881) — Elam et al., 2026; asynchronous pipeline with bounded weight inconsistency; abstract-level verification.
 - [Recipes for Pre-training LLMs with MXFP8](https://arxiv.org/abs/2506.08027) — Mishra et al., 2025.
 - [Scaling FP8 Training to Trillion-Token LLMs](https://arxiv.org/abs/2409.12517) — Fishman et al., ICLR 2025; long-horizon instability.
-- [Pretraining Large Language Models with NVFP4](https://arxiv.org/abs/2509.25149) — NVIDIA, 2026; 12B/10T author-reported recipe.
+- [Pretraining Large Language Models with NVFP4](https://arxiv.org/abs/2509.25149) — NVIDIA, 2025 (v2 2026); 12B/10T author-reported recipe.
 
 **LEGACY / INSUFFICIENT**
 - Dividing $16\Psi$ by ranks and calling that peak memory; treating all collective bytes as exposed time; selecting a parallelism degree without a backward path; claiming “FP8 training” from dtype alone; treating staging completion as durable; importing a checkpoint interval from unrelated failure data.

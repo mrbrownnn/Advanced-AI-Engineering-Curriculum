@@ -96,6 +96,8 @@ A concrete failure class: provider documentation says `temperature`, `top_p`, an
 **Quantitative Model / Derivation:**
 If $k$ manifest fields may have changed, a one-factor-at-a-time contrast needs the baseline plus $k$ single-change runs. A full factorial over binary old/new fields needs $2^k$ configurations and can identify interaction contrasts under randomized, stable execution. Neither count fixes unlogged provider state or measurement error. A digest distinguishes the configurations that were logged; it supplies no causal contrast by itself (**D**, CLM-017).
 
+*Why these counts.* Each changed field has two states, old or new. One-at-a-time keeps every field at its old value except one, so the runs are: the all-old baseline (1) plus one run per field ($k$), total $k+1$. A full factorial tries every combination of old/new across the $k$ fields: $2\times2\times\cdots\times2=2^k$. Example: $k=2$ gives $3$ one-at-a-time runs but $2^2=4$ factorial cells; $k=5$ gives $6$ versus $32$. Only the factorial contains the "both changed" cell, which is what an interaction needs.
+
 **Worked Example — synthetic interaction fixture:**
 Two fields changed: model A→B and prompt A→B. Replay the same 200 frozen, independently sampled items with the same grader under all four cells:
 
@@ -106,7 +108,7 @@ Two fields changed: model A→B and prompt A→B. Replay the same 200 frozen, in
 | A / B | 190 | 95% |
 | B / B | 140 | 70% |
 
-*Steps.* Each single change is −2/200 = −1 pp. Adding those main effects predicts −2 pp, but the joint change is −52/200 = −26 pp. The difference-of-differences interaction is $(140-190)-(190-192)=-48$ items, or −24 pp. *Result.* Hashes identify four cells, but neither the model hash nor prompt hash alone explains the joint regression. *Interpretation / limits.* The fixture supports an interaction under its stable replay assumptions; it does not identify a deeper mechanism. Without the B/A and A/B ablations, the required report is `CAUSE UNKNOWN OR INTERACTING`, not a forced single-component answer. Provider-side drift can keep the cause unknown even after the factorial replay.
+*Steps.* Each single change is −2/200 = −1 pp. Adding those main effects predicts −2 pp, but the joint change is −52/200 = −26 pp. The difference-of-differences interaction is $(140-190)-(190-192)=-48$ items, or −24 pp. (Read it as: the model change costs $190-192=-2$ items under prompt A, but $140-190=-50$ items under prompt B; the effect of the model depends on the prompt by $-50-(-2)=-48$ items, and $-48/200=-24$ pp. Check: main effects $-1-1=-2$ pp plus interaction $-24$ pp equals the observed $-26$ pp.) *Result.* Hashes identify four cells, but neither the model hash nor prompt hash alone explains the joint regression. *Interpretation / limits.* The fixture supports an interaction under its stable replay assumptions; it does not identify a deeper mechanism. Without the B/A and A/B ablations, the required report is `CAUSE UNKNOWN OR INTERACTING`, not a forced single-component answer. Provider-side drift can keep the cause unknown even after the factorial replay.
 
 **Knowledge Check:**
 1. Why is a moving alias a manifest bug even when behavior currently looks unchanged?
@@ -145,14 +147,24 @@ Build a 2×2 table per slice (task type, language, customer tier, tool path). Re
 **Quantitative Model / Derivation:**
 With $n$ independent items, $a$ both-pass, $b$ old-pass/new-fail, $c$ old-fail/new-pass, $d$ both-fail:
 $$\Delta\text{acc}=\frac{(a+c)-(a+b)}{n}=\frac{c-b}{n},\qquad r_{reg}=\frac{b}{n}$$
-Here each item is one independent block and $d_i\in\{-1,0,+1\}$ is new minus old. Concordant items cancel. Equal accuracy implies only $b=c$ (**D**, CLM-006). A two-sided block t interval is $\bar d\pm t_{1-\alpha/2,n-1}s_d/\sqrt n$; a whole-block bootstrap is an alternative. An exact binomial test on $c$ of $b+c$ discordant independent pairs tests no directional change but does not replace the margin gate. If an item has repeated generations, a session has several items, or a user contributes several tasks, first average within that independent block and resample/analyze blocks—not rows (Module 15 CLM-020–022; Module 17 CLM-018).
+Here each item is one independent block and $d_i\in\{-1,0,+1\}$ is new minus old. Concordant items cancel. Equal accuracy implies only $b=c$ (**D**, CLM-006).
+
+*Symbol note.* The count $d$ (both-fail) and the per-item difference $d_i$ are different quantities; $\bar d$ and $s_d$ always refer to $d_i$. Where: old accuracy $=(a+b)/n$ (passes under old), new accuracy $=(a+c)/n$; $r_{reg}$ is the regression-flip rate.
+
+*Step-by-step from the 2×2 table to $\bar d$ and $s_d$.* (1) Score each item $d_i=\text{new}_i-\text{old}_i$: $+1$ for $c$ items, $-1$ for $b$ items, $0$ for the $a+d$ concordant items. (2) Mean: $\bar d=\frac{(+1)c+(-1)b}{n}=\frac{c-b}{n}=\Delta\text{acc}$. (3) Since $d_i^2=1$ exactly for discordant items, $\sum d_i^2=b+c$, so the sample variance is $s_d^2=\frac{\sum d_i^2-n\bar d^2}{n-1}=\frac{(b+c)-n\bar d^2}{n-1}$. (4) Standard error $SE=s_d/\sqrt n$. (5) Interval $[L,U]=\bar d\pm t\cdot SE$, with $t\approx1.961$ for 95% and large $n$.
+
+A two-sided block t interval is $\bar d\pm t_{1-\alpha/2,n-1}s_d/\sqrt n$; a whole-block bootstrap is an alternative. An exact binomial test on $c$ of $b+c$ discordant independent pairs tests no directional change but does not replace the margin gate. If an item has repeated generations, a session has several items, or a user contributes several tasks, first average within that independent block and resample/analyze blocks—not rows (Module 15 CLM-020–022; Module 17 CLM-018).
 
 **Worked Example — synthetic paired fixture:**
 *Predeclared contract.* One independently sampled item per block; two-sided 95% block t interval; primary global noninferiority margin $\tau=0.01$; structured-refund critical slice margin $\tau_s=0.02$; one fixed-horizon look; all gates must pass.
 
 *Input and steps.* Across $n=2{,}000$ items, $b=120$, $c=130$, so $\bar d=10/2000=0.005$, $r_{reg}=6\%$, $s_d=0.3536$, $SE=0.00791$, and the 95% interval is $[-0.0105,0.0205]$. Since $L=-0.0105<-0.01$ and $U>-0.01$, the global noninferiority gate is **undetermined**. In the 300-item structured-refund slice, $b=90,c=10$: $\bar d=-0.2667$, $s_d=0.5129$, $SE=0.02961$, interval $[-0.3249,-0.2084]$; because $U<-0.02$, the slice gate is **refuted**.
 
-*Result.* Decision = **HOLD**: a critical gate is refuted even though global accuracy rose 0.5 pp. *Interpretation / limits.* Numbers are synthetic. The interval assumes independent items and an approximately normal mean; repeated generations or user clusters require block effects. Planning to show global noninferiority at a true $\Delta=0.005$ with pilot $s_d=0.3536$, $\tau=0.01$, $\alpha=0.05$, and power 0.80 gives $n\ge((1.960+0.842)0.3536/(0.005+0.01))^2=4{,}360$ independent items. Power is the probability that this predeclared gate passes at that planning effect, not the probability that the new harness is better.
+*Arithmetic shown (global).* $s_d^2=\frac{(120+130)-2000(0.005)^2}{1999}=\frac{249.95}{1999}=0.12504$, so $s_d=0.3536$; $SE=0.3536/\sqrt{2000}=0.3536/44.72=0.00791$; half-width $1.961\times0.00791=0.0155$; interval $0.005\pm0.0155=[-0.0105,0.0205]$. *Slice.* $\bar d=(10-90)/300=-0.2667$; $s_d^2=\frac{100-300(0.2667)^2}{299}=0.2631$, $s_d=0.5129$; $SE=0.5129/\sqrt{300}=0.02961$; half-width $\approx1.968\times0.02961=0.0583$.
+
+*Gate logic in words.* Noninferiority margin $\tau$ means "the new version may be at most $\tau$ worse." Pass if the whole interval sits above $-\tau$ ($L\ge-\tau$); refute if the whole interval sits below $-\tau$ ($U<-\tau$); otherwise the data cannot tell (undetermined/INCONCLUSIVE).
+
+*Result.* Decision = **HOLD**: a critical gate is refuted even though global accuracy rose 0.5 pp. *Interpretation / limits.* Numbers are synthetic. The interval assumes independent items and an approximately normal mean; repeated generations or user clusters require block effects. Planning to show global noninferiority at a true $\Delta=0.005$ with pilot $s_d=0.3536$, $\tau=0.01$, $\alpha=0.05$, and power 0.80 gives $n\ge((1.960+0.842)0.3536/(0.005+0.01))^2=4{,}362.9\to4{,}363$ independent items. (Why this form: the lower bound is about $\bar d-z_{1-\alpha/2}SE$; for it to clear $-\tau$ with probability $1-\beta$ when the true effect is $\Delta$, the distance $\Delta+\tau$ must cover $(z_{1-\alpha/2}+z_{1-\beta})SE=(z_{1-\alpha/2}+z_{1-\beta})s_d/\sqrt n$; solve for $n$. Here $z_{0.975}=1.960$, $z_{0.80}=0.842$, distance $0.015$: $(2.802\times0.3536/0.015)^2=66.05^2$.) Power is the probability that this predeclared gate passes at that planning effect, not the probability that the new harness is better.
 
 **Knowledge Check:**
 1. Why does unpaired comparison of two accuracies lose power relative to the discordant-pair analysis?
@@ -162,7 +174,7 @@ Here each item is one independent block and $d_i\in\{-1,0,+1\}$ is new minus old
 Given $b=40$, $c=65$ on $n=1{,}500$, compute $\Delta\text{acc}$ and $r_{reg}$, then state what additional slice and severity data a release gate needs.
 
 **Feedback Contract:**
-- *Expected Output*: $\Delta\text{acc}=25/1500\approx1.67$ pp; $r_{reg}=40/1500\approx2.67\%$; $s_d=0.2641$, $SE=0.00682$, 95% block t interval $[0.0033,0.0300]$ under independent items; predeclared margins, slice gates, block/repeat policy, and a three-state decision.
+- *Expected Output* (work: $\bar d=(65-40)/1500$; $s_d^2=(105-1500\bar d^2)/1499=0.06977$; $SE=s_d/\sqrt{1500}$; half-width $1.962\,SE=0.0134$): $\Delta\text{acc}=25/1500\approx1.67$ pp; $r_{reg}=40/1500\approx2.67\%$; $s_d=0.2641$, $SE=0.00682$, 95% block t interval $[0.0033,0.0300]$ under independent items; predeclared margins, slice gates, block/repeat policy, and a three-state decision.
 - *Typical Error*: Reporting RELEASE from the positive mean or exact sign-test result without testing a practical margin and critical slices.
 - *Diagnostic Hint*: How many independent blocks are there, who experiences the 40 regressions, and does every required gate pass?
 - *Concept to Revisit*: Module 15 Lesson 15.4: paired block effects, noninferiority, and RELEASE/HOLD/INCONCLUSIVE.
@@ -191,11 +203,15 @@ All three are search loops: propose candidates → evaluate on (mini)batches →
 **Quantitative Model / Derivation:**
 Optimization cost $\approx N_{trials}\times B_{eval}\times(\text{calls per example})\times(\text{cost per call})$ plus proposal-model calls and full-validation evaluations. Minibatch evaluation lowers cost per trial but raises score noise, which can increase selection bias (Lesson 17.4).
 
+Where: $N_{trials}$ = number of candidate trials; $B_{eval}$ = examples scored per trial (minibatch size); calls per example = LM calls one program run makes (e.g., one per module); cost per call = average price of one LM call.
+
 **Worked Example — pinned-code accounting:**
 At the source snapshot traced in Lesson 17.4, MIPROv2 first evaluates the default program on all validation items. With 40 optimization trials, minibatch 35, full evaluation after every five optimization trials plus the implementation's initial full evaluation, 300 validation items, and three LM calls per program evaluation:
 - minibatches: $40\times35=1{,}400$ program-example evaluations, or $4{,}200$ LM calls;
 - full validation: $\lfloor40/5\rfloor+1=9$ full evaluations, $9\times300=2{,}700$ program-example evaluations, or $8{,}100$ LM calls;
 - total: $4{,}100$ program-example evaluations or $12{,}300$ LM calls, before proposal-model calls.
+
+(Step check: "every five trials" over 40 trials gives full evaluations after trials 5, 10, …, 40, i.e., $\lfloor40/5\rfloor=8$, plus the initial default-program evaluation $=9$. Totals: $1{,}400+2{,}700=4{,}100$; $4{,}100\times3=12{,}300$.)
 
 *Result and limits.* Full validation dominates this fixture's task-model calls. This is a static reconstruction of one implementation at one revision, not a universal optimizer formula; non-divisible schedules and automatic run modes alter the count. Measure retries, cache hits, tool calls, and variable module paths in a real budget.
 
@@ -232,16 +248,22 @@ By how much does "best validation score" overstate a candidate's true quality, a
 **Quantitative Model / Derivation — toy, not an optimizer model:**
 Assume $K$ candidates have the same true score $\theta$ and independent, equal-variance Gaussian validation noise $\sigma Z_k$, $Z_k\sim N(0,1)$. Then the selected score is $\theta+\sigma\max_k Z_k$:
 $$\mathbb{E}[\text{selection bias}]=\sigma\,\mathbb{E}[\max_{k\le K}Z_k]\approx 0.564\sigma,\;1.163\sigma,\;1.539\sigma,\;1.867\sigma\quad(K=2,5,10,20)$$
-For accuracy on $m$ independent validation items, $\sigma\approx\sqrt{p(1-p)/m}$. These assumptions are intentionally narrow. Real optimizer candidates share prompts, demonstrations, data, proposal history, and surrogate feedback; candidate scores are dependent and adaptively generated, true qualities differ, test scores have sampling and grader uncertainty, and the confirmation population can shift. Therefore a validation–confirmation gap decomposes selection bias, genuine quality differences among selected candidates, both samples' noise, grader drift, implementation changes, and population shift. It cannot be attributed entirely to winner's curse (**D**, CLM-010, CLM-019).
+For accuracy on $m$ independent validation items, $\sigma\approx\sqrt{p(1-p)/m}$.
+
+Where: $K$ = number of candidates compared; $\theta$ = their common true score; $Z_k$ = standardized noise of candidate $k$; $\sigma$ = standard deviation of one validation score; $m$ = validation items; $p$ = true accuracy. ($\rho$ below is the correlation between candidates' errors.)
+
+*Step-by-step.* (1) Observed score of candidate $k$: $\hat\theta_k=\theta+\sigma Z_k$. (2) The optimizer keeps the largest: $\max_k\hat\theta_k=\theta+\sigma\max_k Z_k$ (adding the same $\theta$ and scaling by $\sigma>0$ do not change which one is largest). (3) Bias $=\mathbb E[\max_k\hat\theta_k]-\theta=\sigma\,\mathbb E[\max_k Z_k]$. (4) $\mathbb E[\max_k Z_k]$ is a pure number depending only on $K$: $0$ for $K=1$, and growing slowly (roughly like $\sqrt{2\ln K}$) as $K$ rises. (5) $\sigma$ comes from the binomial variance of a mean of $m$ pass/fail items: $\text{Var}=p(1-p)/m$. Intuition: even when nobody is better, the luckiest of $K$ noisy scores looks better.
+
+These assumptions are intentionally narrow. Real optimizer candidates share prompts, demonstrations, data, proposal history, and surrogate feedback; candidate scores are dependent and adaptively generated, true qualities differ, test scores have sampling and grader uncertainty, and the confirmation population can shift. Therefore a validation–confirmation gap decomposes selection bias, genuine quality differences among selected candidates, both samples' noise, grader drift, implementation changes, and population shift. It cannot be attributed entirely to winner's curse (**D**, CLM-010, CLM-019).
 
 **Worked Example — synthetic toy and sensitivity checks (seed 174):**
-*Input.* $m=200$, $p=0.80$, $K=20$, so $\sigma=\sqrt{0.16/200}=0.02828$. Numerical integration gives $E[\max Z_k]=1.867$, hence Gaussian-toy bias $=0.0528$ (5.28 pp).
+*Input.* $m=200$, $p=0.80$, $K=20$, so $\sigma=\sqrt{0.16/200}=0.02828$. Numerical integration gives $E[\max Z_k]=1.867$, hence Gaussian-toy bias $=0.0528$ (5.28 pp). (Steps: $p(1-p)=0.8\times0.2=0.16$; $0.16/200=0.0008$; $\sqrt{0.0008}=0.02828$; $1.867\times0.02828=0.0528$.)
 
 *Monte Carlo.* Reproduction note: the toy means use one stream, `numpy.random.default_rng(174)`, with 1,000,000 replications. The binomial, gap, correlated, and unequal-quality checks use a second `default_rng(174)` stream with 400,000 replications, drawn in the order listed; a different draw order gives slightly different digits. One million independent Gaussian replications give means 0.564, 1.163, 1.539, 1.868 standard deviations for $K=2,5,10,20$ (Monte Carlo SE at $K=20$: 0.00053). A separate 400,000-replication binomial version with 20 independent candidates, 200 items each, and true accuracy 0.80 gives mean selection bias 0.0513. Against an independent 500-item confirmation sample from the same population, the gap has mean 0.0513, SD 0.0226, central 95% simulation range $[0.009,0.097]$, and is nonpositive in 0.97% of replications.
 
 *Break assumptions.* With equicorrelated Gaussian errors $\rho=0.5$, the mean maximum falls to 1.322 standard deviations. When one candidate truly scores 0.83 and nineteen score 0.80, the 200-item binomial simulation selects the better candidate 24.7% of the time; apparent gain is 5.48 pp, real selected-candidate gain is 0.74 pp, and selection bias is 4.74 pp. These are toy diagnostics, not predictions for an optimizer.
 
-*Interpretation / limits.* A large positive gap is compatible with selection bias in this toy, but one observed gap does not identify its cause. The confirmatory sample itself has uncertainty: at $m_{test}=500,p=0.8$, its 95% normal half-width is about 3.51 pp. A shifted confirmation population adds a different estimand. Report candidate dependence, adaptive history, both samples' uncertainty, grader versions, and population definitions before explaining the gap.
+*Interpretation / limits.* A large positive gap is compatible with selection bias in this toy, but one observed gap does not identify its cause. The confirmatory sample itself has uncertainty: at $m_{test}=500,p=0.8$, its 95% normal half-width is about 3.51 pp ($1.96\sqrt{0.16/500}=1.96\times0.01789=0.0351$). A shifted confirmation population adds a different estimand. Report candidate dependence, adaptive history, both samples' uncertainty, grader versions, and population definitions before explaining the gap.
 
 **Mechanism Explanation — Pinned DSPy Trace (O, CLM-012):**
 At `stanfordnlp/dspy` commit `9c900c7de0a3cc3114c23fe8202ebe48e2206ce1` (static re-inspection, 2026-10-01):
@@ -289,14 +311,18 @@ For independent Bernoulli outcomes with control success $p_1$, canary success $p
 $$n_{arm}\approx\frac{(z_{1-\alpha/2}+z_{1-\beta})^2\,[p_1(1-p_1)+p_2(1-p_2)]}{\delta^2}.$$
 This is an equal-allocation formula. If the canary supplies $n_c$ graded outcomes and control supplies $n_k=r n_c$, then
 $$n_c\approx\frac{(z_{1-\alpha/2}+z_{1-\beta})^2\,[p_2(1-p_2)+p_1(1-p_1)/r]}{\delta^2},\qquad n_k=r n_c.$$
-Duration is governed by the slower arm. Randomizing by session makes requests clustered: analyze one effect per independent session/block or, only for planning under equal cluster size $m$ and ICC $\rho$, inflate rows by $DE=1+(m-1)\rho$. The ramp decision itself follows Module 15's margin contract: for paired/block effect $d=\text{canary}-\text{control}$, a noninferiority gate passes only when $L\ge-\tau$; otherwise RELEASE/HOLD/INCONCLUSIVE applies. A sizing calculation at zero threshold is not a release rule, and target power 0.80 means repeated experiments pass that stated rule about 80% of the time under the planning effect—not certainty and not the probability the design is correct.
+
+Where: $\delta$ = planning drop in success rate; $z_q$ = standard-normal quantile ($z_{0.975}=1.960$, $z_{0.80}=0.842$); $\beta$ = miss probability, so $1-\beta$ is target detection; $n_c$, $n_k$ = graded outcomes in canary and control (subscript $k$ = control, unrelated to candidate count $K$); $r=n_k/n_c$ (unrelated to $r_{reg}$).
+
+*Step-by-step.* (1) The estimated difference $\hat p_2-\hat p_1$ has variance $\frac{p_2(1-p_2)}{n_c}+\frac{p_1(1-p_1)}{n_k}$. (2) The stop rule fires when the upper bound $(\hat p_2-\hat p_1)+z_{1-\alpha/2}SE$ is below $0$. (3) If the true difference is $-\delta$, this happens with probability $1-\beta$ when $\delta=(z_{1-\alpha/2}+z_{1-\beta})SE$. (4) Square and substitute $SE^2$: with $n_c=n_k=n$, $SE^2=[p_1(1-p_1)+p_2(1-p_2)]/n$, giving $n_{arm}$; with $n_k=rn_c$, $SE^2=[p_2(1-p_2)+p_1(1-p_1)/r]/n_c$, giving $n_c$.
+Duration is governed by the slower arm. Randomizing by session makes requests clustered: analyze one effect per independent session/block or, only for planning under equal cluster size $m$ and ICC $\rho$, inflate rows by $DE=1+(m-1)\rho$ (here $m$ is requests per session, not Lesson 17.4's validation size, and $\rho$ is the intra-class correlation—how alike two requests from one session are—not the candidate correlation of Lesson 17.4; $L$ in "$L$ planned looks" above is a count, while $L$ in $L\ge-\tau$ is an interval's lower bound). Intuition: with $\rho=0$ each request is new information ($DE=1$); with $\rho=1$ a session's $m$ requests say the same thing once ($DE=m$). The ramp decision itself follows Module 15's margin contract: for paired/block effect $d=\text{canary}-\text{control}$, a noninferiority gate passes only when $L\ge-\tau$; otherwise RELEASE/HOLD/INCONCLUSIVE applies. A sizing calculation at zero threshold is not a release rule, and target power 0.80 means repeated experiments pass that stated rule about 80% of the time under the planning effect—not certainty and not the probability the design is correct.
 
 **Worked Example — synthetic fixed-horizon design and simulation:**
 *Inputs.* Traffic = 40 req/s; 5% assigned to canary and 95% control; 10% of each arm is eligible for grading; $p_1=0.95$, $p_2=0.93$, $\alpha=0.05$, target detection rate 0.80 for a 2-pp drop. Assignment unit = independent request for this fixture; one fixed-horizon look; no clustering, delay, grader error, or traffic drift.
 
-*Equal graded arms.* The formula gives $n=2{,}209.46\to2{,}210$ graded outcomes per arm. Canary graded rate is $40(0.05)(0.10)=0.2$/s. Rather than grading all sampled control requests, draw a randomized graded-control subsample at 0.2/s—0.5263% of the 38 control req/s—so both arms contribute 2,210. Duration $=2210/0.2=11{,}050$ s = 3.07 h. A 20-minute horizon yields only 240 graded outcomes per arm.
+*Equal graded arms.* The formula gives $n=2{,}209.46\to2{,}210$ graded outcomes per arm (steps: $0.95(0.05)+0.93(0.07)=0.0475+0.0651=0.1126$; $(z_{0.975}+z_{0.80})^2=2.8016^2=7.849$ with unrounded quantiles; $7.849\times0.1126/0.02^2=2{,}209.46$; round up). Canary graded rate is $40(0.05)(0.10)=0.2$/s. Rather than grading all sampled control requests, draw a randomized graded-control subsample at 0.2/s—0.5263% of the 38 control req/s—so both arms contribute 2,210. Duration $=2210/0.2=11{,}050$ s = 3.07 h. A 20-minute horizon yields only 240 graded outcomes per arm.
 
-*Natural unequal arms.* If 10% of both traffic arms is graded, $r=3.8/0.2=19$. The unequal formula gives $n_c=1{,}326.46\to1{,}327$ canary and $n_k=25{,}213$ control outcomes, reached in 6,635 s = 1.84 h. Equal-allocation arithmetic must not be attached to these 5%/95% counts.
+*Natural unequal arms.* If 10% of both traffic arms is graded, $r=3.8/0.2=19$ (control graded rate $40(0.95)(0.10)=3.8$/s). The unequal formula gives (bracket $0.0651+0.0475/19=0.0676$; $7.849\times0.0676/0.0004=1{,}326.46$; $n_k=19\times1{,}327$; duration $1{,}327/0.2$) $n_c=1{,}326.46\to1{,}327$ canary and $n_k=25{,}213$ control outcomes, reached in 6,635 s = 1.84 h. Equal-allocation arithmetic must not be attached to these 5%/95% counts.
 
 *Seeded Monte Carlo check.* The following is synthetic; NumPy `default_rng(175)`, 400,000 replications per cell, Wald two-sided 95% bounds, independent binomial arms. `detection` is the fraction whose upper bound for canary-minus-control is below zero when the canary is truly 2 pp worse. `false_alarm` is the same stop under no drop. `ramp_pass_no_drop` is the noninferiority pass rate for $\tau=0.02$ under no drop; `false_ramp` is its pass rate when the true drop is exactly 2 pp.
 
@@ -328,7 +354,7 @@ Monte Carlo SE is at most 0.00064 for these rates. *Result.* Twenty minutes does
 
 *Peeking check.* Ten unadjusted cumulative looks at 221 outcomes per equal arm (seed 175, 200,000 replications) produce detection 0.868 and false-alarm 0.097; one final look gives about 0.801 and 0.025. Bonferroni $\alpha/10$ per look lowers these to 0.580 and 0.012 at the same maximum sample, so a multi-look design needs larger planned sample or another valid sequential method. Ramp stage changes are operational exposure controls, not extra uncounted statistical looks.
 
-*Cluster check.* With four graded requests per session and synthetic ICC 0.3, $DE=1.9$. The 2,210-row equal-arm plan contains only 553 sessions per arm. A session-level simulation (seed 1750, 40,000 replications) gives detection 0.532 and false alarm 0.025; inflating to 1,050 sessions/4,200 rows per arm gives 0.803 and 0.026. Treating rows as independent instead produces false alarms about 0.078. *Limits.* Real graders, delays, attrition, changing traffic, unequal cluster sizes, and low event rates require pilot estimates and a design-specific method.
+*Cluster check.* With four graded requests per session and synthetic ICC 0.3, $DE=1.9$ ($1+(4-1)0.3$). The 2,210-row equal-arm plan contains only 553 sessions per arm ($2{,}210/4=552.5$, rounded up); inflated, $2{,}210\times1.9\approx4{,}200$ rows $=1{,}050$ sessions. A session-level simulation (seed 1750, 40,000 replications) gives detection 0.532 and false alarm 0.025; inflating to 1,050 sessions/4,200 rows per arm gives 0.803 and 0.026. Treating rows as independent instead produces false alarms about 0.078. *Limits.* Real graders, delays, attrition, changing traffic, unequal cluster sizes, and low event rates require pilot estimates and a design-specific method.
 
 **Knowledge Check:**
 1. Why is randomization by session preferred for multi-turn assistants, and what does it cost statistically?
@@ -364,10 +390,10 @@ What must remain true for "rollback" to restore a valid system, and how do we me
 Routing controls only future requests. If the new version wrote `order_v4` JSON, the old parser must accept it or the records must be converted. If a conversation started on the new model, rolling back mid-session changes persona and format; pin sessions to a version or define a hand-off. Forced migrations are scheduled backward from the retirement date: compatibility and offline evaluation first, then enough canary time to reach the powered sample size, plus a contingency window. Anthropic documents at least 60 days' retirement notice for publicly released models on its platforms (**O**, CLM-002); partner platforms set their own schedules.
 
 **Quantitative Model / Trade-off Comparison:**
-Latest safe start $=T_{retire}-(T_{compat}+T_{offline}+T_{reopt}+\sum_s T_{stage,s}+T_{contingency})$, where each canary stage time comes from Lesson 17.5. If the latest safe start is already past, the plan must cut scope (fewer slices, larger $\delta$) explicitly and record the accepted risk.
+Latest safe start $=T_{retire}-(T_{compat}+T_{offline}+T_{reopt}+\sum_s T_{stage,s}+T_{contingency})$, where each canary stage time comes from Lesson 17.5. Where: $T_{retire}$ = days from notice to retirement; each other $T$ = planned duration of that phase; $\sum_s T_{stage,s}$ adds the durations of all canary stages $s$. In words: count backward from the retirement date by the total work. If the latest safe start is already past, the plan must cut scope (fewer slices, larger $\delta$) explicitly and record the accepted risk.
 
 **Worked Example — synthetic schedule:**
-Retirement in 60 days. Compatibility 3 d, offline paired evaluation 5 d, re-optimization and independent confirmation 7 d, four canary stages needing 2, 3, 4, 4 d, contingency 10 d: total 38 d. Latest safe start is day 22 after notice. Starting on day 40 leaves only 20 d, an 18 d shortfall. Skipping re-optimization saves 7 d but still leaves an 11 d shortfall; the team must also change exposure/evidence scope, negotiate timing, or record explicit risk acceptance. It cannot imply that a coarser $\delta$ alone closes the schedule.
+Retirement in 60 days. Compatibility 3 d, offline paired evaluation 5 d, re-optimization and independent confirmation 7 d, four canary stages needing 2, 3, 4, 4 d, contingency 10 d: total 38 d ($3+5+7+(2+3+4+4)+10$). Latest safe start is day 22 after notice ($60-38$). Starting on day 40 leaves only 20 d ($60-40$), an 18 d shortfall ($38-20$). Skipping re-optimization saves 7 d but still leaves an 11 d shortfall ($31-20$); the team must also change exposure/evidence scope, negotiate timing, or record explicit risk acceptance. It cannot imply that a coarser $\delta$ alone closes the schedule.
 
 **Knowledge Check:**
 1. Give two artifacts that survive a traffic rollback.
@@ -527,11 +553,11 @@ Every replacement of a fixture value must identify measurement method, model/run
 Trace the pinned DSPy path from `MIPROv2.compile` through dataset splitting, initial/default evaluation, trial evaluation, and full-validation best-candidate promotion; then trace `BootstrapFewShot` demonstration filtering and `Evaluate` error scoring. State files, symbols, entry path, revision, what was statically inspected, and what was not executed.
 
 ### Reference Checks (synthetic fixture only)
-- **Quality, independent requests, equal arms**: $n=(1.960+0.842)^2[0.96(0.04)+0.94(0.06)]/0.02^2=1{,}860.18\to1{,}861$ graded outcomes/arm. At 1%, 10%, 50% canary with 5% grading, canary rates are 0.015, 0.15, 0.75/s; equal-arm durations are 34.46 h, 3.45 h, 0.689 h. These are stage-specific horizons if each stage starts fresh; cumulative reuse requires a predeclared sequential design.
-- **Parse failure, equal arms**: for 0.3% versus 1.3%, the same approximation gives 1,242 outcomes/arm. At 1% canary, all canary traffic—not only 5% quality grading—can supply parse outcomes at 0.3/s, so duration is 69 min. If all 99% control traffic is used, unequal-allocation sizing gives about 1,010 canary outcomes and 56.1 min. This operational metric can stop exposure; it does not make the quality gate pass.
+- **Quality, independent requests, equal arms**: $n=(1.960+0.842)^2[0.96(0.04)+0.94(0.06)]/0.02^2=1{,}860.18\to1{,}861$ graded outcomes/arm (1,860.18 uses unrounded quantiles, $2.8016^2$; the displayed rounded $2.802^2$ gives 1,860.74; both round up to 1,861). At 1%, 10%, 50% canary with 5% grading, canary rates are 0.015, 0.15, 0.75/s ($30\times$ stage fraction $\times0.05$; duration $=1{,}861/\text{rate}$, e.g., $1{,}861/0.015=124{,}067$ s $=34.46$ h); equal-arm durations are 34.46 h, 3.45 h, 0.689 h. These are stage-specific horizons if each stage starts fresh; cumulative reuse requires a predeclared sequential design.
+- **Parse failure, equal arms**: for 0.3% versus 1.3%, the same approximation gives 1,242 outcomes/arm ($\delta=0.01$; bracket $0.003(0.997)+0.013(0.987)=0.01582$; $7.849\times0.01582/0.0001=1{,}241.8$). At 1% canary, all canary traffic—not only 5% quality grading—can supply parse outcomes at 0.3/s, so duration is 69 min ($1{,}242/0.3=4{,}140$ s). If all 99% control traffic is used, unequal-allocation sizing gives about 1,010 canary outcomes and 56.1 min ($r=99$; bracket $0.01283+0.00299/99$; $1{,}010/0.3=3{,}367$ s). This operational metric can stop exposure; it does not make the quality gate pass.
 - **Multi-turn blocks**: $DE=1+(4-1)0.3=1.9$ is a planning approximation; quality rows become $1{,}861(1.9)=3{,}536$ per arm, about 884 sessions. Analysis must use session effects, not row-independent intervals.
 - **Optimizer toy**: with $m=400,p=0.75,K=30$, $\sigma=\sqrt{0.1875/400}=0.02165$ and $E[\max Z]\approx2.043$, giving 4.42 pp under the equal-quality independent-Gaussian toy only. Confirmation at $m=600,p=0.75$ has a normal 95% half-width about 3.46 pp before pairing/block gains or grader error.
-- **Timeline**: $4+6+8+16+12=46$ d. Latest safe start is day 14 for the 60-day notice and day 44 for the 90-day notice.
+- **Timeline**: $4+6+8+16+12=46$ d. Latest safe start is day 14 for the 60-day notice and day 44 for the 90-day notice ($60-46$, $90-46$).
 
 ### Rubric Dimensions
 - **Versioning and Change Control**: *Insufficient* versions prompts only or calls a digest causal proof. *Competent* pins manifests, classifies changes, and limits the digest to identity. *Strong* catches forced incompatibilities, uses replay/ablation for joint changes, and reports unknown/interacting causes when evidence cannot discriminate.
@@ -565,6 +591,12 @@ A learner successfully completing Module 17 must be able to:
 - **The Core Invariant**: A harness is a versioned configuration; behavior changes whenever any component changes, whether or not you changed it.
 - **The Change Path**: manifest diff → validity → paired flips → governed optimization → shadow → powered canary → ramp or state-aware rollback → ledger.
 - Aggregate scores approve nothing on their own; paired block gates, independent scoped confirmation, concurrent controls, and rollback-state checks provide complementary—not absolute—evidence.
+
+### Cost & Telemetry Hook
+- [Lesson 22.3](../22-ai-economics/README.md): re-price every migration candidate with dated prices; reconcile canary spend against invoice.
+- [Lesson 22.6](../22-ai-economics/README.md): compare candidate manifests on a constrained cost/quality frontier and record flip points.
+- [Lesson 23.1](../23-observability-reliability/README.md): emit the manifest hash and model ID on every span so canary and control are separable.
+- [Lesson 23.4](../23-observability-reliability/README.md): gate canary ramp on offered-outcome SLI burn rate, not before/after dashboards.
 
 ## 12 Competency Targets
 

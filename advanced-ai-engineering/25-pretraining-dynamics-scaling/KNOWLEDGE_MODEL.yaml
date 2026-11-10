@@ -73,7 +73,6 @@ research_connections:
   - { id: "RESEARCH-03", description: "Mixture laws across scale and pretraining-time model merging.", evidence_ids: ["CLM-040", "CLM-042", "CLM-043", "CLM-044"], derived_from: ["MECH-06"] }
 
 todo_verify:
-  - { id: "TODO-01", description: "Porian et al. cite Kaplan's exponent as 0.88 whereas Kaplan reports 0.73 for non-embedding compute; the basis of 0.88 was not checked.", evidence_ids: ["CLM-007"], derived_from: [] }
   - { id: "TODO-02", description: "Functional forms of the Data Mixing Law (Ye et al.) and the optimal-mixture scaling law (Shukor et al.) were not read; abstract-level only.", evidence_ids: ["CLM-040", "CLM-042"], derived_from: [] }
   - { id: "TODO-03", description: "OLMo 2 z-loss weight differs between Table 1 (1e-5) and Section 3.3.3 (1e-4); the OLMo-core 7B script uses 1e-5, but the exact published-run config was not confirmed.", evidence_ids: ["CLM-024", "CLM-028"], derived_from: [] }
   - { id: "TODO-04", description: "Several quotes (CLM-005, -006, -007, -010, -011, -031, -032, -033, -035, -044) were read from HTML renders through a summarizing fetch; spot-check against PDFs before publication.", evidence_ids: ["CLM-005", "CLM-031", "CLM-044"], derived_from: [] }

@@ -125,6 +125,15 @@ T_{system}+T_{tools}+T_{history}+T_{evidence}+T_{state}+T_{input}
 +T_{framing}+T_{output\ reserve}\le T_{limit}.
 $$
 
+where every $T_{\cdot}$ is a token count under the declared tokenizer and protocol:
+
+- $T_{system}$: system instructions; $T_{tools}$: serialized tool schemas;
+- $T_{history}$: earlier turns, including tool calls and tool results; $T_{evidence}$: retrieved evidence; $T_{state}$: canonical state and selected memory;
+- $T_{input}$: the current user input; $T_{framing}$: role markers, delimiters, and other tokens the chat template or server adds;
+- $T_{output\ reserve}$: tokens kept free for the answer; $T_{limit}$: the context limit of the endpoint.
+
+In plain terms: add up everything that will be sent, add the room you promise for the answer, and the sum must not exceed the limit. If any term is a heuristic estimate rather than an exact count, the worked example below adds a measured margin to the left side. If the interface has separate input and output limits, check the input terms against the input limit and the reserve against the output limit.
+
 The inequality is an admission invariant, not a quality guarantee. Tool schemas, role/name fields, tool-call IDs, images, hidden delimiters, and provider framing can consume tokens even when a UI hides them. Input/output limits may be combined or separate. Pin the interface version and record the serialized request when policy permits.
 
 Use the target tokenizer or server-reported usage for exact accounting where possible. If a hot path uses a heuristic, measure signed and absolute error by language, modality, tool shape, and message mix; reserve a calibrated margin. Define priority classes and atomic groups so truncation never leaves a tool result without its call or strips the instruction that interprets state.
@@ -161,9 +170,14 @@ Steps:
 
 1. Requested total: $36{,}580$. Overflow against the limit: $36{,}580-32{,}000=4{,}580$. The request cannot be sent as is.
 2. Enforce caps from the lowest priority upward. History: dropping g1 leaves 11,100; dropping g2 leaves 7,900, which is within the 8,000 cap. Evidence: 14,000 → 12,000 by dropping four whole chunks.
+   - History arithmetic: $11{,}500-400=11{,}100>8{,}000$, so keep dropping; $11{,}100-3{,}200=7{,}900\le8{,}000$, so stop. Dropping g2 removes its call *and* its result.
+   - Evidence arithmetic: $14{,}000-12{,}000=2{,}000$ over the cap, and $2{,}000/500=4$ whole chunks.
 3. Placed total: $30{,}980$. Slack: $32{,}000-30{,}980=1{,}020$.
+   - Check: $1{,}200+3{,}400+900+180+600+2{,}800+12{,}000+7{,}900+2{,}000=30{,}980$. Equivalently, requested minus dropped: $36{,}580-2{,}000-3{,}600=30{,}980$.
 4. Estimator margin: 5% of the 12,000 heuristic-counted evidence tokens is 600. Admission check: $30{,}980+600=31{,}580\le32{,}000$. **Admit**, with 420 tokens unallocated.
-5. Reconcile: placed input 28,980 + reserve 2,000 + margin 600 + unallocated 420 = 32,000. The ledger records the dropped IDs (g1, g2, four chunk IDs) so the request can be replayed.
+   - Why only evidence gets a margin: every other category is an exact count. The heuristic may under-count evidence by up to 5%, so the true evidence size could be as large as $12{,}000+0.05\times12{,}000=12{,}600$. The margin reserves room for that worst case.
+   - Unallocated: $32{,}000-31{,}580=420$.
+5. Reconcile: placed input 28,980 + reserve 2,000 + margin 600 + unallocated 420 = 32,000. (Placed input is the placed total without the reserve: $30{,}980-2{,}000=28{,}980$.) The ledger records the dropped IDs (g1, g2, four chunk IDs) so the request can be replayed.
 
 Why groups matter: suppose the history cap were 10,900 and the allocator dropped *messages* oldest-first. It drops g1 (11,100 left), then g2's tool call (10,800 left) and stops. The tool result of g2 is now in the prompt without the call that produced it. That request is protocol-invalid for tool-calling chat formats, or it leaves the model reading a result with no question. Dropping by group removes g1 and all of g2 and never produces an orphan.
 
@@ -176,7 +190,7 @@ Interpretation and limits: the ledger proves the request fits and is well-formed
 **Guided Practice:** Compare heuristic and exact/server counts across languages and tool schemas; test exact-boundary, over-limit, and atomic tool-call cases. Then redo the ledger with $T_{limit}=30{,}000$.
 
 **Feedback Contract:**
-- *Expected Output*: an estimator-error distribution, pinned protocol/tokenizer, a category ledger that reconciles to the limit, invariant tests, and a fallback. For Knowledge Check 2: the margin becomes $0.09\times12{,}000=1{,}080$, and $30{,}980+1{,}080=32{,}060>32{,}000$, so the request is **not** admissible; drop one more evidence chunk (500 tokens) or count evidence exactly. For the 30,000 limit: placed 30,980 already exceeds it by 980 before any margin, so caps alone are not enough; with the 600 margin the allocator must free about 1,580 tokens, for example by dropping g3 and g4 (1,400) and one more evidence chunk (500), which gives $29{,}080$ placed plus a $575$ margin $=29{,}655\le30{,}000$; or by compacting. Rejecting is also a valid answer if the fallback says so.
+- *Expected Output*: an estimator-error distribution, pinned protocol/tokenizer, a category ledger that reconciles to the limit, invariant tests, and a fallback. For Knowledge Check 2: the margin becomes $0.09\times12{,}000=1{,}080$, and $30{,}980+1{,}080=32{,}060>32{,}000$, so the request is **not** admissible; drop one more evidence chunk (500 tokens) or count evidence exactly. For the 30,000 limit: placed 30,980 already exceeds it by 980 before any margin, so caps alone are not enough; with the 600 margin the allocator must free about 1,580 tokens, for example by dropping g3 and g4 (1,400) and one more evidence chunk (500), which gives $29{,}080$ placed plus a $575$ margin $=29{,}655\le30{,}000$; or by compacting. (Arithmetic: $30{,}980+600-30{,}000=1{,}580$ to free; $30{,}980-1{,}400-500=29{,}080$; evidence is now $11{,}500$, so the margin is $0.05\times11{,}500=575$; unallocated $30{,}000-29{,}655=345$.) Rejecting is also a valid answer if the fallback says so.
 - *Common Failure*: truncating individual messages without preserving call/result pairs; or shrinking the output reserve until the request fits.
 - *Diagnostic Hint*: add up your "placed" column, the reserve, the margin, and the unallocated tokens. If the sum is not exactly the limit, a category is missing or counted twice. Then scan the placed history for a tool result whose call ID is absent.
 - *Concept to Revisit*: admission invariant; atomic groups; output reserve.
@@ -199,6 +213,8 @@ Maximum accepted length asks “can the request be processed?” Effective conte
 - exact lookup, multi-hop tracing, aggregation, long-dialogue, and code/state tasks;
 - prompt/template and model revision;
 - answer format, reasoning budget, latency, and cost.
+
+A "phase surface" here is a table (or plot) of task success over a grid of these variables, so that each cell holds one combination such as (length, position, task type). The variables must be *crossed*: every length is tested at every position, so a change in success can be traced to one variable at a time.
 
 RULER shows that simple needle retrieval can conceal failures on multi-needle, tracing, aggregation, and QA tasks as length grows (**O**, CLM-003). Lost in the Middle shows position sensitivity in evaluated models (**O**, CLM-004). Neither implies a universal degradation curve. A model upgrade can improve one slice and regress another.
 
@@ -287,6 +303,8 @@ A write policy asks whether an event is eligible, novel, durable, attributable, 
 
 A read policy first applies hard access, validity, deletion, and task constraints; only then rank by workload-tested relevance, recency, importance, authority, confidence, and prior utility. Similarity alone does not prove applicability (**D**, CLM-009). Selected records need lineage in the request trace.
 
+In plain terms, reading is two steps. Step 1 is a set of yes/no gates (right owner and tenant, not deleted, not superseded, valid now, allowed for this task); a record that fails any gate is removed. Step 2 orders only the survivors by score. Because the gates run first, no ranking score, however high, can bring back a record the gates removed. Lesson 11.3's S-8 is the example: it is the closest match in wording but fails the validity gate.
+
 Concurrent or multi-writer updates need an explicit compare/version rule. Conditional writes, monotonic sequence or transaction versions, and a domain conflict policy make lost updates observable; last-writer-wins is valid only when its clock and product semantics are declared. Backfills, TTL expiry, tombstones, indexes, replicas, and caches must converge before physical garbage collection removes recovery evidence.
 
 Forgetting is a capability: expiry, correction, user deletion, policy deletion, invalidation after failure, and capacity-based eviction differ. Tombstones and supersession must reach all indexes/caches. A 2025 study reports experience-following, error propagation, and misaligned replay in its evaluated agents—use this as a failure family, not a universal rate.
@@ -294,6 +312,8 @@ Forgetting is a capability: expiry, correction, user deletion, policy deletion, 
 **Worked Example — concurrent correction and tombstone trace** (synthetic; continues the `pref:indent` record of Lesson 11.3, stored at version 4 = `spaces`).
 
 Write rule for canonical state (**D**, CLM-018): every write carries an operation ID and the base version the writer read. The store, in one atomic step per key, (a) returns the stored outcome if the operation ID is already recorded, (b) accepts if the base version equals the stored version, writing version + 1, and (c) rejects as stale otherwise. A delete is a write that produces a tombstone with its own version.
+
+In plain terms: the *base version* is the version the writer saw when it last read the key. "Accept only if base = stored" means "accept only if nobody else has written since you read". The operation ID catches the same write arriving twice; the base version catches a write built on an out-of-date read.
 
 | # | Actor | Operation (op ID, base) | Stored before | Decision | Stored after |
 |---|---|---|---|---|---|
@@ -357,9 +377,21 @@ r=\frac{T_{retained}}{T_{original}},\qquad
 \Delta L_{e2e}=L_{compress}+L_{model,compressed}-L_{model,original}.
 $$
 
+where:
+
+- $T_{original}$: tokens of the content before compaction; $T_{retained}$: tokens kept after compaction. $r$ is between 0 and 1 for a compaction that removes tokens; smaller $r$ means more compression. Example: 10,000 tokens compacted to 2,500 gives $r=2{,}500/10{,}000=0.25$.
+- $L_{compress}$: time spent by the compaction step itself (preprocessing, a summarizer or compressor call).
+- $L_{model,original}$ and $L_{model,compressed}$: model time for the request with the original and with the compacted content.
+- $\Delta L_{e2e}$: change in end-to-end latency caused by compacting. Negative means faster; positive means slower. ($L$ is time; $T$ is tokens.)
+
+Break-even, step by step: compaction is faster only when $\Delta L_{e2e}<0$, that is
+$L_{compress}+L_{model,compressed}<L_{model,original}$, which rearranges to
+$L_{compress}<L_{model,original}-L_{model,compressed}$.
+The compaction step must cost less time than it saves in model time. Note that $r$ does not appear in $\Delta L_{e2e}$: a smaller $r$ shrinks the right-hand side only to the extent it actually reduces measured model time.
+
 Token reduction does not imply latency reduction. A 2026 study found operating regions where compression helped and regions where preprocessing erased the benefit. Measure quality, protocol validity, memory, queueing, and end-to-end latency at the target model/hardware/load.
 
-**Worked Example:** A compressor that saves 500 ms of model time but adds 700 ms preprocessing has $\Delta L_{e2e}=+200$ ms and is slower at that operating point despite reducing tokens.
+**Worked Example:** A compressor that saves 500 ms of model time but adds 700 ms preprocessing has $\Delta L_{e2e}=+200$ ms and is slower at that operating point despite reducing tokens. Step by step: $L_{model,compressed}-L_{model,original}=-500$ ms and $L_{compress}=700$ ms, so $\Delta L_{e2e}=700+(-500)=+200$ ms. Break-even check: $700<500$ is false.
 
 **Knowledge Check:** Why can recursive summary claims become false canonical facts?
 
@@ -392,7 +424,7 @@ Static long-context recall is not a complete memory test. Include:
 - downstream task outcome, calibration/abstention, privacy leakage, latency, and cost;
 - long-range understanding, test-time experience reuse, and selective forgetting.
 
-MemoryAgentBench explicitly expands evaluation toward incremental interaction and four competencies. IFCMemoryBench (2026, one professional domain) separates ingestion, retrieval, and utilization and reports that the evaluated general-purpose memory systems performed poorly in its setup. The registry's characterization of the retrieved records as "incomplete or fragmented" comes from an earlier reading; only the abstract was re-read on 2026-09-30. Do not turn either benchmark into a universal leaderboard.
+MemoryAgentBench explicitly expands evaluation toward incremental interaction and four competencies. IFCMemoryBench (2026, one professional domain) separates ingestion, retrieval, and utilization and reports that the evaluated general-purpose memory systems performed poorly in its setup. Its abstract (re-read 2026-11-09) says those systems often retrieve topically relevant context but store project knowledge as incomplete or fragmented facts; full methods and results were not re-audited. Do not turn either benchmark into a universal leaderboard.
 
 Diagnosis follows the earliest discriminated boundary:
 
@@ -407,6 +439,14 @@ wrong response
 
 **Quantitative Model / Derivation:**
 For each declared probe population, report stage opportunity conditionally: valid given stored, selected given valid, placed given selected, and correctly used given placed. Multiplying stage rates is justified only when the denominators and conditional chain match; retain raw counts and end-to-end success (**D**, CLM-019).
+
+Notation: let $N_0$ be the number of probes and $N_1,\dots,N_5$ the counts that reach stored, valid, selected, placed, and used. Each stage rate is $p_k=N_k/N_{k-1}$ ("of those that reached the previous stage, the fraction that also passed this one"). Then
+
+$$
+p_1p_2p_3p_4p_5=\frac{N_1}{N_0}\cdot\frac{N_2}{N_1}\cdot\frac{N_3}{N_2}\cdot\frac{N_4}{N_3}\cdot\frac{N_5}{N_4}=\frac{N_5}{N_0},
+$$
+
+because each numerator cancels the next denominator. This cancellation is why the product is valid only when every $N_k$ is a subset of $N_{k-1}$ on the same probes.
 
 **Worked Example — one cohort through five stages** (synthetic counts, registry CLM-020).
 
@@ -428,7 +468,7 @@ Steps:
 3. End-to-end correctness is a different number. Suppose 6 of the 106 probes that failed somewhere in the chain were still answered correctly, because the model guessed or knew the fact from elsewhere. End-to-end correct is then $(94+6)/200=0.50$, not 0.47.
 4. A mismatched denominator breaks the product. Suppose the read policy returned 150 records in total for these probes, of which 130 were the valid needed ones. "Selection precision" is $130/150\approx0.867$. Substituting it for the selected-given-valid rate gives $0.9\times0.9\times0.867\times0.9\times0.803\approx0.508$, which matches nothing that happened. Precision answers "of what was selected, how much was right"; the chain needs "of what was valid, how much was selected".
 
-Interpretation and limits: conditional rates locate the loss; the end-to-end rate measures the outcome; they agree only when no success bypasses the chain. The 6 bypass successes are not credit for the memory system, and a memory-disabled replay is how they are identified. If a fact is valid and selected but absent from the serialized prompt, retrieval tuning cannot fix the placement loss; replaying the same request with oracle placement discriminates that stage. Counts are synthetic and have no uncertainty attached; with 117 placed probes, a rate near 0.80 has a standard error of about 0.037.
+Interpretation and limits: conditional rates locate the loss; the end-to-end rate measures the outcome; they agree only when no success bypasses the chain. The 6 bypass successes are not credit for the memory system, and a memory-disabled replay is how they are identified. If a fact is valid and selected but absent from the serialized prompt, retrieval tuning cannot fix the placement loss; replaying the same request with oracle placement discriminates that stage. Counts are synthetic and have no uncertainty attached; with 117 placed probes, a rate near 0.80 has a standard error of about 0.037. (Binomial standard error $\sqrt{p(1-p)/n}$ with $p=94/117\approx0.803$ and $n=117$: $\sqrt{0.803\times0.197/117}\approx\sqrt{0.00135}\approx0.037$.)
 
 **Knowledge Check:**
 1. Which oracle replay separates selection failure from model non-use?
@@ -437,7 +477,7 @@ Interpretation and limits: conditional rates locate the loss; the end-to-end rat
 **Guided Practice:** Run baseline plus oracle stored-state, oracle selection, oracle placement, and memory-disabled replays on stale, fragmented, corrected, and poisoned cases.
 
 **Feedback Contract:**
-- *Expected Output*: stage timestamps/identities, conditional counts on one declared cohort, privacy/deletion checks, downstream outcome, and remeasurement. Knowledge Check 2: chain rate $117/200=0.585$; placed-given-selected $146/162\approx0.901$; used-given-placed $117/146\approx0.801$. Fixing selection alone would raise the chain rate from 0.47 to about 0.585, and use becomes the largest remaining loss (29 probes).
+- *Expected Output*: stage timestamps/identities, conditional counts on one declared cohort, privacy/deletion checks, downstream outcome, and remeasurement. Knowledge Check 2: chain rate $117/200=0.585$; placed-given-selected $146/162\approx0.901$; used-given-placed $117/146\approx0.801$. Fixing selection alone would raise the chain rate from 0.47 to about 0.585, and use becomes the largest remaining loss (29 probes). (Derivation: oracle selection makes selected $=162$, so the stage rates are $0.9,\ 0.9,\ 162/162=1,\ 146/162,\ 117/146$, and the product telescopes to $117/200$. Losses per stage: stored 20, valid 18, selected 0, placed $162-146=16$, used $146-117=29$.)
 - *Common Failure*: one end-to-end score with no stage lineage; or multiplying rates whose denominators come from different populations.
 - *Diagnostic Hint*: write the denominator next to every rate. Each one must be the numerator of the stage before it, on the same probes.
 - *Concept to Revisit*: conditional stage rates versus end-to-end rate; oracle-stage replay.
@@ -484,7 +524,7 @@ No universal architecture or benchmark winner is established by these sources.
   - `InMemoryChatMessageHistory.add_message` appends to a list on the object, and `clear` replaces it with an empty list.
 - Not verified: whether every `trim_messages` configuration keeps tool call/result pairs together. That was not established by reading and needs an executed test (`TODO_VERIFY`).
 - Scope: pinned helpers, not a universal memory policy and not durable persistence.
-- **Trace practice (the 2h `source_trace` effort):** at the pinned revision, read `trim_messages` and the helper it calls for `strategy="last"`. Answer in writing: (1) which arguments would you set to avoid a history that starts with a tool result, and where in the code is that enforced? (2) with the default approximate counter, what does a 4,000-character tool result count as, and what Lesson 11.1 ledger entry must cover the difference from the exact count? Expected answers: (1) `start_on` (for example `"human"`), applied in the last-strategy path; report the function and line you found, and say that you have not shown it holds for every configuration unless you ran it; (2) the function adds the content length, the tool-call ID length, and the role string length, divides by `chars_per_token` rounding up, and adds `extra_tokens_per_message`; for a 20-character call ID and the role `tool` that is $\lceil(4000+20+4)/4\rceil+3=1{,}009$, and the difference from the real count must be covered by the measured estimator margin. A common error is to treat the helper's default as an exact count, or to assume trimming is protocol-safe without a test.
+- **Trace practice (the 2h `source_trace` effort):** at the pinned revision, read `trim_messages` and the helper it calls for `strategy="last"`. Answer in writing: (1) which arguments would you set to avoid a history that starts with a tool result, and where in the code is that enforced? (2) with the default approximate counter, what does a 4,000-character tool result count as, and what Lesson 11.1 ledger entry must cover the difference from the exact count? Expected answers: (1) `start_on` (for example `"human"`), applied in the last-strategy path; report the function and line you found, and say that you have not shown it holds for every configuration unless you ran it; (2) the function adds the content length, the tool-call ID length, and the role string length, divides by `chars_per_token` rounding up, and adds `extra_tokens_per_message`; for a 20-character call ID and the role `tool` that is $\lceil(4000+20+4)/4\rceil+3=1{,}009$ (step by step: $4000+20+4=4024$ characters; $4024/4=1006$, already whole so the ceiling $\lceil\cdot\rceil$ leaves it at 1006; $1006+3=1009$), and the difference from the real count must be covered by the measured estimator margin. A common error is to treat the helper's default as an exact count, or to assume trimming is protocol-safe without a test.
 
 ### LAYER 2: ENGINEERING PRACTICE LAYER
 
@@ -591,6 +631,7 @@ Submit an exact serialized request ledger, typed record/change history, conflict
 Reviewers use these to check arithmetic and decisions. A submission with different declared inputs is checked against its own inputs.
 
 - **Ledger (Deliverable 1):** requested total 28,850, which is 4,850 over the limit. After caps: memory 3,000; evidence 8,000; history 6,000 (the 600 and 2,800 groups are dropped whole, leaving 400 + 1,200 + 3,400 + 1,000). Placed total 23,950, slack 50. The evidence margin is $0.04\times8{,}000=320>50$, so the request is **not yet admissible**. Dropping one more 400-token evidence chunk gives placed 23,550 and margin 304: $23{,}854\le24{,}000$, admitted with 146 unallocated. Equivalent answers (exact evidence counting, or a declared compaction) are accepted if they reconcile. An answer that lowers the 1,500 reserve is not.
+  - Arithmetic: requested $1{,}000+3{,}000+150+800+500+3{,}500+9{,}000+9{,}400+1{,}500=28{,}850$, and $28{,}850-24{,}000=4{,}850$. History: $9{,}400-600=8{,}800>6{,}000$, then $8{,}800-2{,}800=6{,}000\le6{,}000$. Placed: $28{,}850-500-1{,}000-3{,}400=23{,}950$; slack $24{,}000-23{,}950=50$. After one more chunk: evidence $7{,}600$, margin $0.04\times7{,}600=304$, $23{,}550+304=23{,}854$, unallocated $24{,}000-23{,}854=146$.
 - **Protocol check (Deliverable 1):** no placed tool result without its call; the 2,800 group is absent as a whole.
 - **Mutation trace (Deliverable 4):** the expected decisions follow Lesson 11.4: first correction ACCEPT, second correction from the same base REJECT as stale, redelivery DUPLICATE, delete ACCEPT as tombstone, delayed summarizer write REJECT as stale, tombstone kept at least 30 minutes and until indexes and caches converge. A design in which the summarizer write or a redelivery restores the deleted value fails the hard deletion constraint.
 - **Stage counts (Deliverable 7):** each stage count must be a subset of the previous one on the same cohort; the product of the conditional rates must equal used/probes; the end-to-end rate is reported separately with the memory-disabled replay that explains any difference.
@@ -626,6 +667,12 @@ A learner passes when they can account for serialized context and output reserve
 ### Module Wrap-Up (Final Mental Model Reconstruction)
 
 Context is scarce execution input; memory is a governed state system. Reliability comes from budgeting, typed/versioned records, explicit conflict and deletion convergence, selective authorized movement into context, recoverable compaction, and stage-level falsification—not from replaying more text.
+
+### Cost & Telemetry Hook
+
+- [Lesson 22.3](../22-ai-economics/README.md): record per-call input tokens from the provider count, not the approximate counter; reconcile against the context-budget ledger.
+- [Lesson 22.2](../22-ai-economics/README.md): price compaction/summarization calls and memory storage as fixed plus marginal cost against the replayed-context cost they replace.
+- [Lesson 23.1](../23-observability-reliability/README.md): emit budget, reserved output, trimmed count, and memory record IDs/versions selected per call; [Lesson 23.6](../23-observability-reliability/README.md) governs retention and redaction of memory content in telemetry.
 
 ## 12 Competency Targets
 

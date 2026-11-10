@@ -124,6 +124,14 @@ After $L$ layers, a final normalization and language-model head produce logits:
 
 $$Z=\mathrm{LMHead}(\mathrm{RMSNorm}(X_L))\in\mathbb{R}^{B\times S\times V}.$$
 
+where:
+- $B$ = batch size (independent sequences), $S$ = sequence length (positions), $d$ = model width (features per position), $V$ = vocabulary size, $L$ = number of decoder layers;
+- $X_l\in\mathbb{R}^{B\times S\times d}$ = residual stream entering layer $l$ ($l=0,\dots,L-1$); $X_0$ is the embedding output and $X_L$ the output of the last layer;
+- $U_l$ = residual stream after layer $l$'s attention branch has been added, before its MLP branch;
+- $\mathrm{LMHead}$ = a linear map $d\to V$ applied independently at every position; $Z$ = logits (unnormalized scores, one per vocabulary entry).
+
+Read each layer equation as "normalize a copy, transform it, add the result back": the branch input is $\mathrm{RMSNorm}(X_l)$, but the addition uses the un-normalized $X_l$. That is why the branch outputs must have exactly the shape of $X_l$, namely $[B,S,d]$.
+
 The pinned Transformers Llama implementation follows this order (**O**, CLM-010). It is a reference architecture: other decoders may use post-norm, parallel attention/MLP branches, additional norms, convolution or state-space blocks, different residual scaling, or shared layers.
 
 **Invariants**
@@ -162,12 +170,18 @@ The pinned Transformers Llama implementation follows this order (**O**, CLM-010)
 
 - **Autoregressive factorization**: for a token-ID sequence $x_{1:n}$ produced by one fixed tokenizer, the chain rule gives
   $$P(x_{1:n})=\prod_{i=1}^{n}P(x_i\mid x_{<i}),\qquad \log P(x_{1:n})=\sum_{i=1}^{n}\log P(x_i\mid x_{<i}).$$
+  Here $x_i$ is the token ID at position $i$, $x_{1:n}=(x_1,\dots,x_n)$, and $x_{<i}=(x_1,\dots,x_{i-1})$ is everything before position $i$ (empty for $i=1$, i.e. only the context). *Step-by-step for $n=3$*: $P(x_1,x_2,x_3)=P(x_1)\,P(x_2\mid x_1)\,P(x_3\mid x_1,x_2)$ by repeated use of $P(a,b)=P(a)P(b\mid a)$; taking $\log$ turns the product into a sum, which is numerically safer because a product of many probabilities $<1$ underflows quickly.
   Decoder language models are trained and used to produce these conditionals left to right, and generation draws tokens one at a time from them (**O**, CLM-013). The chain rule itself is exact; the model's conditionals are learned approximations.
 - **Scope of the factorization**: it assigns probability to a sequence of token IDs under a stated tokenizer, context (prompt, system text, truncation), and position policy. It is not the probability of a text string (one string can have several tokenizations), and it changes if the context is truncated at the context limit.
 - **Logits and softmax**: the LM head's last-position output $z\in\mathbb{R}^V$ defines $p_j=\exp(z_j)/\sum_{k}\exp(z_k)$.
+  Here $z_j$ is the logit of vocabulary entry $j$, $p_j$ its probability, and the sum runs over all $k=1,\dots,V$. Exponentiation makes every term positive; dividing by the sum makes the $p_j$ add to 1. Adding the same constant $c$ to every logit does not change $p$ (the factor $e^{c}$ cancels between numerator and denominator), which is why implementations subtract $\max_k z_k$ before exponentiating to avoid overflow.
 - **Temperature** $T>0$: $p_j(T)=\exp(z_j/T)/\sum_k\exp(z_k/T)$ (**O**, CLM-013). $T<1$ sharpens, $T>1$ flattens. Dividing by $T$ preserves the order of logits, so the argmax does not change (**D**, CLM-014).
+  *Step-by-step*: (1) the probability ratio of two tokens is $p_i(T)/p_j(T)=\exp\big((z_i-z_j)/T\big)$, because the shared denominator cancels; (2) for $z_i>z_j$, a smaller $T$ makes the exponent $(z_i-z_j)/T$ larger, so the gap between the more and less likely token widens (sharper), and a larger $T$ shrinks it toward $\exp(0)=1$ (flatter, approaching uniform as $T\to\infty$); (3) because $T>0$, $z_i>z_j \iff z_i/T>z_j/T$, so the ordering and hence $\arg\max$ are unchanged.
 - **Greedy decoding**: choose $\arg\max_j z_j$. It is not “sampling at $T=0$”: $T=0$ divides by zero, and the pinned Transformers warper rejects it and points users to `do_sample=False` (**O**, CLM-015).
 - **Top-k**: keep the $k$ highest-probability tokens, renormalize, sample. **Top-p (nucleus)**: keep the smallest high-probability set whose mass is at least $p$, renormalize, sample (**O**, CLM-013).
+  *In symbols*: let $\mathcal{K}$ be the kept set. Top-k: $\mathcal{K}$ = the $k$ indices with largest $p_j$. Top-p: sort tokens so $p_{(1)}\ge p_{(2)}\ge\dots$, and take $\mathcal{K}=\{(1),\dots,(r)\}$ with the smallest $r$ such that $\sum_{i=1}^{r}p_{(i)}\ge p$. In both cases *renormalize* means
+  $$\tilde p_j=\frac{p_j}{\sum_{i\in\mathcal{K}}p_i}\ \text{for } j\in\mathcal{K},\qquad \tilde p_j=0\ \text{otherwise},$$
+  i.e. divide by the kept mass, not by the full-vocabulary sum. Implementations do this by setting removed logits to $-\infty$ (so $\exp(-\infty)=0$) and re-running softmax. Note the symbol clash: $p$ in "top-p" is a threshold, while $p_j$ is a token probability.
 - **Sampling contract**: the full list of choices that determine the next-token distribution and the draw—logit source position and dtype, processor chain and order, $T$, $k$, $p$, other processors, library and checkpoint defaults, greedy versus sampled, RNG seed/generator/device, stop tokens and maximum new tokens, tokenizer/detokenizer versions, and context-limit/truncation policy.
 
 **Mechanism Explanation:**
@@ -183,10 +197,12 @@ The forward pass that produces $z$ is independent of the sampling choice. For a 
 **Worked Example (synthetic logits):**
 - *Input*: vocabulary $\{A,B,C,D\}$, last-position logits $z=[2,1,0,-1]$.
 - *Step 1 — softmax, $T=1$*: $e^{z}=[7.3891,2.7183,1,0.3679]$, sum $11.4752$, so $p=[0.6439,0.2369,0.0871,0.0321]$.
-- *Step 2 — temperature*: $T=0.5$ uses $z/T=[4,2,0,-2]$, giving $[0.8650,0.1171,0.0158,0.0021]$; $T=2$ gives $[0.4551,0.2760,0.1674,0.1015]$. The entropy is $0.455$, $0.947$, and $1.245$ nats for $T=0.5,1,2$. Greedy chooses $A$ at every $T$.
-- *Step 3 — top-k=2 at $T=1$*: keep $\{A,B\}$ with mass $0.8808$; renormalized $[0.7311,0.2689]$.
-- *Step 4 — top-p=0.9 at $T=1$*: cumulative mass from the top is $0.6439$, $0.8808$, $0.9679$. The smallest set reaching $0.9$ is $\{A,B,C\}$; renormalized $[0.6652,0.2447,0.0900]$. The pinned implementation reaches the same set from the other direction: sorted ascending, cumulative $[0.0321,0.1192,0.3561,1]$, and it removes only entries $\le 1-0.9=0.1$, which is $D$.
-- *Step 5 — likelihood*: if the next step's model probability of $B$ after $A$ is $0.5$ (a second synthetic value), then $\log P(A,B\mid\text{ctx})=\ln0.6439+\ln0.5=-1.1333$ nats. Compute that score from unprocessed logits unless the evaluation explicitly defines a processed distribution.
+- *Step 2 — temperature*: $T=0.5$ uses $z/T=[4,2,0,-2]$, giving $[0.8650,0.1171,0.0158,0.0021]$; $T=2$ gives $[0.4551,0.2760,0.1674,0.1015]$. The entropy is $0.455$, $0.948$, and $1.245$ nats for $T=0.5,1,2$. Greedy chooses $A$ at every $T$.
+  - *Detail for $T=0.5$*: $e^{[4,2,0,-2]}=[54.598,7.389,1,0.1353]$, sum $63.1225$; e.g. $p_A=54.598/63.1225=0.8650$. Ratio check: $p_A/p_B=e^{(2-1)/T}$ is $e^{2}=7.39$ at $T=0.5$, $e^{1}=2.72$ at $T=1$, $e^{0.5}=1.65$ at $T=2$.
+  - *Entropy*: $H(p)=-\sum_j p_j\ln p_j$ (nats because of $\ln$); $0$ means one token has all the mass, $\ln V=\ln4=1.386$ is the uniform maximum here. Higher $H$ = flatter distribution.
+- *Step 3 — top-k=2 at $T=1$*: keep $\{A,B\}$ with mass $0.8808$; renormalized $[0.7311,0.2689]$ (i.e. $0.6439/0.8808$ and $0.2369/0.8808$).
+- *Step 4 — top-p=0.9 at $T=1$*: cumulative mass from the top is $0.6439$, $0.8808$, $0.9679$. The smallest set reaching $0.9$ is $\{A,B,C\}$; renormalized $[0.6652,0.2447,0.0900]$. The pinned implementation reaches the same set from the other direction: sorted ascending, cumulative $[0.0321,0.1192,0.3561,1]$, and it removes only entries $\le 1-0.9=0.1$, which is $D$. (Why the two directions agree: a token's ascending cumulative mass is the total mass of that token and every token ranked below it, so removing entries with ascending cumulative $\le 1-p$ removes a tail of total mass $\le 1-p$ and leaves a top set of mass $\ge p$.)
+- *Step 5 — likelihood*: if the next step's model probability of $B$ after $A$ is $0.5$ (a second synthetic value), then $\log P(A,B\mid\text{ctx})=\ln0.6439+\ln0.5=(-0.4402)+(-0.6931)=-1.1333$ nats (equivalently $P=0.6439\times0.5=0.3220$). Compute that score from unprocessed logits unless the evaluation explicitly defines a processed distribution.
 - *Result*: the same logits yield different next-token distributions under different contracts, while greedy output and the forward-pass FLOPs are unchanged.
 - *Interpretation / limits*: $A$ with probability $0.6439$ is not a calibrated statement about the world (Module 07). Whether $T=0.5$ or top-p$=0.9$ improves task quality is an empirical question for the target model and workload.
 
@@ -225,9 +241,23 @@ If $g=H_q/H_{kv}$ is an integer, query head $h$ uses K/V group $\lfloor h/g\rflo
 $$A_h=\mathrm{softmax}\left(\frac{Q_hK_{group(h)}^\top}{\sqrt{d_h}}+M\right),$$
 $$O_h=A_hV_{group(h)}.$$
 
+where:
+- $S$ = number of query positions, $S_k$ = number of key/value positions (equal to $S$ without a cache; larger when a cached prefix is attended to);
+- $Q_h\in\mathbb{R}^{S\times d_h}$ = query head $h$ for one sequence; $K_{group(h)},V_{group(h)}\in\mathbb{R}^{S_k\times d_h}$ = the K/V head it reads, with $group(h)=\lfloor h/g\rfloor$;
+- $M\in\mathbb{R}^{S\times S_k}$ = additive mask; $A_h\in\mathbb{R}^{S\times S_k}$ = attention weights; $O_h\in\mathbb{R}^{S\times d_h}$ = head output. Softmax runs over the key axis (each row of $A_h$ sums to 1).
+
+*Step-by-step for one query position $i$*:
+1. Scores: $s_{ij}=q_i\cdot k_j/\sqrt{d_h}$ for every key position $j$ ($q_i$ = row $i$ of $Q_h$, $k_j$ = row $j$ of $K_{group(h)}$). The $\sqrt{d_h}$ keeps score magnitudes from growing with head width: if the $d_h$ coordinates of $q$ and $k$ were independent with variance 1, $q\cdot k$ would have variance $d_h$, and dividing by $\sqrt{d_h}$ brings it back to 1.
+2. Mask: add $M_{ij}$; future keys get $-\infty$.
+3. Normalize: $a_{ij}=\exp(s_{ij}+M_{ij})/\sum_{j'}\exp(s_{ij'}+M_{ij'})$; masked entries become $\exp(-\infty)=0$.
+4. Mix: $o_i=\sum_j a_{ij}v_j$, a weighted average of value rows.
+5. Concatenate the $H_q$ outputs $O_h$ along features ($H_qd_h=d$) and apply the output projection $W_O$.
+
 For a simple no-prefix causal mask,
 
 $$M_{ij}=\begin{cases}0,&j\le i\\-\infty,&j>i.\end{cases}$$
+
+*Tiny example* ($S=3$, query row $i=1$ with 0-based positions, unmasked scores $[1,0,5]$): the mask turns them into $[1,0,-\infty]$, so $a_{1,\cdot}=[e^1,e^0,0]/(e^1+e^0)=[0.7311,0.2689,0]$. The large future score $5$ has no effect—exactly the property the future-token perturbation test checks. Row $i=0$ always gets $[1,0,0]$: the first position attends only to itself.
 
 The mask is what makes the per-position logits of Lesson 1.2 conditionals on $x_{<i}$ only. With cached prefixes, padding, packed sequences, sliding windows, or special attention patterns, absolute positions and valid-key boundaries require a richer mask.
 
@@ -241,6 +271,8 @@ Fewer KV heads reduce K/V projection width and logical KV payload. They do not r
 - *Input*: $H_q=32$, $H_{kv}=8$, $d_h=128$, $d=4096$.
 - *Steps*: $g=32/8=4$; query heads 0–3 read KV head 0, heads 4–7 read KV head 1, …, heads 28–31 read KV head 7. K and V projections map $4096\to8\cdot128=1024$ each, instead of $4096\to4096$ for MHA.
 - *Result*: K/V projection width and per-token K/V elements shrink by $H_{kv}/H_q=1/4$; Q, the 32 score matrices, and the output projection are unchanged.
+  - *Per-token, per-layer K/V elements*: $2H_{kv}d_h$ (factor 2 for K and V). MHA: $2\cdot32\cdot128=8192$; GQA: $2\cdot8\cdot128=2048$; MQA: $2\cdot1\cdot128=256$. Ratio GQA/MHA $=2048/8192=1/4$.
+  - *Group map check*: head $h=13$ uses group $\lfloor13/4\rfloor=3$ (heads 12–15 share KV head 3).
 - *Interpretation / limits*: the mapping does not require physically repeating stored K/V. Whether decode latency falls depends on kernels, batch, and context (Lab B); quality depends on training (**O**, CLM-005).
 
 **Knowledge Check:** Which dimensions shrink under GQA, and why does attention over prior positions remain?
@@ -269,9 +301,17 @@ For each paired feature coordinate, RoPE applies a rotation at position $p$:
 
 $$R(p\theta)=\begin{bmatrix}\cos(p\theta)&-\sin(p\theta)\\\sin(p\theta)&\cos(p\theta)\end{bmatrix}.$$
 
+where $p$ = token position (here the query's; $r$ below is the key's), $\theta$ = the rotation frequency assigned to this coordinate pair, and $q,k\in\mathbb{R}^2$ = one pair of query/key features. A fully rotated $d_h$-wide head has $d_h/2$ such pairs, each with its own $\theta_i$ given by the model's frequency schedule (read it from the actual config and source, not from memory).
+
 Queries and keys are rotated before their dot product. Orthogonality gives
 
 $$\left(R(p\theta)q\right)^\top\left(R(r\theta)k\right)=q^\top R((r-p)\theta)k,$$
+
+*Step-by-step*:
+1. Transpose of a product: $\left(R(p\theta)q\right)^\top=q^\top R(p\theta)^\top$.
+2. Rotations are orthogonal, and the inverse of rotating by $p\theta$ is rotating by $-p\theta$: $R(p\theta)^\top=R(-p\theta)$.
+3. Rotations about the same origin compose by adding angles: $R(-p\theta)R(r\theta)=R((r-p)\theta)$.
+4. So the score is $q^\top R((r-p)\theta)k$: absolute positions $p$ and $r$ enter only through $r-p$. Summing over all $d_h/2$ pairs keeps this property, since each pair contributes its own term.
 
 so the score can depend on relative displacement (**O**, CLM-003). Real models choose a frequency schedule, rotary fraction, coordinate pairing convention, maximum training positions, and possibly a scaling method.
 
@@ -280,6 +320,7 @@ so the score can depend on relative displacement (**O**, CLM-003). Real models c
 **Worked Example:**
 - *Input*: one 2-D pair, $q=k=(1,0)$, $\theta=\pi/6$; positions $(p,r)=(3,5)$ and then $(13,15)$.
 - *Steps*: $q^\top R((r-p)\theta)k=\cos(2\cdot\pi/6)=\cos(\pi/3)$ in both cases; $\|R(p\theta)q\|=1$.
+  - *Direct check for $(p,r)=(3,5)$*: $R(3\theta)q=(\cos\frac{\pi}{2},\sin\frac{\pi}{2})=(0,1)$ and $R(5\theta)k=(\cos\frac{5\pi}{6},\sin\frac{5\pi}{6})=(-0.8660,0.5)$; dot product $0\cdot(-0.8660)+1\cdot0.5=0.5$. For $(13,15)$ the angles are $13\pi/6$ and $15\pi/6$, which differ by the same $\pi/3$, giving again $0.5$.
 - *Result*: score $0.5$ for both pairs; norms preserved.
 - *Interpretation / limits*: the identity shows relative-position dependence for one frequency. It says nothing about quality at positions never seen in training, and at large $p$ low-precision angle computation can break the identity numerically.
 
@@ -289,7 +330,7 @@ so the score can depend on relative displacement (**O**, CLM-003). Real models c
 
 **Feedback Contract:**
 - *Expected Evidence*: frequency schedule, coordinate pairing (adjacent versus half-split), position IDs, dtype/tolerance, tested position range, and the shift-invariance error as a function of position.
-- *Common Failure*: pairing features $(2i,2i{+}1)$ when the reference rotates $(i,i{+}d/2)$—shapes and norms stay correct while scores differ.
+- *Common Failure*: pairing features $(2i,2i{+}1)$ when the reference rotates $(i,i{+}d_h/2)$—shapes and norms stay correct while scores differ.
 - *Diagnostic Hint*: rotate a one-hot vector and compare which coordinate receives the sine term.
 - *Concept to Revisit*: rotary pairing conventions and relative-position identity.
 
@@ -309,11 +350,20 @@ so the score can depend on relative displacement (**O**, CLM-003). Real models c
 
 $$\mathrm{RMSNorm}(x)=\gamma\odot\frac{x}{\sqrt{\frac{1}{d}\sum_{j=1}^{d}x_j^2+\epsilon}}.$$
 
+where $x\in\mathbb{R}^d$ = the feature vector at one (batch, position), $x_j$ its $j$-th feature, $\gamma\in\mathbb{R}^d$ = learned per-feature scale (the norm "weight"), $\epsilon>0$ = small constant added *inside* the square root so the denominator is never 0, and $\odot$ = elementwise product. *Step-by-step*: (1) square each feature; (2) average over the $d$ features (mean square); (3) add $\epsilon$; (4) take the square root, giving the RMS; (5) divide every feature by it, so the result has RMS $\approx1$; (6) multiply by $\gamma$.
+
 Unlike LayerNorm, the expression does not subtract the feature mean (**O**, CLM-002). The pinned Transformers Llama implementation converts hidden states to float32 for the mean-square and reciprocal-square-root calculation, casts normalized values back to the input dtype, and multiplies by the learned weight (**O**, CLM-011). A substituted fused kernel may realize equivalent semantics through a different execution path.
 
 **SwiGLU** with intermediate width $m$ (**O**, CLM-004):
 
 $$\mathrm{SwiGLU}(x)=W_{down}\left(\mathrm{SiLU}(W_{gate}x)\odot(W_{up}x)\right).$$
+
+where:
+- $x\in\mathbb{R}^d$ = normalized input at one position; $m$ = intermediate (hidden) MLP width;
+- $W_{gate},W_{up}\in\mathbb{R}^{m\times d}$ map $d\to m$; $W_{down}\in\mathbb{R}^{d\times m}$ maps $m\to d$;
+- $\mathrm{SiLU}(u)=u\cdot\sigma(u)=u/(1+e^{-u})$, applied elementwise; $\odot$ = elementwise product.
+
+*Shape walk*: $x\,[d]\to$ gate $[m]$ and up $[m]\to$ $\mathrm{SiLU}(\text{gate})\odot\text{up}$ $[m]\to$ down $[d]$. The gate branch passes through SiLU, the up branch does not, so swapping the two weight matrices changes the output. Example: gate pre-activation $2$, up pre-activation $3$ gives $\mathrm{SiLU}(2)\cdot3=1.7616\cdot3=5.285$; swapped gives $\mathrm{SiLU}(3)\cdot2=2.8577\cdot2=5.715$.
 
 Bias and orientation notation depend on the framework. In row-major PyTorch notation, `nn.Linear(d,m)` stores a weight shaped $[m,d]$; the scalar parameter count is still $dm$.
 
@@ -329,7 +379,7 @@ Bias and orientation notation depend on the framework. In row-major PyTorch nota
 **Worked Example:**
 - *Input*: $x=(3,4)$, $\gamma=(1,1)$, $\epsilon=10^{-6}$, reduction over the feature axis $d=2$.
 - *Steps*: mean square $=(9+16)/2=12.5$; $\sqrt{12.5+10^{-6}}\approx3.5355$; divide.
-- *Result*: $(0.8485,1.1314)$, whose RMS is 1.
+- *Result*: $(0.8485,1.1314)$, whose RMS is 1 (i.e. $3/3.5355$ and $4/3.5355$; check $\sqrt{(0.8485^2+1.1314^2)/2}=\sqrt{(0.72+1.28)/2}=1$).
 - *Interpretation / limits*: on $[B,S,d]$, reducing over $S$ instead of $d$ still broadcasts and returns the same shape, but each output now depends on other positions, which also breaks causal isolation. In FP16, $x_j^2$ overflows above $|x_j|\approx 256$ (since $256^2=65536$ exceeds the FP16 maximum 65504), which is one reason the pinned path squares in float32.
 
 **Knowledge Check:** Where is epsilon applied, which axis is reduced, and why can accumulation dtype matter?
@@ -362,9 +412,13 @@ $$P_Q=d(H_qd_h)=d^2,$$
 $$P_K=P_V=d(H_{kv}d_h),\qquad P_O=d^2,$$
 $$P_{attn}=2d^2+2dH_{kv}d_h=2d^2\left(1+\frac{H_{kv}}{H_q}\right).$$
 
+*Step-by-step*: a bias-free linear map from $a$ inputs to $b$ outputs has $ab$ weights. $Q$ maps $d\to H_qd_h=d$, so $d^2$; $K$ and $V$ each map $d\to H_{kv}d_h$, so $dH_{kv}d_h$ each; $O$ maps $H_qd_h=d\to d$, so $d^2$. Sum: $2d^2+2dH_{kv}d_h$. To factor, substitute $d_h=d/H_q$: $2dH_{kv}d_h=2d^2\,H_{kv}/H_q$, hence $2d^2(1+H_{kv}/H_q)$. Checks: MHA ($H_{kv}=H_q$) gives $4d^2$; MQA ($H_{kv}=1$) gives $2d^2(1+1/H_q)$.
+
 **SwiGLU parameters** (**D**, CLM-019)
 
 $$P_{mlp}=dm+dm+md=3dm.$$
+
+The three terms are $W_{gate}$ ($d\to m$), $W_{up}$ ($d\to m$), and $W_{down}$ ($m\to d$), each with $dm$ weights.
 
 Two RMSNorm weights contribute $2d$ per standard block. Add embeddings, final norm, LM head, biases, adapters, expert/router tensors, and any untied output head separately.
 
@@ -374,18 +428,26 @@ State whether one fused multiply-add counts as one or two operations. This modul
 
 $$\mathrm{GEMM}(m\times k,k\times n)\approx2mkn\text{ FLOPs}.$$
 
+Here $m,k,n$ are generic matrix dimensions (this $m$ is not the MLP width): the output has $mn$ entries, each a length-$k$ dot product of $k$ multiplies and $k$ adds, so $2k$ FLOPs per entry and $2mkn$ in total. Corollary: a token passing through a $d\to b$ linear layer is a $(1\times d)(d\times b)$ GEMM, i.e. $2db$ FLOPs $=2\times$ the layer's weight count. This is the source of "2 FLOPs per weight per token".
+
 For a dense full-sequence attention calculation, QK and AV together have a nominal leading term
 
 $$4BH_qS^2d_h=4BS^2d.$$
 
-For one decode token attending to $S_k$ retained positions, the corresponding term is $4H_qS_kd_h=4dS_k$ per layer. A causal-aware implementation may avoid part of the nominal square, and a fused kernel may never materialize the score matrix. Projections and MLP scale linearly with $S$ but can dominate at common dimensions. Logical FLOPs do not determine latency without shapes, backend, precision, achieved compute/bandwidth, and memory traffic.
+*Step-by-step*: per sequence and head, $QK^\top$ is $(S\times d_h)(d_h\times S)$, costing $2S\,d_h\,S=2S^2d_h$; $AV$ is $(S\times S)(S\times d_h)$, again $2S^2d_h$. Together $4S^2d_h$; times $B$ sequences and $H_q$ heads gives $4BH_qS^2d_h$, and $H_qd_h=d$ gives $4BS^2d$. Softmax and masking are $O(BH_qS^2)$ elementwise work, lower order by a factor $d_h$.
+
+For one decode token attending to $S_k$ retained positions, the corresponding term is $4H_qS_kd_h=4dS_k$ per layer (same derivation with one query row: $(1\times d_h)(d_h\times S_k)$ plus $(1\times S_k)(S_k\times d_h)$, i.e. $4S_kd_h$ per head). It uses $H_q$, not $H_{kv}$: every query head still scores every retained position. A causal-aware implementation may avoid part of the nominal square, and a fused kernel may never materialize the score matrix. Projections and MLP scale linearly with $S$ but can dominate at common dimensions. Logical FLOPs do not determine latency without shapes, backend, precision, achieved compute/bandwidth, and memory traffic.
 
 **Worked Example:**
 - *Input*: $d=4096$, $H_q=32$, $H_{kv}=8$, $d_h=128$, $m=11008$, one decode token with $S_k=4096$ retained positions.
 - *Steps (parameters)*: attention $2\cdot4096^2\cdot(1+8/32)=41{,}943{,}040$; SwiGLU $3\cdot4096\cdot11008=135{,}266{,}304$; two norms $8{,}192$.
+  - *Attention, term by term*: $Q$ and $O$: $4096^2=16{,}777{,}216$ each; $K$ and $V$: $4096\cdot(8\cdot128)=4{,}194{,}304$ each; sum $2\cdot16{,}777{,}216+2\cdot4{,}194{,}304=41{,}943{,}040$, matching the factored form.
+  - *Subtotal*: $41{,}943{,}040+135{,}266{,}304+8{,}192=177{,}217{,}536$.
 - *Result (parameters)*: block subtotal $177{,}217{,}536$, excluding embeddings, final norm, LM head, biases, storage padding, and all runtime memory.
 - *Steps (FLOPs per decode token per layer)*: projections and MLP $2\times(41{,}943{,}040+135{,}266{,}304)=354{,}418{,}688$; attention QK+AV $4\cdot4096\cdot4096=67{,}108{,}864$.
-- *Interpretation / limits*: at this context the weight-proportional term is about $5.3\times$ the attention term, but the attention term grows with $S_k$ while the weight term does not. Neither number predicts decode latency, which also depends on bytes moved per token (Module 02).
+  - The first uses "2 FLOPs per weight" (norm weights excluded as negligible elementwise work); the second is $4dS_k$ with $d=S_k=4096$, equivalently $4H_qS_kd_h=4\cdot32\cdot4096\cdot128$.
+  - *Crossover*: the two terms are equal when $4dS_k=354{,}418{,}688$, i.e. $S_k=354{,}418{,}688/16{,}384=21{,}632$ retained positions (under these logical counts only).
+- *Interpretation / limits*: at this context the weight-proportional term is about $5.3\times$ the attention term ($354{,}418{,}688/67{,}108{,}864=5.28$), but the attention term grows with $S_k$ while the weight term does not. Neither number predicts decode latency, which also depends on bytes moved per token (Module 02).
 
 **OOM discipline:** Logical tensors provide component estimates, not an exact OOM boundary. Measure allocated and reserved peaks across fresh processes and record workspaces, backend, cache state, graph capture, padding, and concurrent allocations (**H**, CLM-012).
 
@@ -415,6 +477,8 @@ For one decode token attending to $S_k$ retained positions, the corresponding te
 
 $$P_{experts,total}=3Edm.$$
 
+This is the Lesson 1.6 SwiGLU count $3dm$ repeated for $E$ experts. The router (a $d\to E$ scoring map) and any shared experts are counted separately. Here $k$ means the number of experts selected per token, not the top-k sampling parameter of Lesson 1.2.
+
 If top-$k$ experts execute per token, the raw selected expert weight use is proportional to $3kdm$, plus router and shared components. This is not a wall-clock model. Expert imbalance, capacity, padding, token dropping/rerouting, locality, batching, and communication matter.
 
 Always distinguish:
@@ -430,9 +494,20 @@ $$c_t^{KV}=W^{DKV}h_t\in\mathbb{R}^{d_c},\qquad k_t^{C}=W^{UK}c_t^{KV},\qquad v_
 $$k_t^{R}=\mathrm{RoPE}(W^{KR}h_t)\in\mathbb{R}^{d_h^R}\ \text{(one key shared by all heads)},$$
 $$q_{t,i}=[q_{t,i}^C;q_{t,i}^R],\qquad k_{t,i}=[k_{t,i}^C;k_t^R],\qquad \text{score scale } 1/\sqrt{d_h+d_h^R}.$$
 
+where:
+- $t$ = token position, $i$ = head index ($i=1,\dots,n_h$); $d$ = model width;
+- $d_c$ = KV latent width (much smaller than $n_hd_h$); $c_t^{KV}$ = joint compressed key/value latent;
+- $W^{DKV}\in\mathbb{R}^{d_c\times d}$ = down-projection; $W^{UK},W^{UV}\in\mathbb{R}^{n_hd_h\times d_c}$ = up-projections, whose outputs $k_t^C,v_t^C\in\mathbb{R}^{n_hd_h}$ are split into per-head $k_{t,i}^C,v_{t,i}^C\in\mathbb{R}^{d_h}$ ("C" = content/compressed part);
+- $d_h^R$ = width of the decoupled RoPE part; $W^{KR}\in\mathbb{R}^{d_h^R\times d}$; $q_{t,i}^R\in\mathbb{R}^{d_h^R}$ = per-head RoPE query part;
+- $[a;b]$ = concatenation, so each head's query and key have width $d_h+d_h^R$, which is why the score scale uses $\sqrt{d_h+d_h^R}$ instead of $\sqrt{d_h}$.
+
 Queries are also produced through a latent $c_t^Q\in\mathbb{R}^{d_c'}$, but the paper states this reduces training activation memory, not KV cache.
 
 **State model — what must be retained per token per layer:** $c_t^{KV}$ ($d_c$ elements) and $k_t^R$ ($d_h^R$ elements). Per-head $k^C$ and $v^C$ are recomputable from $c^{KV}$. The paper states that at inference $W^{UK}$ can be absorbed into $W^Q$ and $W^{UV}$ into $W^O$, so per-head keys and values need not be materialized (**O**, CLM-017). The RoPE part is decoupled because a position-dependent rotation between $W^Q$ and $W^{UK}$ would block that absorption.
+
+*Why absorption works (one head, content part only)*: let $W_i^{UK}\in\mathbb{R}^{d_h\times d_c}$ be head $i$'s rows of $W^{UK}$, so $k_{t,i}^C=W_i^{UK}c_t^{KV}$. For query position $s$ and key position $t$, by associativity
+$$\big(q_{s,i}^C\big)^\top k_{t,i}^C=\big(q_{s,i}^C\big)^\top W_i^{UK}c_t^{KV}=\Big(\big(W_i^{UK}\big)^\top q_{s,i}^C\Big)^\top c_t^{KV}.$$
+The bracketed vector depends only on the query side, so the map producing it can be folded into the query projection, and scores are taken directly against the cached $c_t^{KV}$. If RoPE were applied to $k_{t,i}^C$, a rotation $R_t$ that depends on the key position $t$ would sit between $W_i^{UK}$ and $c_t^{KV}$; it cannot be folded into a fixed query-side matrix, which is why the RoPE key $k_t^R$ is kept separately. The value side is analogous: $\sum_t a_{t}W_i^{UV}c_t^{KV}=W_i^{UV}\sum_t a_tc_t^{KV}$, so $W_i^{UV}$ can be applied after attention and merged into the output projection.
 
 **Why MLA is not GQA with a smaller $H_{kv}$:** GQA retains full-width $K$ and $V$ for each of $H_{kv}$ groups ($2H_{kv}d_h$ elements per token per layer). MLA retains one joint latent plus one shared RoPE key, $(d_c+d_h^R)$ elements, and reconstructs per-head keys and values by learned up-projections, with every query head keeping its own reconstructed key/value. Configuration field names can mislead: the released DeepSeek-V2 config sets `num_key_value_heads: 128` alongside `kv_lora_rank: 512` and `qk_rope_head_dim: 64` (**O**, CLM-017).
 
@@ -440,7 +515,7 @@ Queries are also produced through a latent $c_t^Q\in\mathbb{R}^{d_c'}$, but the 
 - *Input*: $l=60$ layers, $n_h=128$, $d_h=128$, $d_c=512$ (`kv_lora_rank`), $d_h^R=64$ (`qk_rope_head_dim`).
 - *Step 1 — MLA retained elements*: $(512+64)=576$ per token per layer; $\times60=34{,}560$ per token.
 - *Step 2 — MHA reference with the same heads*: $2n_hd_hl=2\cdot128\cdot128\cdot60=1{,}966{,}080$ per token.
-- *Step 3 — GQA-equivalent group count*: $576/(2\cdot128)=2.25$ groups, matching the paper's Table 1 statement (**D**, CLM-018).
+- *Step 3 — GQA-equivalent group count*: solve $2H_{kv}d_h=576$ for $H_{kv}$ with $d_h=128$: $576/(2\cdot128)=2.25$ groups, matching the paper's Table 1 statement (**D**, CLM-018).
 - *Step 4 — the trap*: plugging `num_key_value_heads=128` into the GQA formula reproduces the MHA figure, a $1{,}966{,}080/34{,}560\approx56.9\times$ over-count of retained elements.
 - *Result*: retained state is set by $d_c+d_h^R$, not by the configured KV-head count.
 - *Interpretation / limits*: these are element counts from the paper's equations. Bytes per element, whether a runtime caches the latent before or after the paper's additional latent normalization, padding of 576 to alignment, and page layout belong to Module 03 and remain runtime-specific. The paper's reported 93.3% KV reduction and throughput gains are relative to its own DeepSeek 67B baseline and setup, not general multipliers (**O**, CLM-009).
@@ -456,7 +531,7 @@ Queries are also produced through a latent $c_t^Q\in\mathbb{R}^{d_c'}$, but the 
 **Worked Example (MoE, illustrative configuration, not a specific model):**
 - *Input*: $E=8$ experts, top-$k=2$, $d=4096$, $m=14336$, bias-free SwiGLU experts.
 - *Steps*: total $3\cdot8\cdot4096\cdot14336=1{,}409{,}286{,}144$; selected per token $3\cdot2\cdot4096\cdot14336=352{,}321{,}536$.
-- *Result*: a $4\times$ ratio of total to selected expert weights for this layer.
+- *Result*: a $4\times$ ratio of total to selected expert weights for this layer ($E/k=8/2$; the common factor $3dm=176{,}160{,}768$ cancels).
 - *Interpretation / limits*: every expert still has to be resident somewhere. Executed work depends on capacity padding and routing balance, and latency depends on communication and batching.
 
 **Knowledge Check:**
@@ -562,8 +637,8 @@ Examples of discriminating tests:
 
 **REFERENCE / BASELINE**
 
-- Vaswani et al. (2017), [*Attention Is All You Need*](https://proceedings.neurips.cc/paper/2017/hash/3f5ee243547dee91fbd053c1c4a845aa-Abstract.html) — scaled dot-product and multi-head attention (CLM-001).
-- Zhang and Sennrich (2019), [*Root Mean Square Layer Normalization*](https://proceedings.neurips.cc/paper/2019/hash/1e8a19426224ca89e83cef47f1e7f53b-Abstract.html) — RMSNorm mechanism (CLM-002).
+- Vaswani et al. (2017), [*Attention Is All You Need*](https://arxiv.org/abs/1706.03762) — scaled dot-product and multi-head attention (CLM-001).
+- Zhang and Sennrich (2019), [*Root Mean Square Layer Normalization*](https://arxiv.org/abs/1910.07467) — RMSNorm mechanism (CLM-002).
 - Shazeer (2020), [*GLU Variants Improve Transformer*](https://arxiv.org/abs/2002.05202) — SwiGLU family (CLM-004).
 - Su et al. (2021), [*RoFormer*](https://arxiv.org/abs/2104.09864) — rotary position embedding (CLM-003).
 - Holtzman et al. (ICLR 2020), [*The Curious Case of Neural Text Degeneration*](https://arxiv.org/abs/1904.09751) — left-to-right factorization (Section 2), nucleus, top-k, and temperature sampling definitions (Sections 3.1–3.3); read 2026-09-30 (CLM-013). Its quality findings are specific to its models and tasks.
@@ -738,6 +813,11 @@ A learner can exit Module 01 when they can:
 ### Module Wrap-Up (Final Mental Model Reconstruction)
 
 The final invariant: **model architecture is an executable tensor contract, and generation is that contract plus a recorded sampling contract—not a bag of component names and a temperature.**
+
+### Cost & Telemetry Hook
+
+- [Lesson 22.2](../22-ai-economics/README.md): carry the module's parameter, FLOP, and retained-state accounting into marginal cost per token; state the same exclusions.
+- [Lesson 23.1](../23-observability-reliability/README.md): emit model revision, attention variant, dtype, backend, and effective sampling processor list per request as pinned signal attributes.
 
 ## 12 Competency Targets
 

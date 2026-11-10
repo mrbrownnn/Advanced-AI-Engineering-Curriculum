@@ -89,7 +89,7 @@ claims:
     confidence: medium
     currentness_status: "REFERENCE / BASELINE"
     evidence: [{ source_type: paper, tier: 1, title: "Resolving Discrepancies in Compute-Optimal Scaling of Language Models", authors: "Tomer Porian, Mitchell Wortsman, Jenia Jitsev, Ludwig Schmidt, Yair Carmon", year: "2024", url: "https://arxiv.org/abs/2406.19146", section: "Abstract; Section 1; Sections 3.1-3.5 (HTML render, v4, first ~100k characters)", accessed_at: "2026-10-12" }]
-    limitations: ["The paper's Kaplan reference exponent (0.88) differs from Kaplan's 0.73; the basis of that figure was not checked (TODO_VERIFY in the knowledge model).", "Exponents are for OpenWebText2 and RefinedWeb at the paper's scales."]
+    limitations: ["The paper's Kaplan reference exponent 0.88 is the raw fit N=(1.6e9)C^0.88 from Kaplan et al. Figure 14 (left), listed beside the adjusted 0.73 in the paper's Table 1 (checked 2026-11-09 against arXiv 2406.19146v4 Section 3.1/Table 1 and 2001.08361v1 Figure 14).", "Exponents are for OpenWebText2 and RefinedWeb at the paper's scales."]
     applicability: "Multiple interacting confounds in scaling-law experiments."
     related_claims: [CLM-004, CLM-006]
     curriculum_usage: { lessons: ["25.1", "25.5"], labs: ["LAB-A"], assessments: ["Mastery-25"] }

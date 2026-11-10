@@ -105,11 +105,19 @@ For overlapping work, let each stage $s$ occupy interval $[a_s,b_s]$. Then
 $$T_{first}=t_{emit}-t_{arrive},\qquad \sum_s d_s \ge T_{first}\ \text{when intervals overlap}$$
 and the attributable contribution of a stage is its share of the critical path, measured from the timeline. *Assumptions*: one clock or a verified clock mapping; declared start and end boundaries for each stage (**D**, CLM-001).
 
+where:
+- $S$ is the set of declared stages; $d_s=b_s-a_s$ is the span (duration) of stage $s$, with start $a_s$ and end $b_s$.
+- $t_{arrive}$ is when the request's bytes arrive; $t_{emit}$ is when the first output leaves; $T_{first}$ is the first-output time.
+- The *critical path* is the chain of stages that the request was actually waiting on at each instant between $t_{arrive}$ and $t_{emit}$.
+
+*Why the inequality holds.* $T_{first}$ is the length of the union of the busy intervals (plus any idle gaps). When two intervals overlap, the shared part is counted once in $T_{first}$ but twice in $\sum_s d_s$, so the sum can only overstate. In plain terms: summing a dashboard's per-stage times measures total work done, not how long the user waited.
+
 **Worked Example (synthetic spans):**
 *Input.* One request with one image, measured on a single clock: media decode 18 ms, processor 42 ms, queue 30 ms, encoder 95 ms, projector 2 ms, prefill 140 ms, first-token sampling and emission 8 ms. All stages serialize.
 *Step 1.* $T_{first}=18+42+30+95+2+140+8=335$ ms.
 *Step 2.* A second request carries two images. Preprocessing runs on one CPU worker at 42 ms per image; the encoder runs at 95 ms per image and can start an image once its preprocessing is done. Image 1: preprocess $[0,42]$, encode $[42,137]$. Image 2: preprocess $[42,84]$, encode starts at $\max(137,84)=137$ and ends at $232$.
 *Result.* The media stages finish at 232 ms. Summing spans gives $2\times42+2\times95=274$ ms, which overstates the media path by 42 ms because preprocessing of image 2 is hidden under encoding of image 1.
+*Check.* $274-232=42$ ms, exactly image 2's preprocessing span $[42,84]$, which lies inside image 1's encode interval $[42,137]$. The critical path is preprocess 1 (42) $\to$ encode 1 (95) $\to$ encode 2 (95) $=232$ ms.
 *Interpretation and limits.* Adding a CPU worker would not shorten this path: image 2 already waits for the encoder, not for preprocessing. A faster encoder or a cache hit would. These values are synthetic; the method, not the numbers, transfers. Spans from different processes need a common clock before they are combined.
 
 **Knowledge Check:**
@@ -165,6 +173,20 @@ With patch size $p$, the pinned formulas are:
 
 Then, for a decoder-only fusion, logical decoder KV is $N\times$ bytes per position from Module 03 (**D**, CLM-007).
 
+where:
+- $N$: decoder-visible modality positions (placeholder tokens the decoder attends over).
+- $p$: patch side in pixels (14 here). $H_c,W_c$: height and width of the processed crop that reaches the encoder; $H_c/p$ and $W_c/p$ are patches per column and per row.
+- $e$: extra encoder tokens (`num_additional_image_tokens`, the CLS token here). $\mathbb{1}[\text{default}]$ is 1 when `vision_feature_select_strategy == "default"` (CLS dropped), else 0. With $e=1$ and the default strategy, $+e-1$ cancels: the decoder sees exactly the patch features.
+- $U,R,b$ (LLaVA-NeXT): unpadded tile features, newline features, base-image features. $b$ here is a count, not bytes; bytes per position are written $b_{pos}$ in Lessons 21.5–21.6.
+- $H',W'$ (Qwen2-VL): resized height and width, both multiples of $p\cdot m$. $m$: merge size (2), so $m^2=4$ patches become one position.
+- $Q$: number of learned queries (32).
+
+*Bytes per position (Module 03 formula), step by step* for the synthetic decoder below, with $L$ = layers (not a sequence length here), $H_{kv}$ = KV heads (not an image height):
+$$b_{pos}=\underbrace{2}_{K,V}\times\underbrace{32}_{L}\times\underbrace{8}_{H_{kv}}\times\underbrace{128}_{d_h}\times\underbrace{2\text{ B}}_{\text{FP16}}$$
+$2\times32=64$; $64\times8=512$; $512\times128=65{,}536$ elements; $\times2$ B $=131{,}072$ B $=131{,}072/1{,}024=128$ KiB. Then KV for $N$ positions is $N\times128$ KiB $=N/8$ MiB, e.g. $576/8=72.0$ MiB.
+
+*Qwen2-VL upper bound from `max_pixels`.* Each decoder position covers $(p\cdot m)^2=28^2=784$ pixels after resizing, so $N\le$ `max_pixels`$/784$: $1{,}003{,}520/784=1{,}280$ and $12{,}845{,}056/784=16{,}384$. The 1920×1080 image needs fewer than the cap in both cases (1,222 and 2,691 below).
+
 **Worked Example (pinned configurations; synthetic decoder):**
 *Input.* One 1920×1080 image (width × height). Checkpoint processor configurations were read from the Hugging Face Hub on 2026-09-30: `llava-hf/llava-1.5-7b-hf` (revision `b234b804b114d9e37bb655e11cbbb5f5e971b7a9`: crop 336, patch 14, `num_additional_image_tokens` 1, strategy `default`), `llava-hf/llava-v1.6-mistral-7b-hf` (revision `2424fdd47412fccc66d91719126b420e9fbd7065`: same, plus five grid pinpoints), and `Qwen/Qwen2-VL-7B-Instruct` (revision `eed13092ef92e448dd6875b2a00151bd3f7db0ac`: `max_pixels` 12,845,056). To compare KV, assume a *synthetic* decoder with 32 layers, 8 KV heads, $d_h=128$, FP16: $2\times32\times8\times128\times2=131{,}072$ B $=128$ KiB per position.
 
@@ -176,7 +198,16 @@ Then, for a decoder-only fusion, logical decoder KV is $N\times$ bytes per posit
 | Qwen2-VL, checkpoint `max_pixels` $=12{,}845{,}056$ | resize → 1092×1932; $78\times138=10{,}764$ patches; $/4$ | 2,691 | 336.375 MiB |
 | BLIP-2 (as if on the same synthetic decoder) | fixed queries | 32 | 4.0 MiB |
 
-*Interpretation and limits.* The same image spans an 84× range in decoder positions. Two rows use the same class with different `max_pixels`, so even a model name is insufficient: the processor configuration is part of the contract. LLaVA-1.5's crop discards the left and right of a wide image, a quality effect, not a cost effect. KV values are logical payloads only; block rounding and allocator overhead (Module 03) come on top. Encoder work follows a different count: LLaVA-NeXT encodes five 336×336 crops, Qwen2-VL encodes all patches before merging. A real BLIP-2 checkpoint uses its own language model, so its row only illustrates the fixed-count mechanism.
+*Order note.* The input is stated as width × height (1920×1080), but the Qwen2-VL rows write height × width (1080×1920 → 728×1316), matching `smart_resize(height, width)`. LLaVA-NeXT grid sizes such as 336×1008 below are also height × width, as `select_best_resolution` returns them.
+
+*Step-by-step derivations of the table rows* (Logical KV $=N\times128$ KiB $=N/8$ MiB):
+1. *LLaVA-1.5.* Shortest edge 1080 → 336, so the image becomes about 597×336; the center crop keeps 336×336. Patches: $336/14=24$ per side, $24\times24=576$; $+e-1=+1-1$; $N=576$; $576/8=72.0$ MiB.
+2. *LLaVA-NeXT.* Best grid 672×672 = $2\times2$ tiles of 336, so the tile feature map is $48\times48$ ($672/14=48$). The image is wider than the grid (16:9 versus 1:1), so after fitting its width into 48 columns its content is $1080\times48/1920=27$ rows tall; `_get_unpadded_features` removes $(48-27)//2=10$ padding rows top and bottom, leaving $48-20=28$ rows. $U=28\times48=1{,}344$; $R=28$ (one newline per row); base $b+e=576+1$; minus 1 for the default strategy: $1{,}344+28+577-1=1{,}948$; $1{,}948/8=243.5$ MiB.
+3. *Qwen2-VL, `max_pixels` 1,003,520.* Rounding each side to a multiple of 28 gives 1092×1932 = 2,109,744 pixels, above the bound, so the image is scaled down by $\beta=\sqrt{1080\cdot1920/1{,}003{,}520}\approx1.437$: $1080/\beta\approx751.3$ and $1920/\beta\approx1{,}335.7$, which round down to multiples of 28 as $728=26\times28$ and $1{,}316=47\times28$ (rounding down reproduces the table; confirm the exact rule in `smart_resize` during the trace). Patches $728/14=52$, $1{,}316/14=94$, $52\times94=4{,}888$; $/m^2=4{,}888/4=1{,}222$; $1{,}222/8=152.75$ MiB.
+4. *Qwen2-VL, `max_pixels` 12,845,056.* $1080/28\approx38.6\to39$, $1920/28\approx68.6\to69$, giving 1092×1932 = 2,109,744 pixels, inside the bound, so no rescale. Patches $78\times138=10{,}764$; $/4=2{,}691$; $2{,}691/8=336.375$ MiB.
+5. *BLIP-2.* $N=Q=32$ for any input size; $32/8=4.0$ MiB.
+
+*Interpretation and limits.* The same image spans an 84× range in decoder positions ($2{,}691/32\approx84.1$). Two rows use the same class with different `max_pixels`, so even a model name is insufficient: the processor configuration is part of the contract. LLaVA-1.5's crop discards the left and right of a wide image, a quality effect, not a cost effect. KV values are logical payloads only; block rounding and allocator overhead (Module 03) come on top. Encoder work follows a different count: LLaVA-NeXT encodes five 336×336 crops, Qwen2-VL encodes all patches before merging. A real BLIP-2 checkpoint uses its own language model, so its row only illustrates the fixed-count mechanism.
 
 **Knowledge Check:**
 1. Why does doubling the input width not change LLaVA-1.5's decoder-visible count, while it can change Qwen2-VL's?
@@ -187,7 +218,7 @@ Then, for a decoder-only fusion, logical decoder KV is $N\times$ bytes per posit
 At the pinned revision, call each processor's `_get_num_multimodal_tokens` (or count placeholders after `__call__`) for 336×336, 1000×1000, 400×1200, and 3840×2160 images. Compare with your hand calculation using the formulas above, and explain every difference. Then complete the source trace in Section 09.
 
 **Feedback Contract:**
-- *Expected Evidence*: Per-architecture counts from code and by hand, the processor configuration and revision used, logical KV with bytes per position stated, and trace citations by symbol. Reference values: LLaVA-NeXT 1000×1000 → 2,928; 400×1200 → 2,328 (best grid 336×1008); Qwen2-VL class default 400×1200 → 602. KC1: fixed crop versus pixel-bounded resize. KC2: Qwen2-VL (merge after encoding) and BLIP-2 (fixed output after a full encoder pass). KC3: processor and model disagree on feature count, for example a mismatched `vision_feature_select_strategy` or patch size.
+- *Expected Evidence*: Per-architecture counts from code and by hand, the processor configuration and revision used, logical KV with bytes per position stated, and trace citations by symbol. Reference values: LLaVA-NeXT 1000×1000 → 2,928; 400×1200 → 2,328 (best grid 336×1008); Qwen2-VL class default 400×1200 → 602. These reference sizes are height × width (height 400, width 1200); a 400-wide, 1200-tall portrait image instead selects grid 1008×336 and gives 2,376 for LLaVA-NeXT, while Qwen2-VL still gives 602 ($392\times1{,}204$ or $1{,}204\times392$ → $28\times86=2{,}408$ patches, $/4=602$). Check for 1000×1000: grid 672×672, no unpadding, $48\times48+48+577-1=2{,}928$. KC1: fixed crop versus pixel-bounded resize. KC2: Qwen2-VL (merge after encoding) and BLIP-2 (fixed output after a full encoder pass). KC3: processor and model disagree on feature count, for example a mismatched `vision_feature_select_strategy` or patch size.
 - *Common Failure*: Using $(H/p)(W/p)$ on the raw image for every model, or reading class defaults instead of the checkpoint's processor configuration.
 - *Diagnostic Hint*: What exact height and width reach the encoder, and what happens to features between the encoder and the decoder?
 - *Concept to Revisit*: KV bytes per token (Module 03, Lesson 3.1); satellite `vision-language-models/03-vlm-architectures` for model-family depth.
@@ -224,10 +255,18 @@ A mixed batch is padded per dimension, so one large item sets the shape for all.
 $$\eta_{pad}=\frac{\sum_{i=1}^{B}L_i}{B\cdot\max_i L_i}$$
 applied per padded dimension. For encoder budget $E$ and items with embed counts $n_1,n_2,\dots$ in placeholder order, the scheduled prefix is the longest prefix with $\sum n_j\le E$ (ignoring cache hits), and decoder tokens stop at the next item's offset.
 
+where:
+- $B$: number of items in the batch along this dimension (requests, images, or clips); $L_i$: useful length of item $i$ in that dimension (positions, crops, or frames). $L_i$ is a length, not the layer count $L$ of the KV formula.
+- $B\cdot\max_i L_i$: slots allocated when every item is padded to the longest one. $\eta_{pad}=1$ means no padding; $1-\eta_{pad}$ is the padded share.
+- $E$: encoder budget per scheduling step, in embeds; $n_j$: embeds produced by item $j$.
+
+*Plain reading.* Walk the items in prompt order and keep adding them while the running total stays within $E$. The first item that does not fit is deferred, and the decoder tokens for this step stop just before its placeholders, because the decoder cannot process positions whose embeddings do not exist yet.
+
 **Worked Example (synthetic batch; pinned token counts from Lesson 21.2):**
 1. *Decoder-visible padding.* Three images with 576, 1,948, and 1,222 positions in one dense batch: $\eta=(576+1{,}948+1{,}222)/(3\times1{,}948)=3{,}746/5{,}844=0.641$. About 36% of allocated positions are padding.
-2. *Tile padding.* LLaVA-NeXT images of 1920×1080, 400×1200, and 336×336 produce 5, 4, and 3 crops (base included). `_pad_for_batching` pads to 5: $\eta=12/15=0.80$.
+2. *Tile padding.* LLaVA-NeXT images of 1920×1080, 400×1200, and 336×336 produce 5, 4, and 3 crops (base included). `_pad_for_batching` pads to 5: $\eta=12/15=0.80$. Here $B=3$, $L_i\in\{5,4,3\}$, $\sum L_i=12$, $B\max L_i=3\times5=15$.
 3. *Audio padding.* A 5 s clip under the 30 s Whisper contract: the waveform becomes 480,000 samples and 3,000 mel frames; the encoder runs on 1,500 positions, of which about $5/30\times1{,}500=250$ come from real audio. $\eta\approx1/6$.
+   Step by step: samples $=30\text{ s}\times16{,}000\text{ Hz}=480{,}000$; mel frames $=30\text{ s}/10\text{ ms hop}=3{,}000$; $3{,}000/1{,}500=2$ mel frames per encoder position, i.e. 20 ms of audio per position. Real audio: $5\text{ s}/10\text{ ms}=500$ frames $\to500/2=250$ positions; $\eta=250/1{,}500=1/6\approx0.17$. "About" because window edges can shift the real-frame count by one.
 4. *Encoder budget.* Synthetic engine with $E=2{,}048$. One request has two images with 1,948 and 1,222 embeds, neither cached. Image 1 fits ($2{,}048-1{,}948=100$ left), image 2 does not, so this step's decoder tokens stop at image 2's placeholder offset; image 2 is encoded in a later step.
 5. *Cache identity.* A team switches `max_pixels` from 1,003,520 to 12,845,056 but keys its encoder-output cache on image bytes only. A hit returns 1,222 embeds where the new contract expects 2,691: in the pinned code path this fails the placeholder check; in a system without such a check it silently returns the old representation.
 
@@ -273,10 +312,17 @@ For a stream with clock rate $f$ and sender-report pair $(rtp_{sr}, t_{sr})$:
 $$t_{ref}=t_{sr}+\frac{rtp-rtp_{sr}}{f}$$
 using modular 32-bit arithmetic when timestamps wrap. Skew between two items is $t_{ref,A}-t_{ref,B}$. A window of length $W$ cannot be complete before its last sample's reference time plus that stream's processing lag.
 
+where:
+- $rtp$: the item's RTP timestamp, in ticks of its own media clock; $f$: that clock's rate in ticks per second (48,000 for this audio, 90,000 for video).
+- $(rtp_{sr},t_{sr})$: from the latest RTCP sender report, a media timestamp and the reference (wall-clock) time it corresponds to.
+- $t_{ref}$: the item's sampling instant on the shared reference clock, in seconds. $W$ is a window duration in seconds, not an image width.
+
+*Step by step.* $(rtp-rtp_{sr})$ counts ticks since the sender report; dividing by $f$ converts ticks to seconds; adding $t_{sr}$ places that offset on the reference clock. With wrap, compute the tick difference as $\Delta=\big((rtp-rtp_{sr}+2^{31})\bmod 2^{32}\big)-2^{31}$, so a small step across the wrap stays small instead of becoming a jump of about $-2^{32}$ ticks. Wrap period $=2^{32}/f$: about 47,722 s (13.3 h) at 90 kHz and about 89,478 s (24.9 h) at 48 kHz.
+
 **Worked Example (synthetic timestamps):**
 *Input.* Audio clock 48 kHz with sender report (RTP 1,000,000 ↔ 100.000 s). Video clock 90 kHz with sender report (RTP 5,000,000 ↔ 100.020 s). An audio packet carries RTP 1,048,000 and arrives at 101.050 s; a video frame carries RTP 5,088,200 and arrives at 101.180 s.
-*Step 1.* Audio: $100.000+48{,}000/48{,}000=101.000$ s.
-*Step 2.* Video: $100.020+88{,}200/90{,}000=100.020+0.980=101.000$ s.
+*Step 1.* Audio: $100.000+48{,}000/48{,}000=101.000$ s (tick difference $1{,}048{,}000-1{,}000{,}000=48{,}000$, i.e. 1 s at 48 kHz).
+*Step 2.* Video: $100.020+88{,}200/90{,}000=100.020+0.980=101.000$ s (tick difference $5{,}088{,}200-5{,}000{,}000=88{,}200$).
 *Result.* Media skew is 0 ms. The 130 ms arrival difference is transport and buffering, not misalignment.
 *Step 3.* Under a 2 s interleaving window like Qwen2.5-Omni's, the window $[100,102)$ s cannot close before the video frame at 101.180 s arrival plus later frames up to 102 s, so first output for that window waits on the slowest stream.
 *Interpretation and limits.* Comparing raw RTP values (1,048,000 versus 5,088,200) or arrival times would have suggested a large lag. The sender-report mapping assumes both senders' reference clocks are synchronized; if they are not, the mapping carries their offset.
@@ -333,6 +379,11 @@ The diagnosis ranks hypotheses by which predicted signals covary with the sympto
 **Quantitative Model / Derivation:**
 Logical decoder KV demand for a request: $KV=\sum_{items}N_{item}\cdot b_{pos}+N_{text}\cdot b_{pos}$ (**D**, CLM-007). The engine's physical demand adds rounding and metadata per Module 03. The framework reports $M_{reserved}-M_{allocated}$ as cached memory; fragmentation is supported only if snapshots show free memory split into pieces smaller than the failing request.
 
+where:
+- $N_{item}$: decoder-visible positions of one modality item (Lesson 21.2); $N_{text}$: text token positions in the same request.
+- $b_{pos}$: logical KV bytes per decoder position (128 KiB for the synthetic decoder). Factoring out gives $KV=(\sum N_{item}+N_{text})\,b_{pos}$.
+- $M_{allocated}$: bytes held by live tensors (`memory_allocated()`); $M_{reserved}$: bytes the caching allocator holds from the device (`memory_reserved()`). The gap is free-but-cached memory; its total size says nothing about whether it is in pieces large enough for the next request.
+
 **Worked Example (synthetic telemetry; pinned token counts):**
 *Input.* A document-QA service with the synthetic 128 KiB/position decoder sends 8 page images per request. After a configuration change, OOMs and a TTFT rise appear. Observations:
 - Processor config diff: Qwen2-VL `max_pixels` moved from 1,003,520 to 12,845,056.
@@ -343,6 +394,7 @@ Logical decoder KV demand for a request: $KV=\sum_{items}N_{item}\cdot b_{pos}+N
 - Encoder spans rose roughly in proportion to patches.
 
 *Step 1: capacity.* Logical image KV per request: $8\times1{,}222\times128$ KiB $\approx1.19$ GiB before; $8\times2{,}691\times128$ KiB $\approx2.63$ GiB after, a 2.2× increase. Refusals at peak fit this.
+Arithmetic: $8\times1{,}222=9{,}776$ positions $\times128$ KiB $=1{,}251{,}328$ KiB $=1{,}222$ MiB $\approx1.19$ GiB; $8\times2{,}691=21{,}528$ positions $\to2{,}691$ MiB $\approx2.63$ GiB; ratio $2{,}691/1{,}222\approx2.20$. (With 8 images and 128 KiB per position, KV in MiB equals the per-image position count.) Text positions are excluded here; they add $N_{text}\cdot b_{pos}$ to both.
 *Step 2: fragmentation.* Free memory is not split below the failing size, so allocator fragmentation is not supported by this evidence.
 *Step 3: host.* Unchanged host spans and idle gaps rule out preprocessing for this regression.
 *Step 4: encoder work.* Encoder spans grew with patches, so encoder work explains part of the TTFT rise but not the OOM.
@@ -387,6 +439,13 @@ Reducing positions shortens encoder and prefill work and logical KV, but the eff
 **Quantitative Model / Trade-off Comparison:**
 For each setting $k$: decoder positions $N_k$, logical KV $N_k b_{pos}$, measured stage latencies, and paired quality deltas $\Delta_{k,s}$ per slice $s$. A setting is admissible if the lower confidence bound of $\Delta_{k,s}\ge -m_s$ for all required $s$. Among admissible settings, choose the cheapest by the declared cost metric.
 
+where:
+- $k$: one control setting (here a `max_pixels` value); $s$: one required evaluation slice.
+- $\Delta_{k,s}$: paired quality difference on slice $s$, setting $k$ minus baseline, in points (negative means worse).
+- $m_s$: the non-inferiority margin for slice $s$, declared before testing. $m_s$ is a margin, unrelated to the merge size $m$ of Lesson 21.2.
+
+*Plain reading.* A setting passes only if, on every required slice, even the pessimistic end of its confidence interval loses no more than the declared margin. A single failing slice rejects the setting, however good the aggregate looks.
+
 **Worked Example (pinned token counts; synthetic quality):**
 *Input.* Qwen2-VL on 1920×1080 pages. Settings by `max_pixels`: 200,704 → 252 positions; 401,408 → 480; 1,003,520 → 1,222; 12,845,056 → 2,691 (baseline). Margins declared before testing: 2 points on each of three slices. Synthetic paired results (lower 95% bound of delta versus baseline, points):
 
@@ -397,6 +456,7 @@ For each setting $k$: decoder positions $N_k$, logical KV $N_k b_{pos}$, measure
 | 1,003,520 | 1,222 | 152.75 MiB | −0.4 | −1.6 | −0.9 | yes |
 | 12,845,056 | 2,691 | 336.375 MiB | 0 | 0 | 0 | baseline |
 
+*Admissibility check* ($-m_s=-2$ on every slice): 200,704 fails OCR ($-14.0<-2$) and charts ($-6.2<-2$); 401,408 fails OCR ($-5.5$) and charts ($-2.4$); 1,003,520 passes all three ($-0.4,-1.6,-0.9\ge-2$). Logical KV column $=N\times128$ KiB $=N/8$ MiB, e.g. $252/8=31.5$, $480/8=60.0$.
 *Result.* The cheapest admissible setting is 1,003,520 pixels: 1,222 positions, a 54.6% reduction in logical KV from the baseline ($1-1{,}222/2{,}691$).
 *Interpretation and limits.* The general-QA column alone would have admitted the 252-position setting. The decision holds only for these slices, images, and margins. Passing a bounded suite does not prove no other task degrades.
 
@@ -441,7 +501,7 @@ Select representation budgets inside a measured, slice-level quality–latency�
 **FRONTIER**
 - [ModServe](https://arxiv.org/abs/2502.00937) (2025, v3; §§2–3 read) — stage-aware disaggregation (CLM-016). Placement detail is Module 20.
 - [Qwen2.5-Omni Technical Report](https://arxiv.org/abs/2503.20215) (2025; §§2.2, 2.4 read) — time-aligned positions and block-wise streaming encoders (CLM-009).
-- [TCM-Serve](https://arxiv.org/abs/2603.26498) (Papaioannou and Doudali, 2026; abstract only) — modality-aware scheduling (CLM-020).
+- [TCM-Serve](https://arxiv.org/abs/2603.26498v2) (Papaioannou and Doudali, 2026, v2; v3 retitled *Rocks, Pebbles and Sand* (RPS-Serve); abstract only) — modality-aware scheduling (CLM-020).
 - [VLCache](https://arxiv.org/abs/2512.12977) (Qin et al., 2025; abstract only) — approximate encoder/KV reuse (CLM-021).
 - [Why and When Visual Token Pruning Fails?](https://arxiv.org/abs/2604.12358) (Kim et al., 2026; abstract only) — information shift during decoding (CLM-019).
 - [FastVLM](https://arxiv.org/abs/2412.13303) (2024, v2; introduction read) — hybrid encoder reducing tokens and encoding latency; discovery only, no claim.
@@ -577,6 +637,7 @@ Trace, at the pinned revisions:
 - 1920×1080 photo at 1,003,520 → 1,222 positions, 152.75 MiB; at 401,408 → 480, 60.0 MiB; at 12,845,056 → 2,691, 336.375 MiB.
 - 6 photos at 1,003,520: 7,332 positions; prefill $\approx7{,}332\times0.11=806.5$ ms (fixture rate, text positions excluded).
 - One CPU worker, serialized pipeline per photo: processor 35 ms and encoder 70 ms per photo; with overlap the media path ends at $35+6\times70=455$ ms, versus $6\times(35+70)=630$ ms if summed. A second worker does not shorten it: encoding is the bottleneck.
+  (Why: photo $i$ finishes preprocessing at $35i$ ms, but the encoder frees up only every 70 ms, so after the first 35 ms the encoder is never idle: $35+6\times70$. Positions: $6\times1{,}222=7{,}332$.)
 - Voice note: always 1,500 encoder positions under the 30 s contract; notes longer than 30 s need chunking.
 
 ### Rubric Dimensions
@@ -638,6 +699,12 @@ A learner successfully completing Module 21 must be able to:
 - **The Path**: media bytes → modality contract → encoder → bridge → decoder-visible length → KV and prefill → batching and caches → stream alignment → output. Each arrow has its own counter and its own failure modes.
 - When a multimodal system regresses, write the stage ledger and token counts first, list competing hypotheses, and run the experiment that separates them. "Fragmentation" is one hypothesis, not a default.
 - Next: Module 22 prices this work; Module 23 turns the ledger into telemetry; the satellite tracks go deeper on each model family.
+
+### Cost & Telemetry Hook
+- [Lesson 22.1](../22-ai-economics/README.md): price the stage ledger per offered multimodal task; failed preprocessing and timed-out encodes stay in the denominator.
+- [Lesson 22.4](../22-ai-economics/README.md): value encoder and processor caches from measured hit rate on content-hash keys, net of storage and invalidation cost.
+- [Lesson 23.1](../23-observability-reliability/README.md): emit one span per stage (preprocess, encode, bridge, prefill, decode) with decoder-visible token counts as attributes, not media size alone.
+- [Lesson 23.5](../23-observability-reliability/README.md): monitor representation-budget changes with a calibrated proxy per slice; delayed labels gate any compression rollout.
 
 ## 12 Competency Targets
 

@@ -141,7 +141,7 @@ claims:
     concepts: [contamination, dynamic_benchmark, objective_grader]
     confidence: high
     currentness_status: "FRONTIER / WORKLOAD-DEPENDENT"
-    evidence: [{ source_type: paper, tier: 1, title: "LiveBench: A Challenging, Contamination-Limited LLM Benchmark", authors: "Colin White et al.", year: "2025", url: "https://proceedings.iclr.cc/paper_files/paper/2025/hash/e4a46394ba5378b3f9a186a5b4c650d1-Abstract-Conference.html", section: "Abstract and benchmark design", accessed_at: "2026-09" }]
+    evidence: [{ source_type: paper, tier: 1, title: "LiveBench: A Challenging, Contamination-Limited LLM Benchmark", authors: "Colin White et al.", year: "2025", url: "https://arxiv.org/abs/2406.19314", section: "Abstract (v2, 2025-04-18; comment: ICLR 2025 Spotlight)", accessed_at: "2026-11-09" }]
     limitations: ["Freshness cannot exclude private leakage, task adaptation, or mismatch with a product population; the title deliberately says contamination-limited, not contamination-free."]
     applicability: "Benchmark refresh and contamination-risk design."
     curriculum_usage: { lessons: ["15.2"], labs: ["LAB-A"], assessments: ["Mastery-15"] }

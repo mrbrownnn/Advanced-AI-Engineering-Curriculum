@@ -127,6 +127,16 @@ $$
 s_{t+1}=F(s_t,a_t,o_{t+1}).
 $$
 
+where:
+- $\tau$: the trajectory, the full record of one episode;
+- $s_t$: controller state after step $t$ ($s_0$ is the initial state);
+- $a_t$: the action the controller dispatched from state $s_t$;
+- $o_{t+1}$: the observation returned by that action;
+- $T$: the number of steps the episode actually took;
+- $F$: the controller's deterministic transition function.
+
+Read the formula left to right: from $s_0$ the controller dispatches $a_0$, receives $o_1$, and computes $s_1=F(s_0,a_0,o_1)$; then repeats. A 2-step read-only lookup is $\tau=(s_0,a_0,o_1,s_1,a_1,o_2,s_2)$ with $T=2$. Because $F$ is deterministic, replaying the recorded $(a_t,o_{t+1})$ pairs from $s_0$ reproduces every $s_t$; that is what "replayable" means here.
+
 This is exact bookkeeping for a declared state schema. It is not automatically a Markov model: if `s_t` omits relevant history, permissions, hidden environment state, or pending effects, it is not sufficient to predict the next transition.
 
 **Mechanism Explanation:**
@@ -181,6 +191,8 @@ For validation predicates $V_{schema}$, $V_{policy}$, and $V_{pre}$, dispatch is
 $$D=V_{schema}\land V_{policy}\land V_{pre}.$$
 This is an exact controller rule for the declared contract; it says nothing about whether the eventual external effect is correct.
 
+where $V_{schema}$ is true when the arguments match the typed schema, $V_{policy}$ when this caller is authorized for this action now, $V_{pre}$ when the tool's preconditions hold, and $\land$ is logical AND. One false predicate is enough to block dispatch. In the worked example below, the first attempt has $V_{schema}=\text{true}$, $V_{policy}=\text{false}$, so $D=\text{false}$. (Here $D$ is a yes/no dispatch decision; in Lesson 12.3, $D$ denotes the root deadline, a time.)
+
 **Worked Example:**
 A proposal requests `transfer(amount=100, account=B)`. The schema passes, but the caller lacks account scope, so policy validation rejects before dispatch. A second authorized attempt times out after dispatch; the envelope records `effect=unknown` and requires a postcondition query before retry.
 
@@ -223,6 +235,8 @@ $$
 B=(B_{steps},B_{model},B_{tool},B_{tokens},B_{time},B_{cost},B_{repeat},B_{errors}).
 $$
 
+Each entry is the limit for one resource: steps, model calls, tool calls, tokens, wall-clock time, cost, repeated actions, and errors. Each is enforced on its own; staying under one limit says nothing about the others.
+
 Checking "consumed < limit" before each step is not enough. Suppose 0.24 of a 0.25 cost budget is spent. The check passes, the next model call costs 0.07, and the episode ends at 0.31. A check on what was *consumed* cannot stop an action whose own cost crosses the limit. The controller therefore keeps a ledger with three numbers per resource $r$ (**D**, CLM-015):
 
 - $B_r$: the limit;
@@ -237,11 +251,25 @@ $$
 
 **Admission (before dispatch).** For a proposed action $a$, compute its reservation vector $q(a)$, the worst-case charge under caps the controller enforces. Admit only if $C_r+R_r+q_r(a)\le B_r$ for every $r$, and in that case add $q(a)$ to $R$. The comparison and the addition must be one atomic step. Otherwise reject before dispatch with the reason and the failing resource; the controller may then choose a cheaper action, compact the input, or stop.
 
+Apply this to the opening case, assuming the next call's worst case equals its actual 0.07: $C+R+q=0.24+0+0.07=0.31>0.25$, so the call is rejected *before* dispatch and spend stays at 0.24. The consumed-only check ($0.24<0.25$) would have admitted it.
+
 **Reconciliation (after the action).** When the actual charge $u(a)$ is known, set $C\leftarrow C+u(a)$ and $R\leftarrow R-q(a)$. The difference $q(a)-u(a)$ returns to the available budget; that is the refund. If the action is cancelled or times out and the charge is not yet known, the reservation stays held. It is released only against a usage record, or charged in full if none arrives.
+
+Step by step for row 1 of Example B below (cost only), starting from $C=0$, $R=0$, $B=0.25$:
+1. Reserve: $q=12{,}000\times3\times10^{-6}+2{,}000\times15\times10^{-6}=0.036+0.030=0.066$.
+2. Admit: $0+0+0.066\le0.25$, so $R\leftarrow0.066$.
+3. Actual: 700 output tokens, $u=0.036+700\times15\times10^{-6}=0.036+0.0105=0.0465$.
+4. Reconcile: $C\leftarrow0+0.0465=0.0465$, $R\leftarrow0.066-0.066=0$; refund $q-u=0.0195$.
+
+Since $u\le q$ always holds for a correct worst-case reservation, $C$ grows by less than $R$ shrinks, so reconciliation can never break the invariant.
 
 **Remaining deadline.** Time cannot be reserved the way cost can; it passes whether or not the action finishes. The root episode has one absolute deadline $D$. Every child call receives a timeout of at most $D-t_{now}-t_{reserve}$, where $t_{reserve}$ is the time kept back for postcondition verification and the final response. A child never receives a fresh timeout of its own.
 
+where $t_{now}$ is the current time on the same clock as $D$. Example: with $D=10$ s, $t_{now}=7$ s, and $t_{reserve}=0.5$ s, the child may wait at most $10-7-0.5=2.5$ s, even if its SDK default is 5 s; the effective timeout is $\min(\text{SDK timeout},\ D-t_{now}-t_{reserve})$. Example A below walks through exactly this case.
+
 **Nested retries** (**D**, CLM-016). If the controller allows $k_c$ attempts of a logical call and the SDK or client underneath retries each of them up to $k_s$ more times, the worst case is $k_c\,(1+k_s)$ physical attempts. The reservation for one logical call must cover $(1+k_s)$ physical attempts, or inner retries must be disabled. Counting only controller-level attempts understates the worst case by the factor $(1+k_s)$.
+
+Why the product: each controller attempt is one original physical attempt plus up to $k_s$ inner retries, so $1+k_s$ physical attempts; the controller repeats that up to $k_c$ times. With $k_c=3$ and $k_s=2$: $3\times(1+2)=9$ physical attempts, while a controller that counts only its own attempts records 3, an undercount by the factor $1+k_s=3$.
 
 **Which limits are hard and which are estimates:**
 
@@ -274,7 +302,7 @@ Classify a failed call before choosing a response, because retry and recovery di
 ToolMaze's 2026 benchmark crosses explicit/implicit with transient/permanent perturbations and reports that anomaly recovery remains distinct from happy-path execution in its setup. Treat it as a frontier failure-injection design, not a universal production estimate.
 
 **Worked Example A — one root deadline** (exercise assumptions).
-Assume a root deadline of 10 s, a maximum of three tool attempts, and observed attempt durations of 2 s, 3 s, and 4 s with 1 s total backoff. The sequential path consumes the full 10 s; a fourth attempt is illegal even if its local SDK timeout would permit it. If attempt two has unknown effect, verification precedes attempt three.
+Assume a root deadline of 10 s, a maximum of three tool attempts, and observed attempt durations of 2 s, 3 s, and 4 s with 1 s total backoff. The sequential path consumes the full 10 s ($2+3+4+1=10$); a fourth attempt is illegal even if its local SDK timeout would permit it. If attempt two has unknown effect, verification precedes attempt three.
 
 Now apply the remaining-deadline rule to the unknown-effect case, with 0.5 s backoff before each retry, a 1 s postcondition query, a 5 s SDK default timeout, and $t_{reserve}=0.5$ s:
 
@@ -287,6 +315,8 @@ Now apply the remaining-deadline rule to the unknown-effect case, with 0.5 s bac
 | 6.5–7.0 | backoff | 3.0 |
 | 7.0 | attempt 3 dispatched with timeout $\min(5,\ 3.0-0.5)=2.5$ s | — |
 
+Each "Remaining deadline" value is $10$ minus the time at the end of that row (for example $10-5.5=4.5$). Attempt 3 starts at 7.0 s with 3.0 s left; keeping $t_{reserve}=0.5$ s back gives $2.5$ s, which is smaller than the SDK's 5 s, so 2.5 s is used. It is cut at $7.0+2.5=9.5$ s, leaving $10-9.5=0.5$ s.
+
 Result: attempt 3 gets 2.5 s, not the SDK's 5 s. An attempt that needs 4 s is cut at 9.5 s. If it is a write, the state is again `EFFECT_UNKNOWN`, and only 0.5 s remains, which is less than the 1 s query. The episode ends as *escalated with unknown effect*. It does not end as success, and it does not retry. Interpretation: verification consumed time that the original 2 + 3 + 4 + 1 schedule did not budget for, so the same three attempts no longer fit. The deadline, not the attempt count, was the binding limit.
 
 **Worked Example B — reservation ledger with fan-out, rejection, and retries** (synthetic prices and counts, registry CLM-017; not any provider's price list).
@@ -296,6 +326,8 @@ Inputs:
 - Limits: 6 model calls, 8 physical tool attempts, 0.25 USD.
 - Prices: input 3 USD and output 15 USD per million tokens. The search tool costs 0.01 USD per physical attempt and its SDK retries up to 2 times, so one logical search can make 3 attempts. Write tools have inner retries disabled.
 - Model-call reservation: exact input tokens × input price + maximum output tokens × output price.
+
+Per-token prices are $3\times10^{-6}$ and $15\times10^{-6}$ USD. So 12,000 input tokens cost $12{,}000\times3\times10^{-6}=0.036$, and a 2,000-token output cap reserves $2{,}000\times15\times10^{-6}=0.030$. The "Actual $u$" column uses the same formula with the real output count. In the Check column, each sum is $C+R+q$ for the resource named (cost unless stated). For example, row 3a: $C=0.0765$, $R=0$, $q=0.210$, sum $0.2865>0.25$.
 
 | # | Action | Reservation $q$ | Check $C+R+q\le B$ | Decision | Actual $u$ | After: $C$ (calls / attempts / USD), $R$ |
 |---|---|---|---|---|---|---|
@@ -401,6 +433,8 @@ If a timeout occurs after dispatch, the effect may be unknown. Do not equate an 
 **Quantitative Model / Derivation:**
 Let $A(c,o,v)$ be the controller policy for caller $c$, object $o$, and proposed value $v$, and let $P(e)$ be an independent postcondition for effect $e$. A success claim is permitted only when dispatch was authorized and $P(e)$ is observed; model confidence is not an input to either predicate.
 
+In symbols: $\text{claim success}\iff A(c,o,v)\land P(e)$, where both are true/false values computed outside the model. Lost response on an authorized deployment: $A=\text{true}$, $P$ not yet observed, so no success claim; after a versioned read-back matches the approved artifact, $P=\text{true}$ and the claim is allowed.
+
 **Worked Example:**
 A deployment proposal passes schema validation but exceeds the caller's environment scope. The controller denies it without sending credentials. For an authorized deployment whose response is lost, a versioned read-back must match the approved artifact before the episode can claim success.
 
@@ -452,6 +486,8 @@ Join controller, model, validation, tool, effect, queue, and client spans with s
 
 **Worked Example:**
 In a 60 s observation window, assume 20 offered episodes, 12 verified policy-compliant successes within the SLO, three failures, two abstentions, one rejection, and two unfinished episodes. Declared episode goodput is $12/60=0.2$ successful episodes/s; it is not $12/15$ and unfinished work remains visible.
+
+Check the accounting: $12+3+2+1+2=20$, so every offered episode lands in exactly one class. Goodput divides verified successes by *time* (60 s), giving a rate. Dividing by a subset of episodes instead, such as the 15 that ended in success or failure ($12+3$), gives a ratio ($0.8$) with different units that silently drops abstentions, rejections, and unfinished work. Over all 20 offered episodes the verified success fraction is $12/20=0.6$.
 
 **Knowledge Check:**
 1. Why can final-answer accuracy hide duplicate effects?
@@ -643,8 +679,8 @@ The trace must record, for each finding: repository, exact commit, file, symbol,
 
 Reviewers use these to check arithmetic and decisions. Timelines differ between submissions; the decisions below do not.
 
-- **Reservation arithmetic:** the worst-case model call reserves $24{,}000\times3\times10^{-6}+1{,}500\times15\times10^{-6}=0.072+0.0225=0.0945$ USD. Four such calls reserve 0.378 USD; a fifth would bring the total to 0.4725 and is rejected. The 10-call limit is therefore reachable only with smaller exact inputs, and the ledger must use the exact input count per call. One logical `search_logs` reserves 3 physical attempts and 0.015 USD. Four parallel searches reserve 12 of the 16 attempts and 0.06 USD.
-- **Deadline:** a child call dispatched at time $t$ gets a timeout of at most $\min(\text{tool timeout},\ 120-t-5)$ s.
+- **Reservation arithmetic:** the worst-case model call reserves $24{,}000\times3\times10^{-6}+1{,}500\times15\times10^{-6}=0.072+0.0225=0.0945$ USD. Four such calls reserve 0.378 USD; a fifth would bring the total to 0.4725 and is rejected ($0.378+0.0945=0.4725>0.40$). The 10-call limit is therefore reachable only with smaller exact inputs, and the ledger must use the exact input count per call. One logical `search_logs` reserves 3 physical attempts and 0.015 USD. Four parallel searches reserve 12 of the 16 attempts and 0.06 USD. (One search: $1+2=3$ attempts, $3\times0.005=0.015$ USD; four searches: $4\times3=12$ attempts, $4\times0.015=0.06$ USD.)
+- **Deadline:** a child call dispatched at time $t$ gets a timeout of at most $\min(\text{tool timeout},\ 120-t-5)$ s. (This is Lesson 12.3's $D-t_{now}-t_{reserve}$ with $D=120$, $t_{reserve}=5$. Example: `search_logs` dispatched at $t=110$ s gets $\min(8,\ 5)=5$ s.)
 - **F1:** a 503 before dispatch means the effect is known absent; the inner retry is allowed. Two attempts are consumed and one is refunded.
 - **F2:** a truncated result is not complete evidence. Accepted responses are a narrower query or recording the evidence as partial. Treating it as complete is an observation-contract failure.
 - **F3 and F4:** after the timeout the state is `EFFECT_UNKNOWN` and the next action is a *primary* read. Seed A: v13 with `p-7c1`, so the apply is verified and not repeated. Seed B: v12, so the effect is known absent, and one retry with the same key and base v12 is legal while $t<90$ s. A submission that verifies through the replica sees v12 in seed A and retries; the receiver's stored outcome prevents a duplicate effect, but the trace must show the wasted attempt, and the choice of read is marked as a contract error.
@@ -689,6 +725,12 @@ A learner successfully completing Module 12 must be able to:
 - **The Core Invariant**: An agent loop is a fallible, resource-bounded control system around a stochastic proposer.
 - **The Control Path**: `state → proposal → validation/authorization → execution → observation/effect verification → progress decision → terminal state or next bounded step`.
 - Reliability comes from typed transitions, external authority, observable effects, classified recovery, explicit stops, and trajectory-level falsification—not from letting the model continue until its prose sounds complete.
+
+### Cost & Telemetry Hook
+
+- [Lesson 22.1](../22-ai-economics/README.md): cost per verified task success — failed and step-limit-terminated trajectories stay in the cost numerator.
+- [Lesson 22.3](../22-ai-economics/README.md): the pre-dispatch reservation ledger is the runtime cost record; reconcile it against billed usage.
+- [Lesson 23.1](../23-observability-reliability/README.md) and [Lesson 23.3](../23-observability-reliability/README.md): emit one span per step (proposal, validation, tool call, observation) plus the terminal reason; SLI is the offered task outcome, not loop completion.
 
 ## 12 Competency Targets
 

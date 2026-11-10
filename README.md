@@ -95,7 +95,7 @@ Intensive AI Engineer/
 ├── ROADMAP.md                      ← 26-week schedule with satellite integration
 ├── COMPETENCY.md                   ← SFIA, Bloom, SOLO, Dreyfus framework
 │
-├── advanced-ai-engineering/        ← CORE: 25-module deep track
+├── advanced-ai-engineering/        ← CORE: 29 modules (00–24 core, 25–28 expert)
 │   ├── DEPTH-CONTRACT.md           ← Defines the standard for mastery vs topic coverage
 │   └── ENGINEERING-LEARNING-PROTOCOL.md ← The rigorous loops used to execute modules
 │
@@ -119,4 +119,44 @@ Intensive AI Engineer/
 
 ## Status
 
-🏗️ **Curriculum Depth Upgrade Completed.** The repository architecture and mastery contracts are in place. Content is being progressively developed over 6 months.
+29 modules exist: 25 core (00–24) and 4 expert (25–28). Modules 29–36 are scope contracts in [EXPERT-TRACK.md](advanced-ai-engineering/EXPERT-TRACK.md), not content. AUTHORED means the README, research registry, and knowledge model pass `advanced-ai-engineering/tools/validate_curriculum.py`; it does not certify technical correctness. Expert-module lab packages are deferred.
+
+| Module | Track | Status |
+|---|---|---|
+| 00 — Scientific AI Engineering | Core | AUTHORED |
+| 01 — Foundation Model Internals | Core | AUTHORED |
+| 02 — Inference & GPU Fundamentals | Core | AUTHORED |
+| 03 — KV Cache Engineering | Core | AUTHORED |
+| 04 — Serving, Scheduling, Capacity | Core | AUTHORED |
+| 05 — Inference Optimization | Core | AUTHORED |
+| 06 — Reasoning & Test-Time Compute | Core | AUTHORED |
+| 07 — Model Behavior & Uncertainty | Core | AUTHORED |
+| 08 — AI Data Engineering | Core | AUTHORED |
+| 09 — Retrieval Engineering | Core | AUTHORED |
+| 10 — Advanced RAG | Core | AUTHORED |
+| 11 — Context & Memory Engineering | Core | AUTHORED |
+| 12 — Agent Loop Engineering | Core | AUTHORED |
+| 13 — Harness Engineering | Core | AUTHORED |
+| 14 — Durable Agent Runtime | Core | AUTHORED |
+| 15 — Evaluation Engineering | Core | AUTHORED |
+| 16 — Falsification Engineering | Core | AUTHORED |
+| 17 — Harness Evolution | Core | AUTHORED |
+| 18 — AI Security | Core | AUTHORED |
+| 19 — Model Adaptation | Core | AUTHORED |
+| 20 — Distributed Inference | Core | AUTHORED |
+| 21 — Multimodal AI Systems | Core | AUTHORED |
+| 22 — AI Economics | Core | AUTHORED |
+| 23 — Observability & Reliability | Core | AUTHORED |
+| 24 — Model-System Co-design | Core | AUTHORED |
+| 25 — Pretraining Dynamics & Scaling | Expert | AUTHORED |
+| 26 — Distributed & Low-Precision Training | Expert | AUTHORED |
+| 27 — RL Post-Training Systems | Expert | AUTHORED |
+| 28 — MoE Training Dynamics | Expert | AUTHORED |
+| 29 — Kernel Engineering Below Triton | Expert | PROPOSED |
+| 30 — Numerics, Determinism & Reproducibility | Expert | PROPOSED |
+| 31 — Beyond Dense Attention | Expert | PROPOSED |
+| 32 — Compression: Distillation, Pruning, Merging | Expert | PROPOSED |
+| 33 — Mechanistic Interpretability for Engineers | Expert | PROPOSED |
+| 34 — Memorization, Privacy & Unlearning | Expert | PROPOSED |
+| 35 — Multi-Tenant Adapter & Long-Context Serving | Expert | PROPOSED |
+| 36 — Edge Inference & Computer-Use Agents | Expert | PROPOSED |

@@ -26,7 +26,7 @@ claims:
     currentness_status: "DOCUMENTED BEHAVIOR OF TWO REPLAY RUNTIME FAMILIES; NOT AN INDUSTRY DEFAULT"
     evidence:
       - { source_type: official_docs, tier: 2, title: "Temporal Workflow Definition", authors: "Temporal Technologies", year: "2026", url: "https://docs.temporal.io/workflow-definition", section: "Deterministic constraints; commands compared with the existing Event History on replay (re-read 2026-10-01)", accessed_at: "2026-10-01" }
-      - { source_type: official_docs, tier: 2, title: "Durable orchestrator code constraints", authors: "Microsoft", year: "2026", version: "page dated 2026-08-24", url: "https://learn.microsoft.com/en-us/azure/azure-functions/durable/durable-functions-code-constraints", section: "Orchestrator code constraints; Use deterministic APIs (dates and times, GUIDs, random numbers, environment variables, network and HTTP); Versioning (re-read 2026-10-01)", accessed_at: "2026-10-01" }
+      - { source_type: official_docs, tier: 2, title: "Durable orchestrator code constraints", authors: "Microsoft", year: "2026", version: "page dated 2026-10-12 as served 2026-11-09 (redirected from the earlier azure-functions/durable URL)", url: "https://learn.microsoft.com/en-us/azure/durable-task/common/durable-task-code-constraints", section: "Orchestrator code constraints; Use deterministic APIs (dates and times, GUIDs, random numbers, environment variables, network and HTTP); Versioning (re-read 2026-10-01; URL and headings re-checked 2026-11-09)", accessed_at: "2026-11-09" }
     limitations: ["Specific allowed APIs, patching, and replay checks differ by runtime; not every durable engine uses source-level replay."]
     applicability: "Event-history/replay workflow runtimes."
     curriculum_usage: { lessons: ["14.1", "14.6"], labs: ["LAB-A", "LAB-D"], assessments: ["Incident-14.1"] }
@@ -205,7 +205,7 @@ claims:
     confidence: medium
     currentness_status: "DOCUMENTED BEHAVIOR OF ONE DRAFT AND ONE API; NOT A STANDARD"
     evidence:
-      - { source_type: specification, tier: 1, title: "The Idempotency-Key HTTP Header Field", authors: "IETF HTTPAPI Working Group", year: "2025", version: "draft-ietf-httpapi-idempotency-key-header-07, 2025-10-15, expired Internet-Draft", url: "https://datatracker.ietf.org/doc/html/draft-ietf-httpapi-idempotency-key-header", section: "2 (key); 2.3 (expiry); 2.4 (fingerprint); 2.5.2 (resource responsibilities); 2.7 (error handling: 400, 422, 409)", accessed_at: "2026-10-01" }
+      - { source_type: specification, tier: 1, title: "The Idempotency-Key HTTP Header Field", authors: "IETF HTTPAPI Working Group", year: "2025", version: "draft-ietf-httpapi-idempotency-key-header-07, 2025-10-15, expired Internet-Draft", url: "https://datatracker.ietf.org/doc/html/draft-ietf-httpapi-idempotency-key-header-07", section: "2 (key); 2.3 (expiry); 2.4 (fingerprint); 2.5.2 (resource responsibilities); 2.7 (error handling: 400, 422, 409)", accessed_at: "2026-10-01" }
       - { source_type: official_docs, tier: 2, title: "Idempotent requests", authors: "Stripe", year: "2026", version: "Live page as served 2026-10-01; no revision date shown", url: "https://docs.stripe.com/api/idempotent_requests", section: "Saved first result per key; parameter comparison; key pruning after at least 24 hours; results saved only after endpoint execution begins", accessed_at: "2026-10-01" }
     limitations: ["The IETF document is an expired Internet-Draft, not an RFC; its status codes are recommendations.", "One vendor API; neither source shows that an arbitrary endpoint stores key, intent, and outcome atomically.", "The draft was read through a page-to-text conversion; section numbers are as reported there."]
     applicability: "Grounding the receiver-side idempotency contract of Lesson 14.2 in published contracts."
@@ -242,7 +242,7 @@ claims:
     confidence: medium
     currentness_status: "DOCUMENTED LIMITS OF ONE RUNTIME; SUBJECT TO CHANGE"
     evidence:
-      - { source_type: official_docs, tier: 2, title: "Temporal Cloud limits", authors: "Temporal Technologies", year: "2026", version: "Live page as served 2026-10-01", url: "https://docs.temporal.io/cloud/limits", section: "Event History limits; payload and transaction size limits", accessed_at: "2026-10-01" }
+      - { source_type: official_docs, tier: 2, title: "System limits", authors: "Temporal Technologies", year: "2026", version: "Live page as served 2026-10-01; redirect target re-checked 2026-11-09", url: "https://docs.temporal.io/evaluate/cloud/limits", section: "Event History limits; payload and transaction size limits", accessed_at: "2026-10-01" }
       - { source_type: official_docs, tier: 2, title: "Events and Event History", authors: "Temporal Technologies", year: "2026", version: "Live page as served 2026-10-01", url: "https://docs.temporal.io/workflow-execution/event", section: "Event History limits; Activity events", accessed_at: "2026-10-01" }
     limitations: ["One runtime; limits are configuration and version dependent and can change.", "The pages state MB without defining it; the lesson's comparison reads it as MiB and says so.", "Read through a page-to-text conversion; no limit was exercised."]
     applicability: "Comparing a history estimate with one runtime's documented thresholds in Lesson 14.4."
@@ -266,8 +266,8 @@ claims:
     confidence: medium
     currentness_status: "FRONTIER / AVAILABILITY ONLY"
     evidence:
-      - { source_type: official_docs, tier: 2, title: "Durable Execution overview", authors: "Pydantic", year: "2026", version: "Live page as served 2026-10-01", url: "https://pydantic.dev/docs/ai/integrations/durable_execution/overview/", section: "Supported durable execution systems", accessed_at: "2026-10-01" }
-      - { source_type: official_docs, tier: 2, title: "AI Cookbook", authors: "Temporal Technologies", year: "2026", version: "Live page as served 2026-10-01", url: "https://docs.temporal.io/ai-cookbook", section: "Recipe index", accessed_at: "2026-10-01" }
+      - { source_type: official_docs, tier: 2, title: "Durable Execution", authors: "Pydantic", year: "2026", version: "Live page as served 2026-10-01; redirect target re-checked 2026-11-09", url: "https://pydantic.dev/docs/ai/capabilities/durable_execution/overview/", section: "Supported durable execution systems", accessed_at: "2026-10-01" }
+      - { source_type: official_docs, tier: 2, title: "AI Cookbook", authors: "Temporal Technologies", year: "2026", version: "Live page as served 2026-10-01; redirect target re-checked 2026-11-09", url: "https://docs.temporal.io/ai/cookbook", section: "Recipe index", accessed_at: "2026-10-01" }
     limitations: ["Availability is not adoption; no usage data was read.", "Neither page was checked for how model calls and tool calls are wrapped, or for any external-effect guarantee.", "Index-level reading through a page-to-text conversion."]
     applicability: "Scoping the frontier line in Section 05."
     curriculum_usage: { lessons: ["14.6"], labs: [], assessments: [] }

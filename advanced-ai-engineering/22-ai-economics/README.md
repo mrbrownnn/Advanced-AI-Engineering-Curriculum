@@ -83,14 +83,20 @@ Report $C/N_{offered}$ separately. With independent attempts, per-attempt succes
 $$E[A_k]=\frac{1-(1-p)^k}{p},\qquad P(success\ by\ k)=1-(1-p)^k$$
 Homogeneous independent attempts keep expected attempts per success at $1/p$; heterogeneous or correlated failures do not (**D**, `CLM-018`).
 
+where: $C$ = total billed spend for the cohort (\$); $N_{offered}$, $N_{accepted}$, $N_{billed}$, $N_{success}$ = counts of offered tasks, accepted tasks, billed physical attempts, and successful tasks in the same cohort; $p$ = probability one attempt succeeds; $k$ = retry cap (maximum attempts per task); $A_k$ = attempts actually used by one task (stop at first success or at $k$).
+
+Step-by-step (why the factorization holds): multiply $C/N_{success}$ by $1=N_{billed}/N_{billed}$ and $1=N_{accepted}/N_{accepted}$, then regroup: $\frac{C}{N_{success}}=\frac{C}{N_{billed}}\cdot\frac{N_{billed}}{N_{accepted}}\cdot\frac{N_{accepted}}{N_{success}}$, i.e. (price per attempt) × (attempts per accepted task) × (accepted tasks per success). Each factor is a separate lever: price, retry amplification, and quality loss.
+
+Step-by-step (expected attempts): attempt $i$ happens only if the first $i-1$ failed, so $P(\text{attempt } i)=(1-p)^{i-1}$. Summing the geometric series, $E[A_k]=\sum_{i=1}^{k}(1-p)^{i-1}=\frac{1-(1-p)^k}{1-(1-p)}=\frac{1-(1-p)^k}{p}$. The task fails only if all $k$ attempts fail, so $P(success\ by\ k)=1-(1-p)^k$. Dividing the two: attempts per success $=\frac{1-(1-p)^k}{p}\big/\left(1-(1-p)^k\right)=1/p$ for every $k$.
+
 **Worked Example (synthetic, CLM-027):**
-Input: 10,000 offered; 9,200 accepted; 10,051 billed attempts; 8,529 successful tasks; $0.006 per billed attempt.
+Input: 10,000 offered; 9,200 accepted; 10,051 billed attempts; 8,529 successful tasks; \$0.006 per billed attempt.
 1. Spend $C=10{,}051\times0.006=\$60.306$.
 2. Attempts/accepted $=10{,}051/9{,}200=1.0925$.
 3. Accepted/success $=9{,}200/8{,}529=1.0787$.
 4. Cost/success $=60.306/8{,}529=\$0.00707$; factor check $0.006\times1.0925\times1.0787=0.00707$.
 5. Cost/offered $=60.306/10{,}000=\$0.00603$.
-Result: successful-task cost is 17.8% above nominal call price. Limits: equal attempt prices and complete billing join; zero-success windows report counts, not infinity hidden by filtering.
+Result: successful-task cost is 17.8% above nominal call price ($0.00707/0.006=1.178$). Limits: equal attempt prices and complete billing join; zero-success windows report counts, not infinity hidden by filtering.
 
 **Knowledge Check:**
 1. Why does cost per accepted task improve when rejections rise, even if offered-user utility worsens?
@@ -101,6 +107,7 @@ For easy tasks (90%, $p=.95$) and hard tasks (10%, $p=.20$), compute expected at
 
 **Feedback Contract:**
 - *Expected Evidence*: $k=1$: attempts 1.0, success .875, 1.143 attempts/success. $k=3$: attempts 1.19125, success .94869, 1.256 attempts/success. Added successes cost $(1.19125-1)/(.94869-.875)=2.595$ attempts each.
+- *How the numbers arise*: mix classes by traffic share. $k=1$: success $=.9(.95)+.1(.20)=.875$; attempts/success $=1/.875=1.143$. $k=3$: easy $E[A_3]=(1-.05^3)/.95=1.0525$, hard $E[A_3]=(1-.8^3)/.2=2.44$, so attempts $=.9(1.0525)+.1(2.44)=1.19125$; success $=.9(1-.05^3)+.1(1-.8^3)=.94869$; $1.19125/.94869=1.256$. The mixture ratio exceeds $1/p$ of the easy class because extra retries land mostly on hard tasks, so the marginal success (2.595 attempts) is much dearer than the average (1.256).
 - *Common Failure*: Counting retries as new users or excluding billed failures.
 - *Diagnostic Hint*: Can every physical attempt be joined to exactly one root task?
 - *Concept to Revisit*: Offered versus admitted load (Module 04).
@@ -132,13 +139,19 @@ $$R=\max\left(R_{min},\left\lceil\frac{\lambda_{avg}PAR}{\mu h}\right\rceil\righ
 $$u_{avg}=\frac{\lambda_{avg}}{R\mu},\quad CPS_{self}=\frac{C_{self}}{Nq}$$
 where $q$ is success rate and $N$ monthly tasks. API comparison uses reconciled cost per task divided by its success rate. Replica steps can create multiple local winner flips.
 
+Other symbols: $R$ = provisioned replicas; $R_{min}$ = redundancy floor; $\lambda_{avg}=N/T_{month}$ = mean arrival rate (tasks/s, $T_{month}$ = seconds per month); PAR = peak-to-average ratio, so $\lambda_{avg}PAR$ is the peak rate; $\mu$ = sustainable tasks/s per replica at the SLO; $h\in(0,1]$ = headroom fraction (plan each replica to run at most $h\mu$ at peak); $F$ = fixed monthly cost; $c_{rep}$ = monthly cost per replica; $u_{avg}$ = mean utilization of provisioned SLO capacity; $CPS$ = cost per successful task.
+
+Step-by-step: (1) peak load $=\lambda_{avg}PAR$; (2) usable capacity per replica $=\mu h$; (3) replicas needed $=$ peak/usable, rounded up because replicas are integers, then raised to $R_{min}$; (4) monthly cost $=F+Rc_{rep}$; (5) divide by successful tasks $Nq$. Break-even at fixed $R$: self-host wins when $\frac{F+Rc_{rep}}{Nq}<CPS_{API}$, i.e. $N>\frac{F+Rc_{rep}}{q\,CPS_{API}}$. Because $R$ itself jumps with $N$, this threshold must be checked inside each replica interval—the source of multiple flips.
+
 **Worked Example (synthetic, CLM-027):**
-Input: $F=\$9{,}000/month$, $c_{rep}=\$1{,}825$, $\mu=2.0$ tasks/s at SLO, $h=.70$, PAR=3, $R_{min}=2$, $N=8{,}000{,}000$, $q=.999$. Month=2,592,000 s. API equivalent=$0.002362/task at equal quality.
+Input: $F=\$9{,}000/month$, $c_{rep}=\$1{,}825$, $\mu=2.0$ tasks/s at SLO, $h=.70$, PAR=3, $R_{min}=2$, $N=8{,}000{,}000$, $q=.999$. Month=2,592,000 s. API equivalent=\$0.002362/task at equal quality.
 1. $\lambda_{avg}=8{,}000{,}000/2{,}592{,}000=3.0864$/s.
 2. $R=\lceil3.0864\times3/(2\times.7)\rceil=7$.
 3. $C=9{,}000+7\times1{,}825=\$21{,}775$.
 4. $u=3.0864/(7\times2)=22.05\%$; low average utilization is deliberate peak headroom.
 5. $CPS=21{,}775/(8{,}000{,}000\times.999)=\$0.002725$; API wins at this volume.
+Unit check: month $=30\times24\times3600=2{,}592{,}000$ s $=720$ h, so $c_{rep}=\$1{,}825$/month $\approx\$2.53$ per replica-hour; one replica's SLO capacity is $2.0\times2{,}592{,}000=5{,}184{,}000$ tasks/month, so a fully busy replica would cost $1{,}825/5{,}184{,}000\approx\$0.00035$/task. The realized replica cost here is $7\times1{,}825/8{,}000{,}000\approx\$0.0016$/task—about 4.5× higher—because $u_{avg}\approx22\%$ (and $F$ adds $\$0.0011$/task more).
+Flip mechanics (illustrative, treating \$0.002362 as the API cost per successful task so $q$ cancels at equal quality): $R$ rises by one each time $N$ crosses $R\mu h\,T_{month}/PAR=R\times1{,}209{,}600$. With $R=9$ (valid up to 10.886M), self-host needs $N>(9{,}000+9\times1{,}825)/0.002362\approx10.76$M; the 10th replica then pushes the threshold to $\approx11.54$M, the 11th (from 12.096M) to $\approx12.31$M. Beyond that, each replica raises the threshold by only $1{,}825/0.002362\approx0.77$M while the replica interval is 1.21M wide, so the win persists.
 Result: self-hosting first wins near 10.763M tasks but replica boundaries can reverse it; the registry fixture records later losing intervals and final win from 12.308M (**D**, `CLM-019`). Limits: no lead time, contract minimum, or capacity failure modeled.
 
 **Knowledge Check:**
@@ -184,11 +197,15 @@ Partition usage into disjoint classes before multiplying:
 $$C=\sum_j tokens_j\,rate_j + C_{tools}+C_{fixed}$$
 Apply modifiers in the documented/runtime order; never count cached tokens both as cached and uncached. Reconciliation residual $\Delta=C_{invoice}-\sum C_{gateway}$ must be explained by usage, rate, modifier, rounding, timing, or missing-attempt differences.
 
+where: $j$ indexes disjoint token classes (e.g. uncached input, cache write, cache read, output); $tokens_j$ = tokens billed in class $j$; $rate_j$ = effective price per token for that class after modifiers (list rates are usually quoted per MTok, so $rate_j=\text{(\$/MTok)}/10^6$); $C_{tools}$ = tool/additional charges; $C_{fixed}$ = non-usage charges in the same invoice window; $C_{invoice}$ = provider-billed money; $C_{gateway}$ = per-attempt gateway estimate.
+
 **Worked Example (dated snapshot, not a decision fixture):**
-Using only `CLM-008`'s 2026-10-01 listed example: 1.2M base-input tokens, 0.3M 5m-write tokens, 2.5M read tokens, and 0.4M output tokens for the named $1/$1.25/$0.10/$5 per MTok classes.
-1. Input=$1.20; writes=$0.375; reads=$0.25; output=$2.00.
-2. Total list estimate=$3.825.
-3. If invoice line is $3.95, residual=$0.125 (3.27%); do not silently force equality. Check region, contract, rounding, and omitted tool charges.
+Using only `CLM-008`'s 2026-10-01 listed example: 1.2M base-input tokens, 0.3M 5m-write tokens, 2.5M read tokens, and 0.4M output tokens for the named \$1/\$1.25/\$0.10/\$5 per MTok classes.
+1. Input=\$1.20; writes=\$0.375; reads=\$0.25; output=\$2.00.
+   - Arithmetic (tokens in MTok × \$/MTok): $1.2\times1=1.20$; $0.3\times1.25=0.375$; $2.5\times0.10=0.25$; $0.4\times5=2.00$. The write and read rates are the 1.25× and 0.1× modifiers applied to the \$1 base input rate.
+2. Total list estimate=\$3.825.
+3. If invoice line is \$3.95, residual=\$0.125 (3.27%); do not silently force equality.
+   - Arithmetic: $\Delta=3.95-3.825=0.125$; relative to the estimate, $0.125/3.825=3.27\%$. Check region, contract, rounding, and omitted tool charges.
 Limits: page accessed after research cutoff by one day; re-open before any real decision.
 
 **Knowledge Check:**
@@ -232,9 +249,17 @@ Semantic fixture:
 $$C=c_e+(1-h)c_L,\quad S=s(1-h\epsilon),\quad CPS=C/S$$
 under declared independence (**D**, `CLM-021`).
 
+where (prefix): costs are in units of the base input price per prefix token, so uncached use costs 1; $w$ = write multiplier (>1); $r$ = read multiplier (<1); $n$ = later reads of one written prefix; $h$ = per-request hit share (not the headroom $h$ of Lesson 22.2); $g$ = mean gap between requests sharing the prefix; $\tau$ = TTL, refreshed on each hit.
+where (semantic): $c_e$ = embedding/lookup cost paid on every request; $c_L$ = LLM generation cost paid on misses; $s$ = success rate of generated answers; $h$ = semantic hit share; $\epsilon$ = probability a hit returns a wrong/stale answer; $C$, $S$ = expected cost and success per request.
+
+Step-by-step (prefix): write once and read $n$ times costs $w+nr$; uncached costs $n+1$. Cached wins iff $w+nr<n+1 \iff n(1-r)>w-1 \iff n>\frac{w-1}{1-r}$. Per request: a miss costs $w$, a hit $r$, so expected factor $(1-h)w+hr=w-h(w-r)<1 \iff h>\frac{w-1}{w-r}$. With exponential gaps, a request hits iff its gap is shorter than $\tau$: $h=P(gap<\tau)=1-e^{-\tau/g}$.
+Step-by-step (semantic): every request pays $c_e$; only misses pay $c_L$, giving $C=c_e+(1-h)c_L$. Misses succeed with prob. $s$, hits with $s(1-\epsilon)$ (assumed independence), so $S=(1-h)s+hs(1-\epsilon)=s(1-h\epsilon)$.
+
 **Worked Example (synthetic, CLM-027):**
 Prefix $w=1.25,r=.1,g=10$ min. At $\tau=5$, $h=1-e^{-.5}=.3935$; factor $=.6065(1.25)+.3935(.1)=.7975$, a 20.25% input saving. Break-even $h>.25/1.15=.2174$.
 Semantic: $c_L=.006,s=.93,c_e=.00002$. Policy A $h=.30,\epsilon=.02$: $C=.00422$, $S=.92442$, CPS=$.004565$. Policy B $h=.55,\epsilon=.15$: $C=.00272$, $S=.853275$, CPS=$.003188$ but fails a hard .90 success floor. Result: cheaper point estimate B is infeasible.
+Arithmetic: prefix saving $=1-.7975=20.25\%$; break-even $(1.25-1)/(1.25-.1)=.25/1.15$. Policy A: $C=.00002+.70(.006)=.00422$, $S=.93(1-.30\times.02)=.93(.994)=.92442$, CPS $=.00422/.92442=.004565$. Policy B: $C=.00002+.45(.006)=.00272$, $S=.93(1-.55\times.15)=.93(.9175)=.853275<.90$, CPS $=.00272/.853275=.003188$.
+Reuse count (illustrative, multipliers from Lesson 22.3's snapshot): 5m write $w=1.25$, $r=.1$ gives $n>.25/.9=.28$, so one read pays back; 1h write $w=2$ gives $n>1/.9=1.11$, so at least two reads are needed.
 
 **Knowledge Check:**
 1. Why can one reuse pay for a 5m write but not a 1h write?
@@ -276,12 +301,17 @@ $$e=1-[at+(1-a)f]$$
 $$C=c_W+c_v+ec_S,\quad S=at+eb,\quad WrongAccepted=(1-a)f$$
 Cost-only break-even versus always-strong requires $e<1-(c_W+c_v)/c_S$.
 
+where: $a$ = probability the weak answer is correct; $t$ = P(verifier accepts | weak correct); $f$ = P(verifier accepts | weak wrong); $b$ = strong-model success on escalated tasks; $e$ = escalation share; $c_W$, $c_v$, $c_S$ = per-task cost of weak generation, verification, and strong generation; $C$, $S$ = expected cost and success per task; $WrongAccepted$ = share of tasks ending with an accepted wrong weak answer.
+
+Step-by-step: accepted weak share $=at$ (correct, accepted) $+(1-a)f$ (wrong, accepted); everything else escalates, so $e=1-[at+(1-a)f]$. Every task pays $c_W+c_v$; only escalations pay $c_S$, giving $C=c_W+c_v+ec_S$. Successes come from correct accepted answers ($at$) plus successful escalations ($eb$). Break-even: $c_W+c_v+ec_S<c_S \iff e<1-(c_W+c_v)/c_S$.
+
 **Worked Example (synthetic, CLM-027):**
 $a=.70,t=.90,f=.20,b=.88,c_W=.0006,c_v=.0002,c_S=.006$.
 1. Accepted weak share $=.63+.06=.69$; escalation $e=.31$.
 2. Cost=$.0006+.0002+.31(.006)=.00266$.
 3. Success=$.63+.31(.88)=.9028$; wrong accepted=.06.
 4. CPS=$.002946$; escalated latency contains both stages.
+   - Arithmetic: $at=.70\times.90=.63$; $(1-a)f=.30\times.20=.06$; CPS $=.00266/.9028=.002946$.
 5. Cost-only threshold $e<1-.0008/.006=.8667$, but quality can still reject the policy.
 
 **Pinned RouteLLM Trace (O, CLM-016):**
@@ -317,7 +347,7 @@ How do we choose among API, self-hosted, cached, routed, and cascaded systems wi
 - **Feasible set**: options whose intervals and loaded measurements satisfy every hard constraint.
 - **Decision frontier**: nondominated feasible options in cost, quality, latency, and capacity.
 - **Flip point**: uncertain input value at which recommendation changes while other inputs stay fixed.
-- A scalar $\hat q-\lambda\hat c$ is useful only after feasibility and only to the extent estimators are valid (**O**, `CLM-003`; **D**, `CLM-023`).
+- A scalar $\hat q-\lambda\hat c$ (estimated quality minus $\lambda$ × estimated cost; here $\lambda$ is a cost-penalty weight, not the arrival rate of Lesson 22.2) is useful only after feasibility and only to the extent estimators are valid (**O**, `CLM-003`; **D**, `CLM-023`).
 
 **Mechanism Explanation:**
 Predeclare constraints. Measure every option on matched traffic. Remove infeasible options using quality intervals and loaded latency—not point estimates. Rank survivors by fully loaded cost per successful task. Sweep price, volume, PAR, cache hit rate, escalation, quality, and latency. Report joint scenarios, reservation, and rollback triggers.
@@ -325,13 +355,15 @@ Predeclare constraints. Measure every option on matched traffic. Remove infeasib
 **Quantitative Model / Trade-off Comparison (D):**
 For option $j$, feasible iff $LCB(S_j)\ge S_{min}$, $P95(L_j)\le L_{max}$, capacity ≥ peak, and policy predicates pass. Among feasible options minimize $C_j/N_{success,j}$. Solve equality between leading options for each flip point; one-at-a-time sensitivity is conditional, not joint uncertainty.
 
+where: $LCB(S_j)$ = lower confidence bound on option $j$'s success rate; $S_{min}$ = required success floor; $P95(L_j)$ = 95th-percentile loaded latency; $L_{max}$ = latency ceiling. Flip point for one input $x$: hold all else fixed and solve $CPS_A(x)=CPS_B(x)$ for the two leading feasible options (re-checking feasibility, since $x$ may also move quality or latency).
+
 **Worked Example (synthetic, CLM-027):**
 At 8M tasks/month, constraints are success LCB ≥ .88 and P95 ≤2.5 s.
 - Always-cheap: LCB .82, P95 1.1 s, CPS .00060 → infeasible quality.
 - Cascade: LCB .8800 but P95 3.1 s, CPS .002946 → infeasible latency (boundary quality alone is not enough).
 - Self-hosted: LCB .91, P95 2.2 s, CPS .002975 → feasible.
 - Cached router: LCB .90, P95 1.8 s, CPS .002582 → feasible and selected.
-Sensitivity from the declared fixture: selection flips at prefix-hit rate .705, PAR 2.30, or fixed self-host cost $6,124/month (**D**, `CLM-023`). Limits: each holds other values fixed; use scenarios or Monte Carlo for joint uncertainty.
+Sensitivity from the declared fixture: selection flips at prefix-hit rate .705, PAR 2.30, or fixed self-host cost \$6,124/month (**D**, `CLM-023`). Limits: each holds other values fixed; use scenarios or Monte Carlo for joint uncertainty.
 
 **Knowledge Check:**
 1. Why can a Pareto-frontier point still be unacceptable?
@@ -365,7 +397,7 @@ Construct and defend a constrained decision frontier with sensitivity, uncertain
 - [Prompt Caching for Long-Horizon Tasks](https://arxiv.org/abs/2601.06007), Lumer et al. 2026: workload-specific cache boundary results (**O**, `CLM-007`).
 
 **FRONTIER**
-- [Is Escalation Worth It?](https://arxiv.org/abs/2605.06350), Bouchard 2026, preprint (**O**, `CLM-004`).
+- [Is Escalation Worth It?](https://arxiv.org/abs/2605.06350v1), Bouchard 2026, preprint v1 (v2 retitled and revised) (**O**, `CLM-004`).
 - [Routing, Cascades, and User Choice](https://arxiv.org/abs/2602.09902), Mahmood 2026, abstract-only (**O**, `CLM-005`).
 - [RouteNLP](https://arxiv.org/abs/2604.23577), Guo et al. 2026, abstract-only single deployment report (**O**, `CLM-029`).
 
@@ -424,7 +456,7 @@ All labs follow `PREDICT → BUILD → MEASURE → EXPLAIN → BREAK → IMPROVE
 
 ### Incident 22.1 — The 40% “Savings” That Increased Spend
 
-**Symptoms**: Finance reports invoice spend up 18% after a dashboard claimed 40% savings. Offered traffic is flat. Gateway cost excludes cache hits and most failures; retries rose from 1.04 to 1.31 attempts/accepted task; prefix hit share fell after a timestamp moved to the prompt front; cascade escalation rose; accepted-task latency remains healthy while rejection rose.
+**Symptoms**: Finance reports invoice spend up 18% after a dashboard claimed 40% savings. Offered traffic is flat. Gateway cost excludes cache hits and most failures; retries rose from 1.04 to 1.31 attempts/accepted task; prefix hit share fell after a timestamp moved to the prompt front; cascade escalation rose; accepted-task latency remains healthy while rejection rose. (Scale check: with price per attempt unchanged, the retry factor alone multiplies spend per accepted task by $1.31/1.04\approx1.26$, i.e. +26%.)
 
 **Diagnostic Protocol**:
 1. **Competing hypotheses**: denominator laundering; missing failed-stream usage; stale rate map/modifiers; cache-boundary regression; cascade shift; retry amplification; invoice-window mismatch.
@@ -443,7 +475,7 @@ All labs follow `PREDICT → BUILD → MEASURE → EXPLAIN → BREAK → IMPROVE
 
 ### Enterprise Transfer Problem — Support Assistant Economics
 
-**Synthetic fixture (CLM-027):** 8M offered tasks/month; 8% rejected; hard gates: success LCB ≥.88, P95 ≤2.5 s, no cross-tenant cache reuse. Strong model S costs $2.4/MTok input and $12/MTok output; weak W costs $.24/$1.2. Mean task: 2,000 input and 300 output tokens. Retry cap 2. Candidate systems: always-S API; W/S router; W→verifier→S cascade; prefix+semantic cache before router; self-hosted option using Lesson 22.2 fixture. Base measured/synthetic policy values are those in Lessons 22.2, 22.4–22.6. Treat all as exercise inputs, not vendor rates.
+**Synthetic fixture (CLM-027):** 8M offered tasks/month; 8% rejected; hard gates: success LCB ≥.88, P95 ≤2.5 s, no cross-tenant cache reuse. Strong model S costs \$2.4/MTok input and \$12/MTok output; weak W costs \$.24/\$1.2. Mean task: 2,000 input and 300 output tokens. Retry cap 2. Candidate systems: always-S API; W/S router; W→verifier→S cascade; prefix+semantic cache before router; self-hosted option using Lesson 22.2 fixture. Base measured/synthetic policy values are those in Lessons 22.2, 22.4–22.6. Treat all as exercise inputs, not vendor rates. Unit conversion for one attempt: S $=2{,}000\times\$2.4/10^6+300\times\$12/10^6=\$0.0048+\$0.0036=\$0.0084$; W $=2{,}000\times\$0.24/10^6+300\times\$1.2/10^6=\$0.00084$.
 
 **Required Deliverables**:
 1. Task/attempt/spend schema and denominator table for offered, accepted, billed, successful, rejected, failed, late, and invalid tasks.

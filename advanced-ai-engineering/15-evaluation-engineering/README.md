@@ -111,7 +111,20 @@ Suppose $G$ independent blocks each hold $m$ rows with common variance $\sigma^2
 
 $$\mathrm{Var}(\bar d)=\frac{\sigma^2}{Gm}\bigl[1+(m-1)\rho\bigr],\qquad n_{\text{eff}}=\frac{Gm}{1+(m-1)\rho}.$$
 
+where:
+- $i$ indexes paired rows; $n$ is the number of paired rows ($n=Gm$ in the block model);
+- $m_A(i), m_B(i)$ are the metric values of systems A and B on row $i$ (here $m$ with a subscript is the metric; plain $m$ below is the number of rows per block);
+- $d_i$ is the paired difference, positive when B is better; $\bar d$ is its mean;
+- $G$ is the number of independent blocks; $\sigma^2$ is the variance of one $d_i$; $\rho$ is the correlation between two rows of the same block (rows in different blocks are independent);
+- $n_{\text{eff}}$ is the number of independent rows that would give the same $\mathrm{Var}(\bar d)$.
+
 The bracket is the design effect. It follows from summing $m$ variances and $m(m-1)$ covariances inside each block (**D**, CLM-003). It assumes equal block sizes and one shared $\rho$; real data need the block-level analysis of Lesson 15.4.
+
+*Step-by-step.*
+1. One block's row sum has variance $m\sigma^2$ (the $m$ variances) plus $m(m-1)\rho\sigma^2$ (each ordered pair of distinct rows contributes covariance $\rho\sigma^2$), i.e. $m\sigma^2[1+(m-1)\rho]$.
+2. Blocks are independent, so the total over all $G$ blocks has variance $Gm\sigma^2[1+(m-1)\rho]$.
+3. $\bar d$ divides that total by $Gm$, which divides the variance by $(Gm)^2$: $\mathrm{Var}(\bar d)=\frac{\sigma^2}{Gm}[1+(m-1)\rho]$.
+4. Independent rows would give $\sigma^2/n_{\text{eff}}$. Setting the two equal gives $n_{\text{eff}}=Gm/[1+(m-1)\rho]$.
 
 **Worked Example (synthetic):**
 - *Input*: two systems run on 100 shared prompts with five generations each, 500 paired rows. Assume $\rho=0.6$ between generations of one prompt.
@@ -170,13 +183,18 @@ Two different questions use slices, and they need different machinery:
 
 $$\hat m=\sum_{s=1}^{K} w_s\,\hat m_s$$
 
-estimates it (**D**, CLM-019). The identity fails if an item belongs to two slices, because that item's score enters two terms, or to none, because it enters no term.
+estimates it (**D**, CLM-019). Here $K$ is the number of slices, $m$ is the per-item metric, $\hat m_s$ is the sample mean of $m$ over the items in $S_s$, and $w_s$ is the target share of slice $s$ (not its sample share). The identity fails if an item belongs to two slices, because that item's score enters two terms, or to none, because it enters no term.
 
 *Item-level weighting.* When tags overlap, weight items instead of slices. Give item $i$ the weight $\omega_i=(\text{target share of its cell})/(\text{sample share of its cell})$ and compute
 
 $$\hat m=\frac{\sum_i \omega_i m_i}{\sum_i \omega_i}.$$
 
-Each item is counted once, however many tags it carries. When every item of a cell shares one weight, this equals the partition formula applied to cells (**D**, CLM-019). Both forms assume the target shares are known and every target cell has sampled items; an empty cell cannot be reweighted.
+where $m_i$ is item $i$'s score and $\omega_i$ its weight. Each item is counted once, however many tags it carries. When every item of a cell shares one weight, this equals the partition formula applied to cells (**D**, CLM-019).
+
+*Step-by-step (why the two forms agree).* Let cell $c$ have $n_c$ of the $N$ sampled items, sample share $n_c/N$, target share $w_c$, and cell mean $\hat m_c$. Every item in $c$ gets $\omega_i=w_c/(n_c/N)=Nw_c/n_c$.
+1. Numerator: $\sum_i\omega_i m_i=\sum_c \frac{Nw_c}{n_c}\sum_{i\in c}m_i=\sum_c Nw_c\,\hat m_c$.
+2. Denominator: $\sum_i\omega_i=\sum_c n_c\cdot\frac{Nw_c}{n_c}=N\sum_c w_c=N$.
+3. Ratio: $\sum_c w_c\,\hat m_c$, the partition formula over cells. Both forms assume the target shares are known and every target cell has sampled items; an empty cell cannot be reweighted.
 
 *Critical-slice gates.* A gate has the form $\hat m_s\ge f_s$ (or the interval form of Lesson 15.4) and is evaluated on the members of $S_s$ only. A weight $w_s$ never enters a gate, so a small prevalence cannot buy back a failed gate (**D**, CLM-011).
 
@@ -193,7 +211,7 @@ Each item is counted once, however many tags it carries. When every item of a ce
 - *Steps (wrong)*: treat "L", "N", and "neither" as slices. $\hat m_L=(3+1)/8=0.50$, $\hat m_N=(1+1)/6=0.333$, $\hat m_{\text{neither}}=0.90$. Sample shares are $8/20=0.4$, $6/20=0.3$, and $0.5$, which sum to 1.2. The sum $\sum w_s\hat m_s=0.20+0.10+0.45=0.75$. Dividing by 1.2 gives 0.625.
 - *Steps (right)*: count each item once. $(9+3+1+1)/20=0.70$.
 - *Result*: the true sample mean is 0.70. The overlapping-slice sum gives 0.75 and its normalized form gives 0.625. The four "L and N" items were counted twice: 24 item-counts for 20 items.
-- *Reweighting to a target*: suppose the target cell shares are 0.6, 0.2, 0.1, 0.1. The partition formula over cells gives $0.6\times0.90+0.2\times0.75+0.1\times0.50+0.1\times0.25=0.765$. The item weights are 1.2, 1.0, 1.0, 0.5, and $\sum\omega_i m_i/\sum\omega_i=(10.8+3+1+0.5)/(12+4+2+2)=15.3/20=0.765$. The two forms agree.
+- *Reweighting to a target*: suppose the target cell shares are 0.6, 0.2, 0.1, 0.1. The partition formula over cells gives $0.6\times0.90+0.2\times0.75+0.1\times0.50+0.1\times0.25=0.765$. The item weights are 1.2, 1.0, 1.0, 0.5 (target share / sample share: $0.6/0.5$, $0.2/0.2$, $0.1/0.1$, $0.1/0.2$), and $\sum\omega_i m_i/\sum\omega_i=(10.8+3+1+0.5)/(12+4+2+2)=15.3/20=0.765$. The two forms agree.
 - *Interpretation / limits*: neither wrong number is biased in a predictable direction; the error depends on how the overlap cell scores. The target shares here are exercise assumptions.
 
 **Worked Example B — a gate is not a weight (synthetic):**
@@ -255,6 +273,8 @@ For $n$ pairwise judgments, the descriptive tie-adjusted preference rate is
 
 $$\hat p=\frac{W_B+0.5T}{n}.$$
 
+where $W_B$ is the number of pairs B wins, $T$ the number of ties, and $W_A$ the number A wins, with $n=W_A+W_B+T$. Each tie counts as half a win for each side, so $\hat p$ for B and the matching rate $(W_A+0.5T)/n$ for A sum to 1, and $\hat p=0.5$ means no net preference. Swap consistency $=(\text{verdicts unchanged after the swap})/n$.
+
 It is conditional on sampled items, presentation, judge/rater population, and protocol—not context-free model quality. Swapping order detects sensitivity but does not manufacture ground truth.
 
 **Worked Example (synthetic):**
@@ -309,10 +329,12 @@ The seven items below are this module's **release statistics contract**. Module 
 
 *1. Paired effect.* For row $j$ in block $g$, with both systems run on that same row, $d_{g,j}=m_B(g,j)-m_A(g,j)$. The block effect is $\bar d_g=\frac{1}{n_g}\sum_j d_{g,j}$. The estimand is the mean block effect $\Delta=E[\bar d_g]$, estimated by $\hat\Delta=\frac1G\sum_g\bar d_g$. If block sizes differ, the row-weighted mean $\sum_{g,j}d_{g,j}/\sum_g n_g$ is a different estimand; declare which one the decision uses (**D**, CLM-010).
 
-*2. Interval.* Let $s_b$ be the sample standard deviation of the $G$ block effects.
+where $g=1,\dots,G$ indexes blocks, $j=1,\dots,n_g$ indexes rows inside block $g$, $m_A(g,j)$ and $m_B(g,j)$ are the metric values, $\Delta$ is the population mean block effect, and $\hat\Delta$ its estimate.
+
+*2. Interval.* Let $s_b$ be the sample standard deviation of the $G$ block effects, $s_b=\sqrt{\frac{1}{G-1}\sum_g(\bar d_g-\hat\Delta)^2}$. Let $\alpha$ be the two-sided error level (0.05 for a 95% interval) and $t_{1-\alpha/2,\,G-1}$ the $1-\alpha/2$ quantile of the t distribution with $G-1$ degrees of freedom.
 
 - Block t interval: $\hat\Delta\pm t_{1-\alpha/2,\,G-1}\,s_b/\sqrt G$. This is Module 00's paired interval applied to block effects.
-- Block bootstrap: draw $G$ blocks with replacement, keep every row of each drawn block, recompute $\hat\Delta$, repeat, and take percentiles. The standard deviation of that bootstrap distribution is exactly $\sqrt{(G-1)/G}\;s_b/\sqrt G$.
+- Block bootstrap: draw $G$ blocks with replacement, keep every row of each drawn block, recompute $\hat\Delta$, repeat, and take percentiles. The standard deviation of that bootstrap distribution is exactly $\sqrt{(G-1)/G}\;s_b/\sqrt G$. Step-by-step: each resample draws $G$ block effects independently from the $G$ observed values, whose variance with divisor $G$ is $\frac{G-1}{G}s_b^2$; the mean of $G$ such draws has variance $\frac{G-1}{G}s_b^2/G$; take the square root. Example (R-15 below): $\sqrt{9/10}\times0.1491=0.1414$.
 - **Block resampling is required whenever an independent unit contributes more than one row**: repeated generations of one prompt, turns of one conversation, tasks of one user or session, questions about one document, or translations of one question. Row resampling is valid only when each block has one row or rows are uncorrelated. Under positive within-block correlation it understates the standard error by about the square root of the design effect of Lesson 15.1 (**D**, CLM-020).
 - No interval here is a guarantee. With few blocks, the percentile bootstrap undercovers; the simulation below shows it. The t interval assumes roughly normal block effects.
 
@@ -324,7 +346,9 @@ The same adjustment appears in the evaluation literature as clustered standard e
 - Noninferiority gate: **passes** if $L\ge-\tau$; **refuted** if $U<-\tau$.
 - Otherwise the gate is **undetermined**.
 
-For a harm metric where lower is better, with $\Delta_h=h_B-h_A$, the noninferiority gate is $UCB(\Delta_h)\le\tau$. A pass at a two-sided 95% interval is a one-sided 97.5% statement, so a gate whose true value sits exactly at its threshold passes at most about 2.5% of the time (**D**, CLM-021).
+Here $L$ and $U$ are the lower and upper interval bounds (not the look count $L$ of item 5). Because $L<U$, a gate cannot both pass and be refuted.
+
+For a harm metric where lower is better, with $\Delta_h=h_B-h_A$, the noninferiority gate is $UCB(\Delta_h)\le\tau$. Here $h_A,h_B$ are the harm rates of A and B and $UCB$ is the upper confidence bound (the $U$ of the harm interval). Flipping the sign, $-\Delta_h$ is larger-is-better, and $L(-\Delta_h)\ge-\tau$ is the same condition as $UCB(\Delta_h)\le\tau$. A pass at a two-sided 95% interval is a one-sided 97.5% statement, so a gate whose true value sits exactly at its threshold passes at most about 2.5% of the time (**D**, CLM-021). Reason: a two-sided $1-\alpha$ interval leaves $\alpha/2$ in each tail, so when the true value equals the threshold, $L\ge$ threshold happens with probability about $\alpha/2=0.025$.
 
 *4. Critical-slice gates.* Each critical slice gets its own gate, computed from the rows in that slice with the same block structure and its own margin $\tau_s$. Prevalence weights do not enter. Hard constraints, such as zero unauthorized effects, are deterministic checks and need no interval.
 
@@ -333,7 +357,7 @@ For a harm metric where lower is better, with $\Delta_h=h_B-h_A$, the noninferio
 - *All gates must pass.* If release requires every gate to pass, no adjustment is needed to control false release. Reason: if any one requirement is truly violated, release needs that gate to pass, which happens with probability at most its own level (**D**, CLM-021). The price is lower power.
 - *Any of $K$ can win.* If any one of $K$ metrics or slices could justify a claim, test each at $\alpha/K$ (Bonferroni). This also applies to exploratory slices scanned for regressions.
 - *Looks.* The default is one planned look. With $L$ planned looks, use $\alpha/L$ at each. This is conservative and valid. An unplanned look or rerun is treated as a new experiment on a fresh protected sample; its data are never silently pooled.
-- *Rerun-until-pass.* With $k$ independent reruns of a gate whose true value sits at its threshold, the chance that at least one passes is $1-(1-\alpha/2)^k$.
+- *Rerun-until-pass.* With $k$ independent reruns of a gate whose true value sits at its threshold, the chance that at least one passes is $1-(1-\alpha/2)^k$. Step-by-step: each rerun falsely passes with probability $\alpha/2$ (item 3), so it fails with $1-\alpha/2$; all $k$ independent reruns fail with $(1-\alpha/2)^k$; at least one passes with the complement. With $\alpha=0.05$, $k=5$: $1-0.975^5=0.119$.
 
 *6. Decision.*
 
@@ -344,6 +368,14 @@ For a harm metric where lower is better, with $\Delta_h=h_B-h_A$, the noninferio
 *7. Planning.* For an improvement gate with planning effect $\delta>\epsilon$, pilot block standard deviation $s_b$, two-sided level $\alpha$, and power $1-\beta$, the normal approximation gives
 
 $$G\ \ge\ \left(\frac{(z_{1-\alpha/2}+z_{1-\beta})\,s_b}{\delta-\epsilon}\right)^2 .$$
+
+where $z_q$ is the $q$ quantile of the standard normal ($z_{0.975}=1.960$, $z_{0.80}=0.842$), $\beta$ is the planned miss probability, and $\delta$ is the true effect assumed for planning.
+
+*Step-by-step (normal approximation, $SE=s_b/\sqrt G$).*
+1. The gate passes when $L=\hat\Delta-z_{1-\alpha/2}SE\ge\epsilon$, i.e. $\hat\Delta\ge\epsilon+z_{1-\alpha/2}SE$.
+2. If the true effect is $\delta$, then $\hat\Delta\approx\delta+SE\cdot Z$ with $Z$ standard normal. Requiring a pass with probability $1-\beta$ means $\delta-z_{1-\beta}SE\ge\epsilon+z_{1-\alpha/2}SE$.
+3. Rearrange: $(z_{1-\alpha/2}+z_{1-\beta})\,s_b/\sqrt G\le\delta-\epsilon$. Solve for $G$ and square to get the formula above; round up.
+4. The noninferiority gate passes when $L\ge-\tau$, so the distance to the threshold is $\delta-(-\tau)=\delta+\tau$.
 
 For a noninferiority gate replace $\delta-\epsilon$ by $\delta+\tau$. Power here is the probability that the gate passes when the true effect is $\delta$. It is not the probability that B is better, and it is not defined at a true effect equal to the threshold, where the pass rate is the false-pass rate (**D**, CLM-022). $G$ counts blocks, not rows.
 
@@ -372,21 +404,23 @@ There are 13 rows at +1, 24 at 0, and 3 at −1.
 
 *Step 2 — the wrong interval (rows as independent).* $n=40$, $s=0.5883$, $SE=0.5883/\sqrt{40}=0.0930$, $t_{0.975,39}=2.023$. Interval $[0.062,\,0.438]$. A row bootstrap (10,000 resamples, seed 15) gives the percentile interval $[0.075,\,0.425]$.
 
-*Step 3 — the block interval.* Squared deviations of the block effects from 0.25 sum to 2.0, so $s_b=\sqrt{2.0/9}=0.4714$ and $SE=0.4714/\sqrt{10}=0.1491$. With $t_{0.975,9}=2.262$ the interval is $[-0.087,\,0.587]$. A block bootstrap (10,000 resamples, seed 15) gives $[-0.025,\,0.525]$. The exact bootstrap standard deviations are $0.1414$ for blocks and $0.0919$ for rows.
+*Step 3 — the block interval.* Squared deviations of the block effects from 0.25 sum to 2.0, so $s_b=\sqrt{2.0/9}=0.4714$ and $SE=0.4714/\sqrt{10}=0.1491$. With $t_{0.975,9}=2.262$ the half-width is $2.262\times0.1491=0.337$ and the interval is $0.25\pm0.337=[-0.087,\,0.587]$. A block bootstrap (10,000 resamples, seed 15) gives $[-0.025,\,0.525]$. The exact bootstrap standard deviations are $0.1414$ for blocks and $0.0919$ for rows.
 
-*Step 4 — why they differ.* The block standard error is $0.1491/0.0930=1.60$ times the row standard error, a variance ratio of 2.57. Users are either helped on most tasks or not at all, so four rows from one user are far from four independent rows.
+*Step 4 — why they differ.* The block standard error is $0.1491/0.0930=1.60$ times the row standard error, a variance ratio of 2.57 ($1.60^2$). Read through Lesson 15.1, this ratio plays the role of an observed design effect: $1+(4-1)\rho=2.57$ would mean $\rho\approx0.52$. That is only an analogy, since the 15.1 model assumes one shared $\rho$. Users are either helped on most tasks or not at all, so four rows from one user are far from four independent rows.
 
 *Step 5 — primary gate.* Block interval: $L=-0.087<0.05$, so the gate does not pass; $U=0.587\ge0.05$, so it is not refuted. **Undetermined.** The row interval would have passed it ($0.062\ge0.05$).
 
-*Step 6 — critical-slice gate.* T4 has one row per user: $(+1,0,0,0,0,0,0,0,-1,-1)$. Mean $-0.10$, $s=\sqrt{2.9/9}=0.5676$, $SE=0.1795$, interval $[-0.506,\,0.306]$. $L<-0.05$ and $U\ge-0.05$. **Undetermined.** Cross-check: the discordant pairs are 1 positive and 2 negative, and an exact two-sided sign test gives $p=1.0$.
+*Step 6 — critical-slice gate.* T4 has one row per user: $(+1,0,0,0,0,0,0,0,-1,-1)$. Mean $-0.10$, $s=\sqrt{2.9/9}=0.5676$, $SE=0.1795$, interval $[-0.506,\,0.306]$. $L<-0.05$ and $U\ge-0.05$. **Undetermined.** Cross-check: the discordant pairs are 1 positive and 2 negative, and an exact two-sided sign test gives $p=1.0$. (Ties, the seven zeros, are dropped; with 3 discordant pairs under a fair coin, the outcome 1-vs-2 is the most likely split, so every possible outcome is at least as extreme and $p=1$.)
 
 *Step 7 — decision.* No gate is refuted and not every gate passes. **INCONCLUSIVE**, with a mean of +0.25.
 
-*Look and multiplicity arithmetic.* If two looks had been planned, each would use $\alpha/2$: $t_{0.9875,9}=2.685$ and the interval widens to $[-0.150,\,0.650]$. If five exploratory slices were scanned, each would use $t_{0.995,9}=3.250$, a half-width 1.44 times larger. Five independent reruns of a gate sitting at its threshold pass at least once with probability $1-0.975^5=0.119$; ten reruns, 0.224.
+*Look and multiplicity arithmetic.* If two looks had been planned, each would use $\alpha/2$: $t_{0.9875,9}=2.685$ and the interval widens to $[-0.150,\,0.650]$. If five exploratory slices were scanned, each would use $t_{0.995,9}=3.250$, a half-width 1.44 times larger ($3.250/2.262$). Five independent reruns of a gate sitting at its threshold pass at least once with probability $1-0.975^5=0.119$; ten reruns, 0.224.
 
 *Planning calculation.* Treat $s_b=0.4714$ as a pilot value and plan for $\delta=0.25$, $\epsilon=0.05$, $\alpha=0.05$, power 0.80:
 
 $$G\ge\left(\frac{(1.960+0.842)\times0.4714}{0.25-0.05}\right)^2=43.6\ \Rightarrow\ 44\text{ users}.$$
+
+Step-by-step: $1.960+0.842=2.802$; $2.802\times0.4714=1.321$; $1.321/0.20=6.604$; $6.604^2=43.6$; round up to 44.
 
 The answer is sensitive to the pilot: $s_b=0.35$ gives 25 users and $s_b=0.60$ gives 71. A planning effect of 0.15 gives 175.
 
@@ -451,7 +485,9 @@ Join task quality with safety, latency, cost, and completion. A thresholded offe
 
 $$G=\frac{1}{T}\sum_i \mathbf{1}[q_i\ge q^*,\ l_i\le l^*,\ c_i\le c^*,\ terminal_i=accepted],$$
 
-with units of useful accepted requests per time. Thresholds are workload decisions; show sensitivity and the quality–latency–cost frontier.
+with units of useful accepted requests per time.
+
+where $T$ is the observation window length, $i$ ranges over all offered requests in that window, $q_i,l_i,c_i$ are request $i$'s quality, latency, and cost, $q^*,l^*,c^*$ are the declared thresholds, $terminal_i$ is its terminal class, and $\mathbf{1}[\cdot]$ is 1 if every condition holds and 0 otherwise. Here $G$ means goodput, not the block count $G$ of Lesson 15.4, and $T$ means time, not the tie count of Lesson 15.3. Dividing the same count by the number of offered requests instead of $T$ gives the offered success rate. Thresholds are workload decisions; show sensitivity and the quality–latency–cost frontier.
 
 **Worked Example (synthetic):**
 - *Input*: in 100 s, 50 requests are offered. 30 accepted outcomes satisfy the quality, latency, and cost thresholds; 8 time out; 4 refuse; 3 fail tools; 5 remain unfinished.
@@ -570,7 +606,7 @@ These follow from stated assumptions (**D**, CLM-001, CLM-003, CLM-004, CLM-008,
 
 **FRONTIER** (each scoped to what was read)
 
-- [LiveBench](https://proceedings.iclr.cc/paper_files/paper/2025/hash/e4a46394ba5378b3f9a186a5b4c650d1-Abstract-Conference.html) — White et al., ICLR 2025. Abstract re-opened 2026-10-01. Frequently updated questions from recent sources, objective ground-truth scoring, and varied tasks (**O**, CLM-012). No result figure from it is used here.
+- [LiveBench](https://arxiv.org/abs/2406.19314) — White et al., ICLR 2025 (arXiv v2 comment: "ICLR 2025 Spotlight"). Abstract re-opened 2026-11-09; the earlier ICLR proceedings link was unreachable. Frequently updated questions from recent sources, objective ground-truth scoring, and varied tasks (**O**, CLM-012). No result figure from it is used here.
 - [JudgeArena](https://arxiv.org/abs/2608.02620) — Lushtaku et al., 2026, arXiv v1. Abstract-level, opened 2026-10-01. One interface over several judge benchmarks with swappable judges and metadata logging (**O**, CLM-017). Its claims about tuned open judges are author-reported and not reproduced; its adoption is unknown.
 - The wider 2025–2026 landscape of evaluation-statistics tooling and sequential release testing was not surveyed (`TODO_VERIFY`, CLM-025).
 
@@ -757,6 +793,12 @@ A learner successfully completing Module 15 must be able to:
 - **The Core Invariant**: Evaluation is a versioned measurement-and-decision system.
 - **The Evidence Path**: decision/population → sampled observations → graders → block-level estimates → explicit gates → guarded online validation.
 - Credibility comes from population fit, valid observations, explicit value judgments, complete denominators, and falsifiable links to production outcomes—not from a precise-looking score.
+
+### Cost & Telemetry Hook
+- [Lesson 22.1](../22-ai-economics/README.md): report evaluation cost per offered item, counting failed, retried, and unfinished runs in the denominator.
+- [Lesson 22.3](../22-ai-economics/README.md): record dated grader/judge prices and reconcile run cost against the provider invoice.
+- [Lesson 23.1](../23-observability-reliability/README.md): emit run, dataset, harness, and grader versions as pinned signal attributes.
+- [Lesson 23.5](../23-observability-reliability/README.md): treat online judge scores as proxies; join delayed labels before trusting offline-to-online transfer.
 
 ## 12 Competency Targets
 

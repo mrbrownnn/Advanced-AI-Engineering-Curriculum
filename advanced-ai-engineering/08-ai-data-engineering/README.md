@@ -99,6 +99,15 @@ Datasheets document motivation, composition, collection, processing, use, distri
 **Quantitative Model / Derivation:**
 A dataset display name or mutable URI is not identity. If output is $D=f(S,C,E,R)$ for source bytes $S$, code/config $C$, execution semantics $E$, and randomness/external results $R$, replay requires those arguments or an explicit statement that replay is impossible. Documentation can be stale; hashes do not establish consent, license, authority, retention permission, quality, or fitness. Keep both, and propagate deletion/expiry obligations through derived releases.
 
+*Reading the formula.* $f$ is the whole build pipeline, treated as a function. Replay means calling $f$ again and getting the same $D$, which is only possible when every argument is the same:
+
+- $S$ fixed: the same source **bytes** (a snapshot plus its hash), not "the same URI", because a URI can later point to different bytes.
+- $C$ fixed: the same code revision and configuration (filters, thresholds, tokenizer version, normalizer version).
+- $E$ fixed: the same execution semantics (library versions, file ordering, parallelism), because these can change results even with identical $S$ and $C$.
+- $R$ fixed: the same seeds and the same answers from external calls (API responses, generator outputs). If an external call cannot be repeated, its outputs must be snapshotted, or the manifest must say replay is impossible.
+
+If any one argument is unpinned, two builds may differ and nothing in the manifest can say why. Symbol note: here $D$ is the output dataset; in the worked example below, `D` names the dedup transform, and in evidence tags **D** means "derivation". These are three unrelated uses.
+
 **Break cases:** upstream overwrite, nondeterministic file order, unpinned tokenizer, mutable API response, undocumented manual edit, changed normalization, and a seed that does not cover distributed nondeterminism.
 
 Datasheets complement but do not replace executable lineage (**O**, CLM-001; **D**, CLM-002).
@@ -120,7 +129,7 @@ Release R1 = {s1/r1, s1/r2, s1/r3, syn1}: 4 records from 5 inputs. The ledger st
 
 *Step 2: deletion.* A deletion request arrives for s1/r3. Walking the lineage graph gives the affected set {s1/r3, syn1}: syn1 is a descendant even though its text differs. R3 = {s1/r1, s1/r2@v2}. Consumers that trained on R1 or R2 are notified. Deleting from the data does **not** delete from trained weights; what happens to those models is a separate policy decision (Module 19).
 
-*Result.* The release sizes are 4 → 4 → 2. A hash-only view would miss syn1, because no hash links it to s1/r3; only the parent edge does.
+*Result.* The release sizes are 4 → 4 → 2 (R1: 5 inputs − 1 duplicate = 4; R2: one record swapped for its new version, still 4; R3: 4 − |{s1/r3, syn1}| = 2). A hash-only view would miss syn1, because no hash links it to s1/r3; only the parent edge does.
 
 *Interpretation and limits.* Hashes prove byte identity only. Eligibility, meaning consent, license, and retention, lives in separate metadata that can change while bytes stay the same. Replay of `G` is exact only if the generator is deterministic under the recorded seed, or if its outputs were snapshotted.
 
@@ -178,9 +187,15 @@ Infer schemas for exploration, then review and version them. A bad baseline can 
 
 *Steps.* Orders 101 and 103 each match two profile rows, so the output has $4+2=6$ rows. Summed revenue becomes $1250\cdot2+4000+999\cdot2+1500=9998$ cents instead of $7749$, a 29.0% inflation. Every row is individually valid.
 
+Step by step: a left join emits, for each left row, one output row per matching right row (or one row with nulls if there is no match). So
+
+$$|out|=\sum_{\text{orders } o}\max\bigl(1,\,m(o)\bigr),$$
+
+where $m(o)$ is the number of `profiles` rows with the same `user_id` as order $o$. Here $m=2$ for u1 and $m=1$ for u2 and u3, so $|out|=2+1+2+1=6$. Each order's amount is counted $m(o)$ times: the correct total is $1250+4000+999+1500=7749$; the extra copies of orders 101 and 103 add $1250+999=2249$, giving $7749+2249=9998$; and $2249/7749\approx0.290$, the 29.0% inflation.
+
 *Invariant checks that catch it.* (1) Key uniqueness on the dimension side: `profiles.user_id` is unique fails, with u1 appearing twice. (2) Row conservation for a many-to-one left join: $|out|=|orders|$ fails, since $6\ne4$. (3) An additive total reconciled against the source ledger: $9998\ne7749$ fails.
 
-*Second defect, units.* The event timestamp `1727700000000` is epoch **milliseconds**. It passes an "int64, non-negative" check. Read as seconds, it lies about 54,748 years after 1970. A declared-unit check or a collection-window range check (for example, a 2020–2030 window) catches it; a type check cannot.
+*Second defect, units.* The event timestamp `1727700000000` is epoch **milliseconds**. It passes an "int64, non-negative" check. Read as seconds, it lies about 54,748 years after 1970 ($1.7277\times10^{12}\,\text{s}\div(365.2425\cdot86400\,\text{s/year})\approx54{,}748$ years). Read correctly as milliseconds, it is $1{,}727{,}700{,}000$ s after 1970, which is 2024-09-30 UTC. A declared-unit check or a collection-window range check (for example, a 2020–2030 window) catches it; a type check cannot.
 
 *Result.* Schema validation passed both defective batches. Only relational invariants and semantic range checks rejected them.
 
@@ -215,6 +230,8 @@ Let $P_S$ be the reference (training) distribution and $P_T$ the current (servin
 
 $$P(X,Y)=P(Y|X)P(X)=P(X|Y)P(Y).$$
 
+Both equalities are the definition of conditional probability, $P(Y\mid X)=P(X,Y)/P(X)$ and $P(X\mid Y)=P(X,Y)/P(Y)$, each multiplied back out. Read them as two recipes for generating one data point: "draw an input, then its label" or "draw a label, then an input that fits it". A shift type says which ingredient of a recipe changed between $P_S$ and $P_T$.
+
 A named shift type is a claim about **which factor changes and which stays invariant**. The invariant is the assumption that makes correction methods work, so it must be stated:
 
 | shift type | what changes | what is assumed invariant | what unlabeled $X$ monitoring can see |
@@ -234,7 +251,13 @@ For $B$ bins with current proportions $p_i$ and reference proportions $q_i$, bot
 
 $$PSI=\sum_{i=1}^{B}(p_i-q_i)\ln\frac{p_i}{q_i}.$$
 
-Each term is non-negative, because $p_i-q_i$ and $\ln(p_i/q_i)$ have the same sign. A zero bin makes a term undefined, so a pseudocount or bin-merging policy is part of the metric definition (**D**, CLM-005). PSI changes with bins and smoothing. There is no universal cutoff or quality mapping. Calibrate alerts against incidents, downstream labels, lead time, operator cost, and simpler baselines (**H**, CLM-014).
+where:
+
+- $B$ is the number of bins (fixed edges, shared by both histograms);
+- $p_i$ is the fraction of **current** values in bin $i$ and $q_i$ the fraction of **reference** values, so $\sum_i p_i=\sum_i q_i=1$;
+- $\ln$ is the natural log.
+
+Each term is non-negative, because $p_i-q_i$ and $\ln(p_i/q_i)$ have the same sign. (If $p_i>q_i$ then $p_i/q_i>1$ and the log is positive; if $p_i<q_i$ both factors are negative; if they are equal the term is 0.) So PSI is 0 only when every bin share is unchanged. The log makes a small bin that empties out expensive: $q_i=0.1$ falling to $p_i=0.001$ contributes $(-0.099)\ln(0.01)\approx0.456$, while $q_i=0.5$ falling to $p_i=0.4$ contributes only $(-0.1)\ln(0.8)\approx0.022$, although both lose about 0.1 of share. A zero bin makes a term undefined, so a pseudocount or bin-merging policy is part of the metric definition (**D**, CLM-005). PSI changes with bins and smoothing. There is no universal cutoff or quality mapping. Calibrate alerts against incidents, downstream labels, lead time, operator cost, and simpler baselines (**H**, CLM-014).
 
 **Worked Example 1 (synthetic mixed-shift joint distribution):**
 *Input.* $X\in\{a,b\}$ (for example, query language) and $Y\in\{0,1\}$ (answer needs escalation). The deployed rule predicts $\hat Y=0$ for $a$ and $\hat Y=1$ for $b$.
@@ -248,14 +271,24 @@ Each term is non-negative, because $p_i-q_i$ and $\ln(p_i/q_i)$ have the same si
 
 *Steps.* $T_1$ keeps $P(Y\mid X)$ from $S$ and sets $P(X=a)=0.7$. $T_2$ has the same $P(X)$ but raises $P(Y=1\mid a)$ from 0.1 to 0.4, so $P(Y\mid X)$ changed. It is also not a label shift, because $P(X=a\mid Y=1)$ moves from $0.087$ to $0.571$. $T_3$ sets $P(Y=1)=0.2$ and keeps $P(X\mid Y)$ from $S$; for example $P(X=a\mid Y=0)=0.667$ in both $S$ and $T_3$. In $T_3$, $P(Y\mid X)$ changes as a *consequence*, which is why label-shift correction must not assume $P(Y\mid X)$ is fixed. The error is $P(a,1)+P(b,0)$.
 
-*Result.* $T_1$ and $T_2$ have **identical** $P(X)$, so any unlabeled $X$ monitor gives the same alarm for both. PSI on $X$ is $(0.7-0.4)\ln(0.7/0.4)+(0.3-0.6)\ln(0.3/0.6)=0.376$ in each case. Yet the rule's error *falls* from 0.22 to 0.16 under $T_1$ and *rises* to 0.37 under $T_2$.
+How each row is read and built (all values from the table):
+
+- Marginal and conditionals from a joint row: $P(X=a)=P(a,0)+P(a,1)$ and $P(Y=1\mid a)=P(a,1)/P(X=a)$. For $S$: $0.36+0.04=0.40$ and $0.04/0.40=0.10$; $P(Y=1\mid b)=0.42/0.60=0.70$; $P(Y=1)=0.04+0.42=0.46$.
+- Error of the rule: it predicts 0 on $a$, so it is wrong on $(a,1)$; it predicts 1 on $b$, so it is wrong on $(b,0)$. For $S$: $0.04+0.18=0.22$.
+- $T_1$ (keep $P(Y\mid X)$, change $P(X)$): $P(a,1)=0.7\cdot0.1=0.07$, $P(a,0)=0.63$, $P(b,1)=0.3\cdot0.7=0.21$, $P(b,0)=0.09$.
+- $T_2$ (same $P(X)$ as $T_1$, change $P(Y\mid a)$): $P(a,1)=0.7\cdot0.4=0.28$, $P(a,0)=0.42$; the $b$ cells are as in $T_1$. Label-shift check: $P(X=a\mid Y=1)=P(a,1)/P(Y=1)$ is $0.04/0.46=0.087$ in $S$ and $0.28/0.49=0.571$ in $T_2$.
+- $T_3$ (keep $P(X\mid Y)$, change $P(Y)$): from $S$, $P(a\mid Y=0)=0.36/0.54=0.667$ and $P(a\mid Y=1)=0.04/0.46=0.087$. Multiply by the new priors $P(Y=0)=0.8$, $P(Y=1)=0.2$: $P(a,0)=0.8\cdot0.667=0.533$, $P(a,1)=0.2\cdot0.087=0.017$, $P(b,0)=0.8\cdot0.333=0.267$, $P(b,1)=0.2\cdot0.913=0.183$. Then $P(Y=1\mid a)=0.017/0.551=0.032$, no longer 0.10.
+
+*Result.* $T_1$ and $T_2$ have **identical** $P(X)$, so any unlabeled $X$ monitor gives the same alarm for both. PSI on $X$ is $(0.7-0.4)\ln(0.7/0.4)+(0.3-0.6)\ln(0.3/0.6)=0.376$ in each case (term by term: $0.3\cdot0.560=0.168$ and $(-0.3)(-0.693)=0.208$). Yet the rule's error *falls* from 0.22 to 0.16 under $T_1$ and *rises* to 0.37 under $T_2$.
 
 *Interpretation and limits.* The alarm is necessary evidence that something moved, but it cannot tell $T_1$ from $T_2$, and so cannot tell harmless from harmful. Discriminating them needs delayed labels, a labeled canary slice, or a justified causal proxy. This is a four-cell toy; real drift involves high-dimensional $X$ and uncertain estimates.
 
 **Worked Example 2 (synthetic PSI with zero bins):**
 *Input.* Four fixed bins of one feature. Reference counts are $(120,380,400,100)$ and current counts are $(300,350,350,0)$, with $n=1000$ each.
 
-*Steps.* The last current bin is empty, so the raw PSI term $(0-0.1)\ln(0/0.1)$ is undefined. Policy A adds a pseudocount $\epsilon=0.5$ to every bin of both histograms and renormalizes; the terms are $0.1642, 0.0025, 0.0067, 0.5293$, so $PSI=0.702$. Policy B uses $\epsilon=5$, giving $PSI=0.465$. Policy C merges bins 3 and 4, giving proportions $(0.30,0.35,0.35)$ vs $(0.12,0.38,0.50)$ and $PSI=0.221$.
+*Steps.* The last current bin is empty, so the raw PSI term $(0-0.1)\ln(0/0.1)$ is undefined. Policy A adds a pseudocount $\epsilon=0.5$ to every bin of both histograms and renormalizes, so each proportion becomes $(\text{count}_i+\epsilon)/(n+B\epsilon)$ with $n=1000$, $B=4$ (denominator 1002). The empty bin becomes $p_4=0.5/1002=0.0005$ against $q_4=100.5/1002=0.1003$, so its term is $(0.0005-0.1003)\ln(0.0005/0.1003)=(-0.0998)(-5.30)=0.529$. All four terms are $0.1642, 0.0025, 0.0067, 0.5293$, so $PSI=0.702$. Policy B uses $\epsilon=5$, giving $PSI=0.465$. Policy C merges bins 3 and 4, giving proportions $(0.30,0.35,0.35)$ vs $(0.12,0.38,0.50)$ and $PSI=0.221$.
+
+Why the policies disagree: most of the PSI comes from the emptied bin, and its log-ratio is set by $\epsilon$. A smaller pseudocount pushes $p_4$ closer to 0 and the log more negative, so PSI rises; merging removes the empty bin entirely.
 
 *Result.* The same data gives PSI of 0.70, 0.46, or 0.22 depending on a policy choice. Under a hypothetical cut-off of 0.25, the alert fires or not depending on the smoothing rule.
 
@@ -264,13 +297,19 @@ Each term is non-negative, because $p_i-q_i$ and $\ln(p_i/q_i)$ have the same si
 **Worked Example 3 (synthetic 30-day alert cost table):**
 *Exercise assumptions.* Each alert costs 1.5 engineer-hours at 80 per hour. Each missed incident costs 3,000. The window contains 5 labeled incidents.
 
+Formulas used in the table, with $A$ = alerts fired and $k$ = true incidents flagged:
+
+- precision $=k/A$ (share of alerts that were real); recall $=k/5$ (share of incidents caught);
+- investigation cost $=A\cdot1.5\cdot80=120A$; missed-incident cost $=(5-k)\cdot3000$;
+- total = investigation + missed. Row 1: $120\cdot40=4800$ plus $(5-4)\cdot3000=3000$, total 7,800.
+
 | alert rule | alerts | true incidents flagged | precision | recall | investigation cost | missed-incident cost | total |
 |---|---|---|---|---|---|---|---|
 | PSI > 0.10 on any feature | 40 | 4 | 0.10 | 0.80 | 4,800 | 3,000 | 7,800 |
 | PSI > 0.25 **and** labeled canary-slice drop | 8 | 3 | 0.375 | 0.60 | 960 | 6,000 | 6,960 |
 | labeled canary only | 3 | 2 | 0.67 | 0.40 | 360 | 9,000 | 9,360 |
 
-*Result.* Under these costs the combined rule has the lowest total, even though neither its precision nor its recall is the best. Doubling the miss cost to 6,000 changes the totals to 10,800 / 12,960 / 18,360, so the broad PSI rule becomes cheapest.
+*Result.* Under these costs the combined rule has the lowest total, even though neither its precision nor its recall is the best. Doubling the miss cost to 6,000 changes the totals to 10,800 / 12,960 / 18,360, so the broad PSI rule becomes cheapest. (Only the missed term doubles: $4800+1\cdot6000$, $960+2\cdot6000$, $360+3\cdot6000$.)
 
 *Interpretation and limits.* The ranking of alert rules depends on the cost ratio, which is a product decision. Five incidents give very wide uncertainty on recall, so evaluate on held-out windows before adopting a rule (**H**, CLM-014).
 
@@ -319,7 +358,7 @@ Lee et al. provide scoped evidence that deduplication reduced memorized output a
 | P5 | same topic, different content | 0 | no | no | 0.84 |
 | P6 | shared boilerplate template | 0 | no | no | 0.62 |
 
-*Steps.* Precision = flagged pairs that are truly derived ÷ flagged pairs. Recall = flagged derived pairs ÷ 4 derived pairs.
+*Steps.* Precision = flagged pairs that are truly derived ÷ flagged pairs. Recall = flagged derived pairs ÷ 4 derived pairs. In symbols, with $TP$ = flagged pairs labeled 1 and $FP$ = flagged pairs labeled 0: precision $=TP/(TP+FP)$ and recall $=TP/4$. For example, embedding ≥ 0.80 flags P1, P2, P3 ($TP=3$) and P5 ($FP=1$): precision $3/4=0.75$, recall $3/4=0.75$. A threshold detector flags every pair scoring at or above the cut, so lowering the cut only adds flags: recall can only rise, and precision falls whenever an added pair is non-derived.
 
 | detector | flags | precision | recall |
 |---|---|---|---|
@@ -329,7 +368,7 @@ Lee et al. provide scoped evidence that deduplication reduced memorized output a
 | embedding ≥ 0.80 | P1, P2, P3, P5 | 0.75 | 0.75 |
 | embedding ≥ 0.70 | P1–P5 | 0.80 | 1.00 |
 
-*Result.* Exact matching reports "one contaminated item" while three derived items remain. No threshold on this score separates the translation (0.71) from the unrelated same-topic document (0.84), so full recall costs a false merge.
+*Result.* Exact matching reports "one contaminated item" while three derived items remain. Sorting pairs by score shows why: P1 1.00, P2 0.99, P3 0.88, **P5 0.84**, P4 0.71, P6 0.62. A non-derived pair sits between two derived ones, so no threshold on this score separates the translation (0.71) from the unrelated same-topic document (0.84), so full recall costs a false merge.
 
 *Interpretation and limits.* A "clean" report is a statement about one detector on one accessible snapshot. Six pairs are far too few to estimate a detector's rates, so a real audit needs a labeled sample sized for the decision. Removing P5 as a "duplicate" deletes legitimate training content.
 
@@ -361,7 +400,7 @@ Does generated data add coverage or amplify the generator's blind spots?
 - **Synthetic record:** a training or evaluation record whose content was produced by a model rather than observed. It remains a derived artifact with parents, never a source.
 - **Generator:** the pinned model, prompt, decoding settings, seed, and tools that produced the record.
 - **Filter / judge:** the pinned rule or model that accepts, rejects, or labels generated records. If it shares a model family with the generator, the two can share errors.
-- **Mixture weight:** the fraction of training work (tokens or examples, declared) drawn from synthetic records. "30% synthetic" is ambiguous until the unit is stated.
+- **Mixture weight:** the fraction of training work (tokens or examples, declared) drawn from synthetic records. "30% synthetic" is ambiguous until the unit is stated. Example: 7,000 real examples of 300 tokens and 3,000 synthetic examples of 900 tokens are 30% synthetic by examples ($3000/10000$) but 56.25% synthetic by tokens ($2.7\text{M}/4.8\text{M}$).
 - **Recursion round:** training generation $g+1$ on data that includes outputs of generation $g$. Model-collapse results concern this regime (**O**, CLM-009).
 - **Real-data anchor:** a fixed, independently collected set that every synthetic mixture is evaluated against, and ideally trained alongside.
 
@@ -382,7 +421,7 @@ Shumailov et al. show model-collapse behavior in recursive regimes; Seddik et al
 | 30% synthetic | 0.731 | 0.552 | 11% |
 | 60% synthetic | 0.735 | 0.470 | 6% |
 
-*Steps.* Mean gain vs real-only is $+0.012, +0.031, +0.035$; rare-slice change is $-0.002, -0.048, -0.130$. The filter rejection rate falls as the synthetic share rises, which is worth checking: either the generator is improving or the filter is increasingly agreeing with it.
+*Steps.* Mean gain vs real-only is $+0.012, +0.031, +0.035$; rare-slice change is $-0.002, -0.048, -0.130$ (each is the row value minus the real-only value, e.g. $0.731-0.700=+0.031$ and $0.552-0.600=-0.048$). At equal training tokens, a synthetic share $w$ leaves a fraction $1-w$ of the budget for real tokens: at 60% synthetic, real tokens, rare-language ones included, drop to 40% of the real-only run. The filter rejection rate falls as the synthetic share rises, which is worth checking: either the generator is improving or the filter is increasingly agreeing with it.
 
 *Result.* Beyond 10%, the mean rises while the rare slice falls. The "best mean" choice (60%) costs 13 points on the rare slice.
 
@@ -436,9 +475,9 @@ Plot representative holdout utility against cumulative annotation cost. Keep ini
 | uncertainty | 250 | 4.0 | 60 | 16.7 | 1,000 | 3.2 | 1.28 | 312.5 |
 | hybrid (uncertainty + diversity) | 300 | 2.5 | 60 | 12.5 | 750 | 3.4 | 1.13 | 220.6 |
 
-*Steps.* Cost = items × minutes/60 × rate. Uncertainty sampling picks harder items that need an expert rate and take longer per item.
+*Steps.* Cost = items × minutes/60 × rate. Gain per 100 items = gain ÷ items × 100. Cost per point = cost ÷ gain. For uncertainty: $250\times4.0/60=16.7$ hours, $16.7\times60=1000$; $3.2/250\times100=1.28$; $1000/3.2=312.5$. Uncertainty sampling picks harder items that need an expert rate and take longer per item.
 
-*Result.* Per item, uncertainty sampling looks best (1.28 points per 100 items). Per unit cost, random sampling is 3.1× cheaper per point (100 vs 312.5). The ranking reverses when the objective changes from items to cost.
+*Result.* Per item, uncertainty sampling looks best (1.28 points per 100 items). Per unit cost, random sampling is 3.1× cheaper per point (100 vs 312.5; $312.5/100=3.125$). The ranking reverses when the objective changes from items to cost.
 
 *Interpretation and limits.* These numbers are exercise assumptions from one round with no uncertainty; real comparisons need repeated rounds and intervals on the gains. The uncertainty strategy's items also cannot be used as a test set, because they were selected by the model.
 
@@ -608,6 +647,12 @@ A learner passes when they can replay a release, break schema-green data, distin
 ### Module Wrap-Up (Final Mental Model Reconstruction)
 
 Data engineering is controlled evidence transformation. Preserve identity, authority, eligibility, and ancestry; validate progressively; keep evaluation independent; measure drift against consequences; and never let feedback data erase the distinction between observation and model-generated belief.
+
+### Cost & Telemetry Hook
+
+- [Lesson 22.2](../22-ai-economics/README.md): cost a dataset release fully loaded — labeling, adjudication, dedup compute, and deletion propagation, not storage alone.
+- [Lesson 23.1](../23-observability-reliability/README.md): emit dataset version, lineage ID, and gate result with every training and eval run.
+- [Lesson 23.5](../23-observability-reliability/README.md) and [Lesson 23.6](../23-observability-reliability/README.md): feedback labels arrive late and are model-influenced; govern them as telemetry, and separate drift alarms from data incidents.
 
 ## 12 Competency Targets
 

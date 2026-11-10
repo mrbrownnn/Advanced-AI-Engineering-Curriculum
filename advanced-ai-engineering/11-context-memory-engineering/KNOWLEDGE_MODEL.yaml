@@ -174,7 +174,7 @@ todo_verify:
     evidence_ids: []
     derived_from: ["RESEARCH-01"]
   - id: "TODO-03"
-    description: "TODO_VERIFY: full methods and results of MemoryAgentBench, Xiong et al., IFCMemoryBench, the prompt-compression study, RULER, Lost in the Middle, MemGPT, and Generative Agents were not re-audited in this revision; the incomplete-or-fragmented wording for IFCMemoryBench rests on the earlier reading."
+    description: "TODO_VERIFY: full methods and results of MemoryAgentBench, Xiong et al., IFCMemoryBench, the prompt-compression study, RULER, Lost in the Middle, MemGPT, and Generative Agents were not re-audited in this revision."
     evidence_ids: ["CLM-003", "CLM-004", "CLM-006", "CLM-007", "CLM-011", "CLM-012", "CLM-013", "CLM-014"]
     derived_from: []
 

@@ -174,7 +174,7 @@ Does generating more candidates improve opportunity, selection, or both?
 **Concepts & Definitions:**
 
 - **Candidate**: one complete generation for an item under a stated sampling contract (Module 01, Lesson 1.2).
-- **Self-consistency**: sample several reasoning paths, parse a final answer from each, and return the most frequent answer. Wang et al. define the aggregation as $\arg\max_a\sum_i\mathbb{1}(a_i=a)$ and call it a majority vote (**O**, CLM-002). Operationally this is a **plurality** vote: the winning answer needs the most votes, not more than half. A production implementation must also define answer normalization, invalid parses, abstentions, tie-breaking, duplicate handling, and whether it uses plurality, weighted voting, or a separate verifier.
+- **Self-consistency**: sample several reasoning paths, parse a final answer from each, and return the most frequent answer. Wang et al. define the aggregation as $\arg\max_a\sum_i\mathbb{1}(a_i=a)$ and call it a majority vote (**O**, CLM-002). Operationally this is a **plurality** vote: the winning answer needs the most votes, not more than half. *Reading the formula*: $a_i$ is the parsed answer of candidate $i$; $\mathbb{1}(a_i=a)$ is 1 if candidate $i$ gave answer $a$ and 0 otherwise; the sum therefore counts the votes for $a$, and $\arg\max_a$ returns the answer with the most votes. Example: answers $(7,9,9,7,9)$ give 2 votes for 7 and 3 for 9, so the vote returns 9. A production implementation must also define answer normalization, invalid parses, abstentions, tie-breaking, duplicate handling, and whether it uses plurality, weighted voting, or a separate verifier.
 - **Independent draws (operational definition)**: $k$ candidates for one item are independent draws when each is generated from the same prompt, model, and processor chain with its own random stream: no shared seed, no reuse of a cached sampled response, no deduplication, and no candidate conditioned on an earlier candidate. Under that protocol, and conditional on the item, the correctness indicators are independent with one item-specific probability $p_i$.
 - **Dependent candidates**: any case where that protocol does not hold or where the item is not fixed.
   - *Greedy decoding*: every candidate is the same sequence in exact arithmetic, so pass@k equals pass@1.
@@ -184,6 +184,9 @@ Does generating more candidates improve opportunity, selection, or both?
 - **Selected accuracy**: the event that the one answer the system returns is correct. It measures opportunity and selection together.
 - **Strict majority** means more than $k/2$ candidates agree. Plurality can select an answer without a strict majority.
 - **Combinations and the binomial distribution**: $\binom{n}{k}=\frac{n!}{k!(n-k)!}$ counts the size-$k$ subsets of $n$ things. If $k$ trials are independent with success probability $p$, the number of successes $J$ satisfies $P(J=j)=\binom{k}{j}p^j(1-p)^{k-j}$.
+  - *Why*: one particular ordering with $j$ successes and $k-j$ failures has probability $p^j(1-p)^{k-j}$ (independence lets the per-trial probabilities multiply), and $\binom{k}{j}$ counts the orderings, i.e. the ways to choose which $j$ of the $k$ trials succeed.
+  - *Example*: $\binom{5}{3}=\frac{5!}{3!\,2!}=\frac{120}{6\cdot2}=10$. With $k=3$, $p=0.4$: $P(J=2)=\binom{3}{2}(0.4)^2(0.6)=3\cdot0.16\cdot0.6=0.288$.
+- **Notation used in this lesson**: $p$ (or $p_i$ for item $i$) is the probability that one candidate is correct; $k$ is the number of candidates considered; $n$ is the number of candidates actually observed for an item, and $c$ how many of those are correct; $\bar p$ is the average of $p_i$ over items; $\mathbb{E}_i[\cdot]$ averages over items. Lesson 6.3 reuses $k$ for thoughts per state, and Lesson 6.5 reuses $j$, $a$, $b$ with different meanings; each is redefined there.
 
 **Quantitative Model / Derivation:**
 
@@ -193,6 +196,8 @@ $$
 P(\text{at least one correct})=1-(1-p)^k.
 $$
 
+*Step-by-step*: (1) "at least one correct" is the complement of "all $k$ wrong"; (2) one candidate is wrong with probability $1-p$; (3) independence lets the $k$ wrong-probabilities multiply, giving $P(\text{all wrong})=(1-p)^k$; (4) subtract from 1. Example: $p=0.4$, $k=3$ gives $1-0.6^3=1-0.216=0.784$.
+
 *Model 2 — a population of items.* With independent draws per item and item-specific $p_i$, population pass@k is the average of the per-item values, and it is bounded by the pooled formula (**D**, CLM-017):
 
 $$
@@ -201,13 +206,19 @@ $$
 
 with equality only when all $p_i$ are equal (for $k\ge2$), because $(1-p)^k$ is convex in $p$. Plugging a pooled single-sample accuracy into Model 1 therefore *overstates* population pass@k whenever items differ in difficulty. Neither model applies when the draws themselves are dependent.
 
+*Step-by-step*: (1) for a random item, pass@k is $1-(1-p_i)^k$, so the population value averages it: $1-\mathbb{E}_i[(1-p_i)^k]$; (2) $f(p)=(1-p)^k$ curves upward (convex; its second derivative $k(k-1)(1-p)^{k-2}$ is $\ge0$, and $>0$ for $k\ge2$, $p<1$); (3) Jensen's inequality for a convex $f$ gives $\mathbb{E}_i[f(p_i)]\ge f(\mathbb{E}_i[p_i])=(1-\bar p)^k$; (4) subtracting both sides from 1 flips the inequality. Example (Worked Example C below): $p_i\in\{0.8,0\}$ with equal weight, $k=3$: $\mathbb{E}_i[(1-p_i)^3]=0.5\cdot0.008+0.5\cdot1=0.504$, so population pass@3 $=0.496$, while $(1-0.4)^3=0.216$ gives the pooled $0.784$.
+
 *Model 3 — finite-sample estimator.* Given $n$ observed candidates for an item, $c$ of them correct, the probability that a uniformly chosen subset of size $k\le n$ contains at least one correct candidate is (**D**, CLM-010):
 
 $$
 \widehat{pass@k}=1-\frac{\binom{n-c}{k}}{\binom{n}{k}},
 $$
 
-taken as 1 when $n-c<k$. Chen et al. average this over problems, state that it is an unbiased estimate of per-problem $1-(1-p_i)^k$ when the $n$ samples are independent draws, and show that the plug-in $1-(1-c/n)^k$ underestimates it (**O**, CLM-018). It is an oracle set metric, not selected accuracy.
+taken as 1 when $n-c<k$.
+
+*Step-by-step*: (1) there are $\binom{n}{k}$ equally likely size-$k$ subsets of the $n$ candidates; (2) a subset has no correct candidate only if all $k$ members come from the $n-c$ wrong ones, which can happen in $\binom{n-c}{k}$ ways; (3) the ratio is the probability of an all-wrong subset, and its complement is the estimate; (4) when $n-c<k$ no all-wrong subset exists, hence the value 1. Example: $n=5$, $c=2$, $k=3$: $\binom{3}{3}=1$ all-wrong subset out of $\binom{5}{3}=10$, so $\widehat{pass@3}=1-1/10=0.9$.
+
+Chen et al. average this over problems, state that it is an unbiased estimate of per-problem $1-(1-p_i)^k$ when the $n$ samples are independent draws, and show that the plug-in $1-(1-c/n)^k$ underestimates it (**O**, CLM-018). It is an oracle set metric, not selected accuracy.
 
 *Model 4 — strict majority of independent binary votes.* For odd $k$ (**D**, CLM-011):
 
@@ -216,11 +227,13 @@ P(\text{majority correct})=
 \sum_{j=(k+1)/2}^{k}\binom{k}{j}p^j(1-p)^{k-j}.
 $$
 
+*Step-by-step*: (1) treat each candidate as a binary vote, correct with probability $p$, so the number of correct votes $J$ is binomial; (2) for odd $k$, "more than $k/2$" means $J\ge(k+1)/2$ (odd $k$ also rules out a tie); (3) add the binomial probabilities of those $J$ values. Example: $k=5$, $p=0.4$ needs $J\in\{3,4,5\}$: $10(0.4)^3(0.6)^2+5(0.4)^4(0.6)+(0.4)^5=0.2304+0.0768+0.01024\approx0.317$, the value used in Worked Example B.
+
 Real self-consistency uses multi-class plurality: wrong answers may split, one wrong answer may dominate through correlated error, and normalization can merge or fragment answers. Report at least single-sample accuracy, oracle pass@k, selected accuracy, parsing failure, answer entropy, duplicates, cost, and latency.
 
 **Worked Example A — the IID baseline (analytical inputs).**
 - *Input*: one item, independent draws, $p=0.4$, $k=3$.
-- *Steps*: oracle opportunity $=1-0.6^3=0.784$. Strict-majority correctness $=3(0.4)^2(0.6)+(0.4)^3=0.352$.
+- *Steps*: oracle opportunity $=1-0.6^3=0.784$. Strict-majority correctness $=3(0.4)^2(0.6)+(0.4)^3=0.352$ (Model 4 with $J\in\{2,3\}$: $0.288+0.064$).
 - *Result and limits*: the gap shows why oracle pass@k cannot be reported as selected accuracy. These are values of a formula under its assumptions, not forecasts for model samples.
 
 **Worked Example B — a candidate table (synthetic data).**
@@ -234,18 +247,19 @@ Real self-consistency uses multi-class plurality: wrong answers may split, one w
 | 4 | 5 | 6, 6, 8, 6, 6 | 0 | $1-\binom{5}{3}/\binom{5}{3}=0$ | 6 (4 votes) | no |
 
 - *Steps*:
-  - Single-sample accuracy $=(4+2+2+0)/20=0.40$.
+  - Single-sample accuracy $=(4+2+2+0)/20=0.40$ (correct candidates over all $4\times5=20$ candidates).
   - Finite-sample pass@3 $=(1+0.9+0.9+0)/4=0.70$.
   - Oracle set success over all five candidates $=3/4=0.75$ (items 1–3 contain a correct candidate).
   - Plurality-selected accuracy $=2/4=0.50$. Strict-majority correctness $=1/4=0.25$ (item 1 only).
   - Oracle–selection gap at $k=5$: $0.75-0.50=0.25$, all of it from item 2.
-- *Comparison with formulas*: the pooled IID formula gives $1-0.6^3=0.784$, above the estimated $0.70$. That is the direction Model 2 gives for items of unequal difficulty; with four items it is an illustration, not a test. The per-item plug-in $1-(1-c/n)^3$ averages $(0.992+0.784+0.784+0)/4=0.64$, below $0.70$, the direction Chen et al. report. The IID strict-majority formula at $p=0.4$, $k=5$ gives $0.317$, which matches neither the observed plurality accuracy ($0.50$) nor the observed strict-majority rate ($0.25$).
+- *Comparison with formulas*: the pooled IID formula gives $1-0.6^3=0.784$, above the estimated $0.70$. That is the direction Model 2 gives for items of unequal difficulty; with four items it is an illustration, not a test. The per-item plug-in $1-(1-c/n)^3$ (e.g. item 1: $1-(1-4/5)^3=1-0.2^3=0.992$) averages $(0.992+0.784+0.784+0)/4=0.64$, below $0.70$, the direction Chen et al. report. The IID strict-majority formula at $p=0.4$, $k=5$ gives $0.317$, which matches neither the observed plurality accuracy ($0.50$) nor the observed strict-majority rate ($0.25$).
 - *Result*: item 2 had a correct candidate that plurality did not select (a repeated wrong answer). Item 3 was selected correctly with only two of five votes because the wrong answers split. Item 4 had nothing to select.
 - *Interpretation and limits*: four synthetic items show the accounting, not an effect size. On real data, report uncertainty across items and keep the item as the unit of analysis.
 
 **Worked Example C — why independent sampling is not the same as independent correctness (synthetic mixture).**
 - *Input*: half of the items have $p_i=0.8$ and half have $p_i=0$; draws are independent within each item; $k=3$.
 - *Steps*: pooled $\bar p=0.4$. Population pass@3 $=0.5\,(1-0.2^3)+0.5\cdot0=0.496$. The pooled IID formula gives $0.784$. The correlation between the correctness of two candidates for the same random item is $(\mathbb{E}[p_i^2]-\bar p^2)/(\bar p(1-\bar p))=(0.32-0.16)/0.24\approx0.67$.
+  - *Where the correlation comes from*: let $X_1,X_2$ be the 0/1 correctness of two candidates for the same random item. Each has mean $\bar p$ and variance $\bar p(1-\bar p)$. Given the item they are independent, so $\mathbb{E}[X_1X_2]=\mathbb{E}_i[p_i\cdot p_i]=\mathbb{E}[p_i^2]$. Covariance $=\mathbb{E}[X_1X_2]-\bar p^2$; dividing by the common variance gives the correlation. Here $\mathbb{E}[p_i^2]=0.5\cdot0.8^2+0.5\cdot0^2=0.32$, $\bar p^2=0.16$, $\bar p(1-\bar p)=0.4\cdot0.6=0.24$. If all $p_i$ were equal, $\mathbb{E}[p_i^2]=\bar p^2$ and the correlation would be 0.
 - *Result*: the same single-sample accuracy as Example A yields a pass@3 of $0.496$ instead of $0.784$.
 - *Interpretation and limits*: nothing was wrong with the sampler. The dependence comes from the population, and more samples cannot help the items with $p_i=0$. If the draws themselves were fully dependent, so that the three candidates are identical, pass@3 would equal that decoder's pass@1. Under greedy decoding that is the greedy accuracy, which need not equal the sampled single-sample accuracy of $0.4$.
 
@@ -258,7 +272,7 @@ Real self-consistency uses multi-class plurality: wrong answers may split, one w
 Three items, $n=4$ candidates each, gold answer `x` in every item: item A answers `x, x, y, x`; item B answers `y, y, x, z`; item C answers `y, z, w, y`. Compute single-sample accuracy, finite-sample pass@2, plurality-selected accuracy over the four candidates, oracle set success, and the oracle–selection gap. Compare pass@2 with the pooled IID value and explain the difference. Then repeat on your own candidate table and inspect duplicated wrong answers.
 
 **Feedback Contract:**
-- *Expected Evidence*: for the three-item table: single-sample accuracy $4/12\approx0.333$; pass@2 per item $1$, $0.5$, $0$, mean $0.5$; plurality accuracy $1/3$ (only item A); oracle set success $2/3$; gap $1/3$, from item B; pooled IID value $1-(2/3)^2\approx0.556$, higher than $0.5$ because the items differ in difficulty. For your own table: candidate-level labels and seeds, answer normalization, tie policy, all formulas with assumptions, and uncertainty across items. Knowledge check: (1) independent draws and one common $p$; the common $p$ fails; (2) no; (3) the wrong answers split, so two votes are a plurality.
+- *Expected Evidence*: for the three-item table: single-sample accuracy $4/12\approx0.333$; pass@2 per item $1$, $0.5$, $0$, mean $0.5$ (e.g. item B: $c=1$, $1-\binom{3}{2}/\binom{4}{2}=1-3/6$); plurality accuracy $1/3$ (only item A); oracle set success $2/3$; gap $1/3$, from item B; pooled IID value $1-(2/3)^2\approx0.556$, higher than $0.5$ because the items differ in difficulty. For your own table: candidate-level labels and seeds, answer normalization, tie policy, all formulas with assumptions, and uncertainty across items. Knowledge check: (1) independent draws and one common $p$; the common $p$ fails; (2) no; (3) the wrong answers split, so two votes are a plurality.
 - *Common Failure*: Calling oracle opportunity a production selection result; pooling candidates across items before applying the IID formula; treating $k$ low-temperature near-duplicates as $k$ independent attempts.
 - *Diagnostic Hint*: Did the correct answer exist in the set, and if so, why was it not selected? Would your pass@k change if you computed it per item and then averaged?
 - *Concept to Revisit*: Opportunity Versus Selection; independent draws versus dependent candidates.
@@ -304,6 +318,7 @@ The paper's results on Game of 24, Creative Writing, and Mini Crosswords establi
 - *Step 2 — evaluator calls*: one per generated state $=15$.
 - *Step 3 — generator calls, sample strategy*: one call per candidate $=15$, so $15+15=30$ model calls.
 - *Step 4 — generator calls, propose strategy*: one call per expanded state $=1+2+2=5$, so $5+15=20$ model calls.
+- *General form (same assumptions, $b\le k$, $T\ge1$)*: generated states $=k+(T-1)\,b\,k$ (the root expansion, then $b$ kept states expanded per later step); kept states $=bT$; evaluator calls = generated states; sample-strategy generator calls = generated states; propose-strategy generator calls = expanded states $=1+(T-1)\,b$. Check: $3+2\cdot2\cdot3=15$ and $1+2\cdot2=5$. Here $k$ counts thoughts per state, not final-answer candidates as in Lesson 6.2.
 - *Contrast*: an unpruned binary tree of depth 3 has $1+2+4+8=15$ nodes. The same number 15 appears, but it counts something else, and neither count is a token count or a latency.
 - *Result*: the same search shape costs 30 or 20 model calls depending on the generator strategy, before any difference in tokens per call.
 - *Interpretation and limits*: these are counts under the declared configuration. Batching, repeated evaluator samples, early termination, and duplicate elimination change them, so record executed calls and tokens rather than inferring cost from node count.
@@ -316,7 +331,7 @@ The paper's results on Game of 24, Creative Writing, and Mini Crosswords establi
 Implement one breadth/depth policy and one best-first policy under the same total-call cap. Log every proposed, pruned, duplicated, and terminal state. Before running, compute the generated-state and model-call counts for $k=4$, $b=3$, $T=2$ with one evaluator call per state and the sample strategy.
 
 **Feedback Contract:**
-- *Expected Evidence*: for the pre-run count: generated states $4+12=16$, evaluator calls $16$, generator calls $16$, total $32$ model calls. For the implementation: search graph, actual work ledger, evaluator revision, terminal correctness, and a matched independent-sampling baseline at the same call cap. Knowledge check: (1) when the evaluator ranks a wrong state above the correct one, more candidates give it more chances to keep the wrong state and prune the right one; (2) a node can cost zero, one, or several calls; calls differ in tokens; calls can run in parallel.
+- *Expected Evidence*: for the pre-run count: generated states $4+12=16$ ($k+(T-1)bk=4+1\cdot3\cdot4$), evaluator calls $16$, generator calls $16$, total $32$ model calls. For the implementation: search graph, actual work ledger, evaluator revision, terminal correctness, and a matched independent-sampling baseline at the same call cap. Knowledge check: (1) when the evaluator ranks a wrong state above the correct one, more candidates give it more chances to keep the wrong state and prune the right one; (2) a node can cost zero, one, or several calls; calls differ in tokens; calls can run in parallel.
 - *Common Failure*: Comparing strategies at different budgets, hiding pruned correct branches, or reporting node count as cost.
 - *Diagnostic Hint*: Did proposal fail, or did the evaluator prune the useful state? Does your ledger's call count equal the count you predicted from $k$, $b$, and $T$?
 - *Concept to Revisit*: Proposal–Evaluation–Budget Separation.
@@ -349,15 +364,16 @@ $$
 \text{oracle set success} \geq \text{selected success}
 $$
 
-when both operate on the same candidate set and ground-truth correctness is well-defined. A verifier cannot select a correct item absent from that fixed set, and can fail despite one being present. If verifier-guided search changes the candidate set, the comparison no longer isolates selector quality.
+when both operate on the same candidate set and ground-truth correctness is well-defined. *Why*: for each item, "selected answer correct" implies "the set contains a correct candidate", so the selected-success count can never exceed the oracle count. The difference, oracle minus selected, is the selection gap. A verifier cannot select a correct item absent from that fixed set, and can fail despite one being present. If verifier-guided search changes the candidate set, the comparison no longer isolates selector quality.
 
 Verifier validation includes score semantics, calibration, ranking/discrimination, false positives and negatives, abstention, subgroup performance, temporal and domain shift, adversarial candidates, and score-quality behavior as search pressure grows. A rising verifier score without rising independent correctness is evidence consistent with gaming, but evaluator noise and distribution shift remain competing explanations (**H**, CLM-016).
 
 **Worked Example (synthetic counts):**
 - *Input*: 100 items, each with a fixed set of 4 candidates generated before the verifier is consulted. Ground-truth labels are independent of the verifier. The verifier returns exactly one candidate per item and never abstains.
 - *Item level*: 60 sets contain at least one correct candidate. The verifier's selected candidate is correct in 45 items.
-- *Steps*: oracle set success $=60/100=0.60$. Selected success $=45/100=0.45$. Selection accuracy given opportunity $=45/60=0.75$. Gap $=0.60-0.45=0.15$.
+- *Steps*: oracle set success $=60/100=0.60$. Selected success $=45/100=0.45$. Selection accuracy given opportunity $=45/60=0.75$ (selected-correct items divided by items whose set contained a correct candidate; equivalently $0.45/0.60$). Gap $=0.60-0.45=0.15$.
 - *Candidate level (same data, different unit)*: of the 400 candidates, 90 are correct. Used as an accept/reject classifier at a fixed score threshold, the verifier accepts 120 candidates, 72 of them correct. Precision $=72/120=0.60$; recall $=72/90=0.80$; false-positive rate $=48/310\approx0.155$.
+  - *Confusion counts behind these rates*: true positives $TP=72$ (accepted and correct); false positives $FP=120-72=48$ (accepted but wrong); false negatives $FN=90-72=18$ (rejected but correct); wrong candidates $=400-90=310$, so true negatives $TN=310-48=262$. Precision $=TP/(TP+FP)$, recall $=TP/(TP+FN)$, false-positive rate $=FP/(FP+TN)$.
 - *Result*: 15 of 100 items were lost in selection although a correct candidate was present, and 40 items could not be won by any selector.
 - *Interpretation and limits*: the 0.15 gap is attributable to selection only because labels, set membership, and evaluation rules are identical in both numbers. Candidate-level precision and recall do not determine item-level selected success: the item-level number depends on how false positives are distributed across items. If the verifier had guided generation, the candidate sets would differ and this decomposition would not apply. With abstention, report abstentions separately instead of counting them as wrong or dropping them.
 
@@ -403,6 +419,8 @@ $$
 C_{total}=C_{generator}+C_{verifier}+C_{tools}+C_{orchestration}.
 $$
 
+where each $C_x$ is the work of that component, summed over every executed action (including cancelled and pruned ones) and already converted to the one declared unit. This $C$ (cost) is unrelated to $c$, the count of correct candidates in Lesson 6.2.
+
 Possible units include GPU-seconds on a pinned device, accelerator FLOPs with a stated estimator, tokens separated by model class, or monetary cost under a pinned price contract. Tokens from different models and sequence positions are not compute-equivalent. Total work is additive after valid conversion; wall-clock latency follows the dependency critical path under available parallel resources.
 
 A fixed policy may cap new tokens, elapsed time, samples, branches, depth, or cost. An adaptive policy estimates whether marginal expected value justifies marginal cost. One useful decision model is:
@@ -411,11 +429,13 @@ $$
 U(B)=Q(B)-\lambda C(B),
 $$
 
-where $B$ is a declared budget, $Q$ measured task utility, $C$ measured cost, and $\lambda$ a stakeholder trade-off in compatible units. Hard latency, safety, or subgroup constraints may not be reducible to this scalar.
+where $U$ is net utility, $B$ is a declared budget, $Q$ measured task utility, $C$ measured cost, and $\lambda$ a stakeholder trade-off in compatible units. Hard latency, safety, or subgroup constraints may not be reducible to this scalar.
+
+*Reading the trade-off*: $\lambda$ converts cost into utility units, e.g. "accuracy points given up per thousand tokens". Moving from budget $B_1$ to $B_2$ changes utility by $\Delta U=\Delta Q-\lambda\,\Delta C$. With $C(B)=B$ this is worth doing only if the marginal quality per unit of budget, $\Delta Q/\Delta B$, exceeds $\lambda$. Worked Example B below applies this rule.
 
 Snell et al. provide evidence that effective allocation varies with prompt difficulty in their evaluated setting (**O**, CLM-005). The s1 paper demonstrates one sequential control—truncating thinking or appending “Wait” at an attempted stop—for its trained model and competition-math experiments (**O**, CLM-006). A 2026 preprint that uses the same budget-forcing control on open-weight models reports diminishing returns and cases of abandoning correct answers on mathematical and scientific tasks (**O**, CLM-008); treat this as frontier evidence to reproduce, not a universal overthinking law.
 
-**An exact early stop for plurality voting** (**D**, CLM-019). With at most $k_{max}$ candidates and $j$ already sampled, let the leading answer have $a$ votes and the runner-up $b$. If $a-b>k_{max}-j$, the remaining candidates cannot change the plurality winner, so stopping returns the same answer as the full vote under the same tie rule. This rule saves work without changing selection. It does not make the selected answer correct.
+**An exact early stop for plurality voting** (**D**, CLM-019). With at most $k_{max}$ candidates and $j$ already sampled, let the leading answer have $a$ votes and the runner-up $b$. If $a-b>k_{max}-j$, the remaining candidates cannot change the plurality winner, so stopping returns the same answer as the full vote under the same tie rule. (Here $j$, $a$, $b$ are vote counts, not the binomial $j$ of Lesson 6.2 or the search breadth $b$ of Lesson 6.3.) *Why*: $k_{max}-j$ candidates remain. In the worst case for the leader, every one of them votes for one rival answer; since every rival starts with at most $b$ votes, no rival can finish above $b+(k_{max}-j)$. The strict inequality $a>b+(k_{max}-j)$ means even this worst case leaves the leader strictly ahead, so no tie can arise. This rule saves work without changing selection. It does not make the selected answer correct.
 
 **Runtime stop primitives are resource stops.** At the pinned Transformers revision in Section 05, `GenerationMixin._prepare_generated_length` sets `max_length` to the prompt length plus `max_new_tokens`; `_get_stopping_criteria` adds a length criterion, a time criterion when `max_time` is set, a stop-string criterion when `stop_strings` is set, and an EOS criterion when an EOS token is configured; and `StoppingCriteriaList.__call__` ORs their per-row results (**O**, CLM-014). None of these inspects whether the answer is good. A semantic or marginal-value stop is policy code that the application adds on top.
 
@@ -424,8 +444,8 @@ Snell et al. provide evidence that effective allocation varies with prompt diffi
 **Worked Example A — total work versus critical path (synthetic times).**
 - *Input*: four candidates with generation times $2.0$, $2.4$, $3.1$, and $2.7$ s; one verifier pass over all four takes $0.5$ s and starts after all four finish; orchestration adds $0.1$ s before the verifier. Unit of work: accelerator-seconds, one accelerator-second per second of generation or verification. Orchestration runs on the host and is recorded separately.
 - *Step 1 — total work*: generator $2.0+2.4+3.1+2.7=10.2$; verifier $0.5$; total $10.7$ accelerator-seconds, plus $0.1$ s of host time.
-- *Step 2 — critical path with four free workers*: $\max(2.0,2.4,3.1,2.7)+0.1+0.5=3.7$ s.
-- *Step 3 — critical path with two workers*, schedule (2.0 then 3.1) and (2.4 then 2.7): both workers finish at $5.1$ s, so the path is $5.1+0.1+0.5=5.7$ s. Total work is unchanged at $10.7$.
+- *Step 2 — critical path with four free workers*: $\max(2.0,2.4,3.1,2.7)+0.1+0.5=3.7$ s. All four run at once, so the join waits for the slowest branch; orchestration and the verifier then run in sequence after it.
+- *Step 3 — critical path with two workers*, schedule (2.0 then 3.1) and (2.4 then 2.7): both workers finish at $5.1$ s ($2.0+3.1$ and $2.4+2.7$), so the path is $5.1+0.1+0.5=5.7$ s. Total work is unchanged at $10.7$.
 - *Result*: four-way parallelism multiplied work by about four relative to one candidate and left latency near the slowest branch, but only while four workers were free.
 - *Interpretation and limits*: the schedule assumes no queueing and no slowdown from sharing a device. Under batching on one accelerator, per-branch times change with batch size (Module 04), so both numbers must be measured rather than derived from width.
 
@@ -439,9 +459,10 @@ Snell et al. provide evidence that effective allocation varies with prompt diffi
 | 4 | 0.71 | 0.63 | $+0.015$ |
 | 8 | 0.70 | 0.54 | $-0.0025$ |
 
-- *Steps*: accuracy peaks at $B=4$; utility peaks at $B=2$; from 4 to 8 the marginal accuracy is negative.
+- *How the columns are computed*: $U=Q-0.02B$, e.g. at $B=2$: $0.68-0.02\cdot2=0.64$. Marginal accuracy $=\Delta Q/\Delta B$ between consecutive rows, e.g. from 2 to 4: $(0.71-0.68)/(4-2)=0.015$; from 4 to 8: $(0.70-0.71)/4=-0.0025$.
+- *Steps*: accuracy peaks at $B=4$; utility peaks at $B=2$; from 4 to 8 the marginal accuracy is negative. Utility stops rising at $B=2$ because the next step's marginal accuracy ($0.015$) is below $\lambda=0.02$, the price of one more thousand tokens.
 - *Result*: the accuracy-maximizing budget, the utility-maximizing budget, and the largest budget are three different settings. Doubling tokens from 4 to 8 lowered accuracy in this sweep.
-- *Exact early stop*: with $k_{max}=5$ and the first three candidates agreeing, $a-b=3>5-3=2$, so sampling stops and two candidates are saved with the same selected answer.
+- *Exact early stop*: with $k_{max}=5$ and the first three candidates agreeing ($j=3$, $a=3$, $b=0$), $a-b=3>5-3=2$, so sampling stops and two candidates are saved with the same selected answer.
 - *Interpretation and limits*: the sweep is synthetic. A real sweep needs uncertainty on each $Q(B)$, the same items at every budget, and per-item correctness transitions to separate gains from losses. $\lambda$ is a stakeholder choice; a hard latency or safety constraint may override $U$.
 
 **Knowledge Check:**
@@ -453,7 +474,7 @@ Snell et al. provide evidence that effective allocation varies with prompt diffi
 (a) Three branches take $1.5$, $2.2$, and $1.9$ s; a verifier pass takes $0.4$ s after the join; orchestration adds $0.05$ s. Compute total accelerator-seconds, and the critical path with three workers and with one worker. (b) Build a ledger for one sequential and one parallel policy of your own. Reconcile generator, verifier, tool, cancelled, and orchestration work against billing/runtime counters and a dependency timeline.
 
 **Feedback Contract:**
-- *Expected Evidence*: (a) $5.6+0.4=6.0$ accelerator-seconds; $2.2+0.05+0.4=2.65$ s with three workers; $5.6+0.05+0.4=6.05$ s with one worker. (b) Compatible cost units, a complete executed-work ledger including cancelled work, cancellation semantics, and a critical-path trace. Knowledge check: (1) cost per token differs by model size, sequence position, and batch shape; (2) per-item utility with and without the extra work on the same items, its cost, and uncertainty; (3) work is a sum over executed branches, while the path depends on how many branches run at once.
+- *Expected Evidence*: (a) $5.6+0.4=6.0$ accelerator-seconds (generator $1.5+2.2+1.9=5.6$; orchestration $0.05$ s is host time, recorded separately as in Worked Example A); $2.2+0.05+0.4=2.65$ s with three workers; $5.6+0.05+0.4=6.05$ s with one worker. (b) Compatible cost units, a complete executed-work ledger including cancelled work, cancellation semantics, and a critical-path trace. Knowledge check: (1) cost per token differs by model size, sequence position, and batch shape; (2) per-item utility with and without the extra work on the same items, its cost, and uncertainty; (3) work is a sum over executed branches, while the path depends on how many branches run at once.
 - *Common Failure*: Counting only delivered tokens, equating parallel width with a latency multiplier, or reading a longer rationale as a better one.
 - *Diagnostic Hint*: Which work executed, and which work lay on the dependency path? At which budget did accuracy stop rising?
 - *Concept to Revisit*: Total Work Versus Critical Path; stopping policy types.
@@ -503,10 +524,11 @@ Necessary but insufficient signals include longer rationales, higher verifier sc
 
 **Worked Example (synthetic replay):**
 - *Input*: 100 requests, 60 routed "easy" and 40 routed "hard" by a decision-time feature. One candidate costs one unit. Measured selected accuracy by route and width: easy $0.90$ at $k=1$ and $0.92$ at $k=3$; hard $0.40$ at $k=3$, $0.55$ at $k=6$, and $0.58$ at $k=8$.
+- *Rule used below*: budget $=\sum_{\text{routes}}(\text{requests on route})\times k_{\text{route}}$; overall accuracy $=\sum_{\text{routes}}(\text{share of requests})\times(\text{route accuracy at its }k)$, with shares $60/100=0.6$ and $40/100=0.4$.
 - *Uniform policy*: $k=3$ for all. Budget $=100\times3=300$ units. Accuracy $=0.6\cdot0.92+0.4\cdot0.40=0.712$.
 - *Adaptive policy at equal budget*: easy $k=1$, hard $k=6$. Budget $=60\cdot1+40\cdot6=300$ units. Accuracy $=0.6\cdot0.90+0.4\cdot0.55=0.760$.
-- *Adaptive policy at unequal budget*: easy $k=1$, hard $k=8$. Budget $=60+320=380$ units, $27\%$ more. Accuracy $=0.6\cdot0.90+0.4\cdot0.58=0.772$.
-- *Result*: at equal budget the adaptive policy gains $0.048$. The $0.060$ gain of the third policy cannot be credited to routing, because it also spent more.
+- *Adaptive policy at unequal budget*: easy $k=1$, hard $k=8$. Budget $=60+320=380$ units, $27\%$ more ($80/300\approx0.267$). Accuracy $=0.6\cdot0.90+0.4\cdot0.58=0.772$.
+- *Result*: at equal budget the adaptive policy gains $0.048$ ($0.760-0.712$; the third policy's $0.060$ is $0.772-0.712$). The $0.060$ gain of the third policy cannot be credited to routing, because it also spent more.
 - *Interpretation and limits*: the gain is a point estimate on synthetic numbers and needs an interval on real data. The easy route lost $0.02$, so a subgroup constraint on that route could reject the policy. If the "hard" label had been derived from whether direct answering failed on these same items, the comparison would be leaked. Equal units of candidates are not equal accelerator-seconds or equal latency; the loaded test checks those.
 
 **Knowledge Check:**
@@ -517,7 +539,7 @@ Necessary but insufficient signals include longer rationales, higher verifier sc
 (a) 100 requests split 50 easy and 50 hard. Uniform policy: $k=2$ for all, with accuracy $0.88$ on easy and $0.30$ on hard. Adaptive policy: easy $k=1$ ($0.85$), hard $k=3$ ($0.42$). Check that the budgets match and compute both accuracies. (b) Predeclare an equal-cost replay, a shifted holdout, and a loaded test. Produce a routing confusion matrix and quality/cost/SLO-goodput by route and subgroup.
 
 **Feedback Contract:**
-- *Expected Evidence*: (a) both budgets are 200 units; uniform $0.59$, adaptive $0.635$, difference $0.045$ at equal budget. (b) Decision-time feature manifest, matched budgets, temporal holdout, capacity telemetry, and rollback thresholds. Knowledge check: (1) gold labels, the chosen strategy's own outcome, verifier scores computed after generation, and benchmark difficulty tags derived from correctness; (2) extra candidates raise accelerator demand, which can lengthen queues, trigger timeouts and cancellations, and lower SLO-goodput.
+- *Expected Evidence*: (a) both budgets are 200 units ($100\cdot2$ and $50\cdot1+50\cdot3$); uniform $0.5\cdot0.88+0.5\cdot0.30=0.59$, adaptive $0.5\cdot0.85+0.5\cdot0.42=0.635$, difference $0.045$ at equal budget. (b) Decision-time feature manifest, matched budgets, temporal holdout, capacity telemetry, and rollback thresholds. Knowledge check: (1) gold labels, the chosen strategy's own outcome, verifier scores computed after generation, and benchmark difficulty tags derived from correctness; (2) extra candidates raise accelerator demand, which can lengthen queues, trigger timeouts and cancellations, and lower SLO-goodput.
 - *Common Failure*: Attributing an unequal-budget gain to adaptivity; reporting only the aggregate and missing a route that got worse.
 - *Diagnostic Hint*: Freeze aggregate work and remove every feature unavailable before routing. Does the gain survive?
 - *Concept to Revisit*: Causal Evaluation of Routing Policies; equal-budget comparison.
@@ -766,6 +788,12 @@ A learner passes when they can:
 ### Module Wrap-Up (Final Mental Model Reconstruction)
 
 Test-time reasoning is controlled generation plus selection under resource constraints. Extra work creates opportunities, not guaranteed value. The engineering task is to expose where opportunity becomes quality, measure what selection loses, charge every executed branch, and stop only when evidence supports the utility trade.
+
+### Cost & Telemetry Hook
+
+- [Lesson 22.1](../22-ai-economics/README.md): cost per *correct selected* answer — every sampled branch, verifier call, and cancelled candidate stays in the numerator.
+- [Lesson 22.5](../22-ai-economics/README.md): an adaptive budget is a cascade; cost escalation the same way as routing (escalation rate times added cost).
+- [Lesson 23.1](../23-observability-reliability/README.md) and [Lesson 23.2](../23-observability-reliability/README.md): emit per-candidate spans (tokens, verifier score, stop reason); sampling or dropping candidate spans censors the vote record.
 
 ## 12 Competency Targets
 

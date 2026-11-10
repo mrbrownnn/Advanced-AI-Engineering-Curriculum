@@ -168,14 +168,14 @@ claims:
     curriculum_usage: { lessons: ["11.4", "11.6"], labs: ["LAB-C"], assessments: ["Incident-11.1"] }
 
   - id: CLM-014
-    claim: "IFCMemoryBench reports that general-purpose memory systems in its 2026 professional-domain setup often retrieve topically relevant but incomplete or fragmented records, motivating separate ingestion, retrieval, and utilization measurements."
+    claim: "IFCMemoryBench reports that general-purpose memory systems in its 2026 professional-domain setup often retrieve topically relevant context but store project knowledge as incomplete or fragmented facts, motivating separate ingestion, retrieval, and utilization measurements."
     provenance: VERIFIED_FACT
     domain: memory_evaluation
     concepts: [domain_memory, fragmentation, stage_evaluation]
     confidence: medium
     currentness_status: "FRONTIER / DOMAIN-SPECIFIC"
     evidence: [{ source_type: paper, tier: 1, title: "IFCMemoryBench: Evaluating Long-Term Memory of LLM-Based Agents in BIM Information Retrieval", authors: "Changyu Du, Alexander Vosseler, Filippo Mazza, André Borrmann", year: "2026", version: "arXiv v1 (2026-07-13)", url: "https://arxiv.org/abs/2607.26072", section: "Evaluation framework and analysis (abstract re-read 2026-09-30)", accessed_at: "2026-09-30" }]
-    limitations: ["Workshop preprint in a BIM/IFC domain; its measurements and conclusions are not universal.", "TODO_VERIFY: the wording that retrieved records are topically relevant but incomplete or fragmented comes from the earlier reading; the abstract re-read on 2026-09-30 confirms the ingestion/retrieval/utilization framework and weak results for the evaluated systems, not that specific characterization."]
+    limitations: ["Workshop preprint in a BIM/IFC domain; its measurements and conclusions are not universal.", "Abstract re-read 2026-11-09 states that the evaluated systems often retrieve topically relevant context but store project knowledge as incomplete or fragmented facts; full methods and results not re-audited."]
     applicability: "Evidence that topical relevance alone is insufficient for domain memory."
     curriculum_usage: { lessons: ["11.6"], labs: ["LAB-C"], assessments: ["Mastery-11"] }
 

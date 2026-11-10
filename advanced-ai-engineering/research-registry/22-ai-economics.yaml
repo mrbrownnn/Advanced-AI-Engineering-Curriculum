@@ -55,7 +55,7 @@ claims:
     concepts: [structural_cascade_cost, cascade_frontier, pre_generation_routing]
     confidence: medium
     currentness_status: "FRONTIER"
-    evidence: [{ source_type: paper, tier: 1, title: "Is Escalation Worth It? A Decision-Theoretic Characterization of LLM Cascades", authors: "Dylan Bouchard", year: "2026", url: "https://arxiv.org/abs/2605.06350", version: "v1 (2026-05-07)", section: "Abstract; Section 3.2 (first-order conditions, economic interpretation: equal marginal quality-per-cost across stages)", accessed_at: "2026-10-01" }]
+    evidence: [{ source_type: paper, tier: 1, title: "Is Escalation Worth It? A Decision-Theoretic Characterization of LLM Cascades", authors: "Dylan Bouchard", year: "2026", url: "https://arxiv.org/abs/2605.06350v1", version: "v1 (2026-05-07); v2 retitled and substantially revised", section: "Abstract; Section 3.2 (first-order conditions, economic interpretation: equal marginal quality-per-cost across stages)", accessed_at: "2026-10-01" }]
     limitations: ["Single-author preprint, not yet independently reproduced.", "Results are for deterministic threshold cascades and the evaluated benchmarks."]
     applicability: "Why a cascade's cost floor includes every cheap-model call."
     curriculum_usage: { lessons: ["22.5"], labs: ["LAB-D"], assessments: ["Mastery-22"] }

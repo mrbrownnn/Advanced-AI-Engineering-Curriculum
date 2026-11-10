@@ -116,7 +116,7 @@ claims:
     confidence: high
     currentness_status: "REFERENCE / BASELINE"
     evidence:
-      - { source_type: paper, tier: 1, title: "Roofline: An Insightful Visual Performance Model for Multicore Architectures", authors: "Samuel Williams, Andrew Waterman, David Patterson", year: "2009", url: "https://escholarship.org/uc/item/78h8v7mr", section: "Roofline model definition", accessed_at: "2026-09-30" }
+      - { source_type: paper, tier: 1, title: "Roofline: An Insightful Visual Performance Model for Multicore Architectures", authors: "Samuel Williams, Andrew Waterman, David Patterson", year: "2009", url: "https://doi.org/10.1145/1498765.1498785", version: "CACM 52(4):65-76", section: "Roofline model definition", accessed_at: "2026-09-30" }
     limitations: ["Analytical ceiling, not measured root cause or latency guarantee."]
     applicability: "Regime prediction before profiler validation."
     curriculum_usage: { lessons: ["24.1", "24.3"], labs: ["LAB-C"], assessments: ["Mastery-24"] }
@@ -244,7 +244,7 @@ claims:
     confidence: medium
     currentness_status: "FRONTIER"
     evidence:
-      - { source_type: paper, tier: 1, title: "Rethinking LLM Inference Bottlenecks: Insights from Latent Attention and Mixture-of-Experts", authors: "Sungmin Yun et al.", year: "2025/2026 revision", url: "https://arxiv.org/abs/2507.15465", version: "revision inspected 2026-09-30", section: "Sections IV–VII; Observations 1–8", accessed_at: "2026-09-30" }
+      - { source_type: paper, tier: 1, title: "Rethinking LLM Inference Bottlenecks: Insights from Latent Attention and Mixture-of-Experts", authors: "Sungmin Yun et al.", year: "2025", url: "https://arxiv.org/abs/2507.15465v3", version: "v3 (2026-01-29)", section: "Sections IV–VII; Observations 1–8", accessed_at: "2026-09-30" }
     limitations: ["Real-system experiments are DGX H100 node-level; wider scale uses a simulator and specified topology assumptions.", "Reported regimes must be reproduced on the target runtime and hardware."]
     applicability: "Frontier counterexample to static labels such as 'attention always bandwidth-bound'."
     related_claims: [CLM-003, CLM-008, CLM-012]

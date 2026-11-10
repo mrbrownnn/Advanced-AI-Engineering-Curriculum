@@ -125,10 +125,23 @@ Do not collapse these concepts:
 
 Residency is jointly constrained by architectural block/thread limits and per-block registers and shared memory. More occupancy can help hide latency, but maximum occupancy is not a theorem of maximum performance (**O**, CLM-007). Reducing registers to increase occupancy can spill data; shrinking tiles can lower reuse; changing blocks can reduce instruction-level parallelism.
 
+Step by step, ignoring shared memory and allocation granularity:
+
+$$B_{SM}=\min\left(\left\lfloor\frac{R_{SM}}{T_b\,r}\right\rfloor,\ \left\lfloor\frac{T_{SM}}{T_b}\right\rfloor,\ B_{max}\right),\qquad \text{occupancy}_{theor}=\frac{B_{SM}\,T_b/32}{W_{max}},$$
+
+where:
+
+- $R_{SM}$: 32-bit registers per SM; $r$: registers per thread; $T_b$: threads per block;
+- $T_{SM}$: maximum resident threads per SM; $B_{max}$: maximum resident blocks per SM;
+- $B_{SM}$: resident blocks per SM (the tightest of the three limits); $T_b/32$: warps per block;
+- $W_{max}$: maximum resident warps per SM ($=T_{SM}/32$).
+
+Each term is one resource budget divided by one block's demand; the smallest quotient wins. *Achieved* occupancy is measured by the profiler and is usually lower.
+
 **Worked Example (exercise limits, not a specific GPU):**
 - *Input*: per-SM limits of 65,536 32-bit registers, 2,048 resident threads (64 warps), and 32 resident blocks. Kernel X uses 256 threads/block and 32 registers/thread; kernel Y uses 256 threads/block and 64 registers/thread. Register-allocation granularity and shared memory are ignored.
-- *Steps*: X needs $256\times32=8{,}192$ registers/block, so registers allow $\lfloor65536/8192\rfloor=8$ blocks and threads allow $2048/256=8$, giving 8 blocks = 64 warps. Y needs 16,384 registers/block, so 4 blocks = 32 warps.
-- *Result*: theoretical occupancy is 100% for X and 50% for Y.
+- *Steps*: X needs $256\times32=8{,}192$ registers/block, so registers allow $\lfloor65536/8192\rfloor=8$ blocks and threads allow $2048/256=8$, and the block limit allows 32, giving $\min(8,8,32)=8$ blocks $=8\times256/32=64$ warps. Y needs $256\times64=16{,}384$ registers/block, so $\min(\lfloor65536/16384\rfloor,8,32)=\min(4,8,32)=4$ blocks $=32$ warps.
+- *Result*: theoretical occupancy is $64/64=100\%$ for X and $32/64=50\%$ for Y.
 - *Interpretation / limits*: Y may still finish first if its extra registers hold reused operands and expose more instruction-level parallelism, while X spills or reloads. Query real limits from the device and the occupancy API or profiler before reasoning about a real kernel.
 
 **Knowledge Check:** Which launch quantities are chosen by the program, and which residency/utilization quantities must be observed?
@@ -161,7 +174,7 @@ For useful bytes read $B_r$, useful bytes written $B_w$, and synchronized elapse
 
 $$BW_{useful}=\frac{B_r+B_w}{t}\quad\text{bytes/s}.$$
 
-Use $10^9$ for decimal GB/s and $2^{30}$ for GiB/s; do not mix the label and divisor (**D**, CLM-010). This value is not DRAM traffic. Compare it with profiler traffic at a named boundary to test transaction waste or reuse hypotheses.
+Here $B_r$ and $B_w$ are counted from the algorithm (elements × bytes/element), not from a profiler. Use $10^9$ for decimal GB/s and $2^{30}$ for GiB/s; do not mix the label and divisor (**D**, CLM-010). This value is not DRAM traffic. Compare it with profiler traffic at a named boundary to test transaction waste or reuse hypotheses.
 
 **Necessary but insufficient signals**
 
@@ -172,9 +185,9 @@ Use $10^9$ for decimal GB/s and $2^{30}$ for GiB/s; do not mix the label and div
 
 **Worked Example:**
 - *Input*: a kernel requests 4 MiB of useful bytes (read + write) and a synchronized interval of 1 ms.
-- *Steps*: $4\text{ MiB}=4\times2^{20}=4{,}194{,}304$ bytes; divided by $10^{-3}$ s gives $4{,}194{,}304{,}000$ bytes/s.
+- *Steps*: (1) to bytes: $4\text{ MiB}=4\times2^{20}=4{,}194{,}304$ bytes; (2) to seconds: $1\text{ ms}=10^{-3}$ s; (3) divide: $4{,}194{,}304/10^{-3}=4{,}194{,}304{,}000$ bytes/s; (4) convert once: $\div2^{30}=3.90625$ GiB/s or $\div10^{9}=4.194304$ GB/s.
 - *Result*: exactly $4000$ MiB/s $=4000/1024=3.90625$ GiB/s $=4.194304$ GB/s. Rounded, “≈3.9 GiB/s” or “≈4.2 GB/s”; it is **not** 4 GiB/s, which would need 4 GiB/s × 1 ms $=4.096$ MiB.
-- *Interpretation / limits*: this is useful bandwidth. If the profiler reports 8 MiB of DRAM reads for the same launch, the transferred-to-useful ratio is 2, which supports (but does not prove) a transaction-waste hypothesis; reuse in L2 could equally make DRAM bytes smaller than useful bytes.
+- *Interpretation / limits*: this is useful bandwidth. If the profiler reports 8 MiB of DRAM reads for the same launch, the transferred-to-useful ratio is $8\text{ MiB}/4\text{ MiB}=2$ (half of the DRAM bytes moved were not requested), which supports (but does not prove) a transaction-waste hypothesis; reuse in L2 could equally make DRAM bytes smaller than useful bytes.
 
 **Knowledge Check:** Why are useful bytes, L2 traffic, and DRAM traffic different, and what does coalescing change?
 
@@ -217,9 +230,9 @@ Warmup can include context creation, library initialization, memory-pool growth,
 
 **Worked Example (synthetic timestamps on one host clock, device events on the same stream):**
 - *Input*: host timer starts at 0 µs; the launch call returns at 20 µs; the start event records at 25 µs and the end event at 195 µs; `synchronize()` returns at 200 µs.
-- *Steps*: submission interval $=20$ µs; device interval $=195-25=170$ µs; synchronized host interval $=200$ µs.
-- *Result*: three different, non-conflicting measurements. The 30 µs between device and synchronized host time is launch-to-start delay plus synchronization return.
-- *Interpretation / limits*: reporting 20 µs as “kernel time” understates execution by $8.5\times$. Adding a second stream whose work is not bracketed by these events would leave the device interval unchanged while the application interval grows.
+- *Steps*: submission interval $=20-0=20$ µs; device interval $=195-25=170$ µs; synchronized host interval $=200-0=200$ µs. The difference decomposes as $200-170=30=(25-0)+(200-195)$: 25 µs from timer start to the start event (20 µs submission + 5 µs launch-to-start) and 5 µs from the end event until `synchronize()` returns.
+- *Result*: three different, non-conflicting measurements. The 30 µs between device and synchronized host time is submission plus launch-to-start delay (25 µs) plus synchronization return (5 µs).
+- *Interpretation / limits*: reporting 20 µs as “kernel time” understates execution by $170/20=8.5\times$. Adding a second stream whose work is not bracketed by these events would leave the device interval unchanged while the application interval grows.
 
 **Knowledge Check:** Why can an event on one stream fail to bound work on another, and when is per-operator synchronization unrepresentative?
 
@@ -266,6 +279,16 @@ and under the basic overlap abstraction,
 
 $$T\ge\max\left(\frac{W}{P_{peak}},\frac{Q}{\beta}\right).$$
 
+where $P=W/T$ is achieved throughput (operations/s) and $T$ is elapsed time. Unit check: $\beta I$ is (bytes/s)·(operations/byte) = operations/s, the same unit as $P_{peak}$.
+
+*Step-by-step derivation:*
+
+1. Work cannot execute faster than the compute ceiling: $T\ge W/P_{peak}$.
+2. $Q$ bytes cannot cross the boundary faster than its bandwidth: $T\ge Q/\beta$.
+3. Both hold at once, so $T\ge\max(W/P_{peak},\,Q/\beta)$. Perfect overlap of compute and memory is the optimistic assumption; with no overlap the two terms would add.
+4. Divide $W$ by this bound: $P=\dfrac{W}{T}\le\min\left(P_{peak},\ \dfrac{W}{Q/\beta}\right)=\min(P_{peak},\,\beta I)$, using $W/Q=I$.
+5. The roofs meet where $\beta I=P_{peak}$, i.e. $I^*=P_{peak}/\beta$. If $I<I^*$ then $Q/\beta>W/P_{peak}$ and the memory term dominates; if $I>I^*$ the compute term dominates.
+
 This is an analytical bound, not a latency guarantee. State all assumptions:
 
 - FMA counting convention and which operations are counted;
@@ -280,9 +303,9 @@ A point below both ceilings is not automatically “neither compute nor memory.�
 
 **Worked Example (exercise ceilings, not a specific GPU):**
 - *Input*: $P_{peak}=400$ TFLOP/s for the selected FP16 tensor path and $\beta=2.0$ TB/s at DRAM, both treated as attainable; FMA = 2 FLOPs; one-pass DRAM bytes (read $A$ and $B$ once, write $C$ once), 2 bytes/element.
-- *Step 1 — ridge*: $I^*=400\times10^{12}/2.0\times10^{12}=200$ FLOP/byte.
-- *Step 2 — GEMV-like* ($M=K=4096$, $N=1$): $W=2\cdot4096\cdot1\cdot4096=33{,}554{,}432$ FLOPs; $Q=2(4096^2+4096+4096)=33{,}570{,}816$ bytes; $I\approx1.0$ FLOP/byte. Bounds: $T\ge\max(0.084,16.79)$ µs, so the memory term dominates.
-- *Step 3 — GEMM* ($M=N=K=4096$): $W=137{,}438{,}953{,}472$ FLOPs; $Q=2\cdot3\cdot4096^2=100{,}663{,}296$ bytes; $I\approx1365$ FLOP/byte. Bounds: $T\ge\max(343.6,50.3)$ µs, so the compute term dominates.
+- *Step 1 — ridge*: $I^*=\dfrac{400\times10^{12}\ \text{FLOP/s}}{2.0\times10^{12}\ \text{bytes/s}}=200$ FLOP/byte.
+- *Step 2 — GEMV-like* ($M=K=4096$, $N=1$): $W=2MNK=2\cdot4096\cdot1\cdot4096=33{,}554{,}432$ FLOPs; $Q=s(MK+KN+MN)=2(4096^2+4096+4096)=33{,}570{,}816$ bytes (the $A$ term dominates); $I=W/Q\approx1.0$ FLOP/byte. Bounds: $W/P_{peak}=33{,}554{,}432/(400\times10^{12})\text{ s}=0.084$ µs and $Q/\beta=33{,}570{,}816/(2.0\times10^{12})\text{ s}=16.79$ µs, so $T\ge\max(0.084,16.79)$ µs and the memory term dominates ($I\approx1\ll I^*=200$).
+- *Step 3 — GEMM* ($M=N=K=4096$): $W=2\cdot4096^3=137{,}438{,}953{,}472$ FLOPs; $Q=2\cdot3\cdot4096^2=100{,}663{,}296$ bytes; $I=W/Q=4096/3\approx1365$ FLOP/byte. Bounds: $W/P_{peak}=343.6$ µs and $Q/\beta=50.3$ µs, so $T\ge\max(343.6,50.3)$ µs and the compute term dominates ($I\approx1365>I^*=200$).
 - *Result*: the screen assigns the GEMV to the bandwidth roof and the GEMM to the compute roof.
 - *Interpretation / limits*: both are lower bounds on time under optimistic byte counts and attainable ceilings. A measured GEMV at 40 µs would sit well below the bandwidth roof and send you looking for launch overhead, insufficient parallelism, or a lower sustainable $\beta$. It would not refute the classification.
 
@@ -311,9 +334,16 @@ For $C_{M\times N}=A_{M\times K}B_{K\times N}$ and FMA counted as two operations
 
 $$W_{GEMM}\approx2MNK.$$
 
-If each element occupies $s$ bytes and an optimistic screen assumes one read of $A$, one read of $B$, one write of $C$, and $\beta C=0$:
+Here $A$ is $M\times K$, $B$ is $K\times N$, and $C$ is $M\times N$. Each of the $MN$ outputs is a length-$K$ dot product, i.e. $K$ FMAs, so $MNK$ FMAs $=2MNK$ operations.
+
+If each element occupies $s$ bytes and an optimistic screen assumes one read of $A$, one read of $B$, one write of $C$, and no read of the old $C$ (GEMM epilogue $C\leftarrow AB+\beta C$ with $\beta=0$; this $\beta$ is the GEMM scale factor, not the bandwidth $\beta$ of Lesson 2.4):
 
 $$I_{one-pass}=\frac{2MNK}{s(MK+KN+MN)}.$$
+
+Derivation: $A$, $B$, and $C$ hold $MK$, $KN$, and $MN$ elements, each touched once, so $Q=s(MK+KN+MN)$ bytes; divide $W_{GEMM}$ by $Q$. Two useful limits:
+
+- **square** ($M=N=K=n$): $I=\dfrac{2n^3}{3sn^2}=\dfrac{2n}{3s}$, i.e. $n/3$ for FP16 ($s=2$): $4096/3\approx1365$ and $64/3\approx21$;
+- **thin** ($N\ll M,K$): $MK$ dominates the denominator, so $I\approx\dfrac{2MNK}{sMK}=\dfrac{2N}{s}$, i.e. $I\approx N$ for FP16. Intensity grows roughly linearly with the batch-like dimension.
 
 This is not measured intensity. Tiles reuse operands through registers/shared memory/cache, while imperfect implementations can reload them. The chosen $M,N,K$, layout, dtype, alignment, epilogue, library version, workspace, and concurrent work affect kernel selection and realized traffic.
 
@@ -331,9 +361,9 @@ Numerical behavior remains part of the experiment. Floating-point addition is no
 
 **Worked Example (same exercise ceilings as Lesson 2.4, $I^*=200$ FLOP/byte):**
 - *Input*: FP16, $M=K=4096$, batch-like dimension $N\in\{1,8,64,512\}$, one-pass bytes.
-- *Steps*: $I=MNK/(MK+KN+MN)$ gives $1.0$, $7.97$, $62.1$, and $409.6$ FLOP/byte.
-- *Result*: the one-pass screen crosses the ridge between $N=64$ and $N=512$. The memory-bound lower time stays near 17–21 µs while $N$ grows 512×, which is why batching decode tokens can raise throughput until another ceiling appears (**O**, CLM-006).
-- *Interpretation / limits*: a $64\times64\times64$ GEMM has $I\approx21$ FLOP/byte, but its $64\times64$ output may be covered by one or a few thread blocks, far too few to occupy every SM. Intensity does not encode grid size, and the kernel library may pick a different tiling for each $N$.
+- *Steps*: with $s=2$ the factor 2 in $2MNK$ cancels $s$, so $I=MNK/(MK+KN+MN)$. With $M=K=4096$, divide numerator and denominator by $4096^2$: $I=\dfrac{N}{1+N/2048}$, giving $1.0$, $7.97$, $62.1$, and $409.6$ FLOP/byte. Solving $I=I^*=200$ gives $N=200/(1-200/2048)\approx222$. The memory lower time is $Q/\beta=2(4096^2+2\cdot4096N)\text{ bytes}/(2.0\times10^{12}\text{ bytes/s})$: $16.8$, $16.8$, $17.3$, and $21.0$ µs for the four $N$, because the $4096^2$ weight-matrix term dominates $Q$.
+- *Result*: the one-pass screen crosses the ridge between $N=64$ and $N=512$ (at $N\approx222$). The memory-bound lower time stays near 17–21 µs while $N$ grows 512×, which is why batching decode tokens can raise throughput until another ceiling appears (**O**, CLM-006).
+- *Interpretation / limits*: a $64\times64\times64$ GEMM has $I=64/3\approx21$ FLOP/byte, but its $64\times64$ output may be covered by one or a few thread blocks, far too few to occupy every SM. Intensity does not encode grid size, and the kernel library may pick a different tiling for each $N$.
 
 **Knowledge Check:** Why is the one-pass GEMM intensity not measured intensity, and how can padding both add work and improve execution?
 
@@ -385,7 +415,7 @@ Example: “GPU utilization fell” can be explained by host launch gaps, smalle
 
 **Worked Example (synthetic traces):**
 - *Input*: a 10-iteration loop regressed from 4.0 ms to 6.0 ms per iteration after an upgrade. Aligned Nsight Systems timelines show the same kernel sequence with per-kernel durations within 2%, but a new 190 µs gap before each of 10 launches in the new trace.
-- *Steps*: accumulated gaps $=10\times0.19=1.9$ ms, explaining $1.9$ of the $2.0$ ms regression; kernel-duration changes explain at most $0.02\times4.0=0.08$ ms.
+- *Steps*: accumulated gaps $=10\times0.19=1.9$ ms, explaining $1.9$ of the $2.0$ ms regression; kernel-duration changes explain at most $0.02\times4.0=0.08$ ms (2% of the whole old iteration, an upper bound because kernels are only part of it). Together, at most $1.9+0.08=1.98$ ms accounts for nearly all of the $6.0-4.0=2.0$ ms regression.
 - *Result*: host-side launch or dispatch gaps rank first, and kernel-internal limiters rank last.
 - *Interpretation / limits*: the next measurement is a CPU sampling or API trace of the gap. Nsight Compute on the unchanged kernels would cost time without discriminating. Confirm by removing the suspected host cause and remeasuring *unprofiled*.
 
@@ -435,7 +465,7 @@ Observed behavior at that revision:
 
 **Worked Example:**
 - *Input*: a `Measurement` from `blocked_autorange` reporting `number_per_run=100` and raw times for 5 blocks.
-- *Steps*: each raw time covers 100 executions bracketed by accelerator synchronization, so per-call time = raw time / 100; the spread across the 5 blocks is block-level variation.
+- *Steps*: each raw time covers 100 executions bracketed by accelerator synchronization, so per-call time $t_{call,i}=t_{raw,i}/n$, where $t_{raw,i}$ is block $i$'s raw time and $n=$ `number_per_run` $=100$ (illustrative: $t_{raw,i}=2.0$ ms gives $t_{call,i}=20$ µs); the spread across the 5 blocks is block-level variation.
 - *Result*: an operator-level, synchronized, amortized estimate.
 - *Interpretation / limits*: the synchronization spreads launch overhead over 100 calls and removes overlap with other work. It does not include request queueing, and it is not evidence about production overlap.
 
@@ -457,7 +487,7 @@ Observed behavior at that revision:
 
 **REFERENCE / BASELINE**
 
-- Williams, Waterman, and Patterson (2009), [*Roofline: An Insightful Visual Performance Model for Multicore Architectures*](https://escholarship.org/uc/item/78h8v7mr) — original bound and optimization model (CLM-004).
+- Williams, Waterman, and Patterson (2009), [*Roofline: An Insightful Visual Performance Model for Multicore Architectures*](https://doi.org/10.1145/1498765.1498785) — original bound and optimization model (CLM-004).
 - NVIDIA, [*CUDA Programming Guide*](https://docs.nvidia.com/cuda/cuda-programming-guide/) — execution, synchronization, and architecture semantics (CLM-001, CLM-003, CLM-007; accessed 2026-09-25).
 - NVIDIA, [*CUDA C++ Best Practices Guide*](https://docs.nvidia.com/cuda/cuda-c-best-practices-guide/) — correctness, timing, bandwidth, coalescing, and execution-configuration guidance (CLM-002, CLM-007, CLM-013; accessed 2026-09-25).
 
@@ -662,6 +692,12 @@ A learner can exit Module 02 when they can:
 ### Module Wrap-Up (Final Mental Model Reconstruction)
 
 The final invariant: **a GPU bottleneck is a scoped causal claim supported by aligned work, byte, time, timeline, and intervention evidence—not a label read from one counter.**
+
+### Cost & Telemetry Hook
+
+- [Lesson 22.2](../22-ai-economics/README.md): convert measured kernel time and achieved bandwidth into GPU-seconds per unit of work; idle and profiling time are fixed cost, not free.
+- [Lesson 22.6](../22-ai-economics/README.md): report the batch/shape flip point where a kernel change stops reducing cost per unit of work.
+- [Lesson 23.1](../23-observability-reliability/README.md): emit device, driver, timing boundary, and profiler-on/off state with every timing so replay overhead is not read as production latency.
 
 ## 12 Competency Targets
 
