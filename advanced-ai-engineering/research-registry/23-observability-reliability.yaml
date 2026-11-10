@@ -1,9 +1,9 @@
 module: "23-observability-reliability"
-registry_version: "1.0.0"
-previous_version: ""
-research_cutoff: "2026-09-30"
-change_reason: "First evidence-backed registry for Module 23 (audit.md AUD-N23). Replaces the generated outline, whose title said Module 18 and which proposed embedding distances and LLM-judge scores as semantic monitoring without a reliability contract. Covers signal boundaries, the pinned OpenTelemetry GenAI conventions and their Development stability, propagation, sampling and censoring, offered-outcome SLIs, error budgets and burn-rate alerting recomputed from the SRE Workbook, judge and detector correction, delayed labels, telemetry cost, cardinality and privacy, and incident discrimination with rollback-first mitigation."
-changed_claims: []
+registry_version: "1.1.0"
+previous_version: "1.0.0"
+research_cutoff: "2026-11-10"
+change_reason: "Scoped dossier-backed lesson extension, sources inspected 2026-11-10. Unchanged claims retain original evidence/verification dates and were not re-verified. New arithmetic checked in Python; no parsed-table values or unverified dossier items imported."
+changed_claims: ["CLM-045", "CLM-046", "CLM-047", "CLM-048", "CLM-049", "CLM-050", "CLM-051", "CLM-052", "CLM-053", "CLM-054", "CLM-055", "CLM-056", "CLM-057", "CLM-058"]
 out_of_scope_candidates:
   - "Serving metric definitions (TTFT/ITL/TPOT, goodput, admission) are taught in Module 04; this module only maps them onto telemetry boundaries."
   - "Evaluation program design, slices, and release statistics belong to Module 15."
@@ -558,3 +558,440 @@ claims:
     limitations: ["A successful status says the call returned; it says nothing about answer quality."]
     applicability: "Why span status cannot serve as a quality SLI."
     curriculum_usage: { lessons: ["23.1", "23.3"], labs: ["LAB-A"], assessments: ["Incident-23.1"] }
+
+  - id: CLM-045
+    claim: Pinned Kubernetes HPA calculator applies an inclusive asymmetric-capable tolerance band to usage ratios,
+      recommends ceil(ratio*ready population) on the complete-metric path, and conservatively recomputes missing/unready
+      samples with direction guards. CPU initialization filtering is CPU-specific. The inspected external/object zero
+      helper returns ceil(usageRatio) instead of multiplying by zero; docs report default tolerance0.1.
+    provenance: VERIFIED_FACT
+    domain: gpu_platform_operations
+    concepts:
+    - hpa
+    - tolerance
+    - missing_metrics
+    confidence: high
+    limitations:
+    - Upstream master snapshot, not release guarantee; static only. Min/max/stabilization/rate policies and scale-from-zero
+      API eligibility remain separate from the calculator.
+    curriculum_usage:
+      lessons:
+      - '23.7'
+      labs:
+      - LAB-E
+      assessments:
+      - Mastery-23-D10
+    evidence:
+    - source_type: source_code
+      tier: 1
+      title: kubernetes/kubernetes main/master snapshot
+      repository: https://github.com/kubernetes/kubernetes
+      commit: 3197813cc57dfb94631f8f20bbb8fc5b5bb4e763
+      file: pkg/controller/podautoscaler/replica_calculator.go
+      symbol: Tolerances.isWithin; GetResourceReplicas; calcPlainMetricReplicas; getUsageRatioReplicaCount
+      entry_point: HPA metric calculator entry
+      execution_path: pod grouping; usage ratio; tolerance; missing/unready sample recomputation; direction guards;
+        ceil replica recommendation; separate external/object zero path
+      verification_date: '2026-11-10'
+      accessed_at: '2026-11-10'
+      url: https://github.com/kubernetes/kubernetes/blob/3197813cc57dfb94631f8f20bbb8fc5b5bb4e763/pkg/controller/podautoscaler/replica_calculator.go
+    - source_type: official_docs
+      tier: 2
+      title: Kubernetes Horizontal Pod Autoscaling
+      url: https://kubernetes.io/docs/concepts/workloads/autoscaling/horizontal-pod-autoscale/
+      accessed_at: '2026-11-10'
+  - id: CLM-046
+    claim: Pinned Knative KPA resolves stable/panic windows and configured targets before scaling; panic retains a
+      nondecreasing maximum and needs a stable calm interval to exit. Defaults include stable60s, panic10%, threshold200%,
+      grace30s, retention0 and scale-down delay0. Scale-to-zero additionally gates active age and Activator routing/probes;
+      activation timeout is progressDeadline plus30s.
+    provenance: VERIFIED_FACT
+    domain: gpu_platform_operations
+    concepts:
+    - kpa
+    - panic_window
+    - scale_to_zero
+    confidence: high
+    limitations:
+    - Static upstream snapshot. No guaranteed sum of stable and grace timers; gates can overlap. Configured progressDeadline
+      default not verified.
+    curriculum_usage:
+      lessons:
+      - '23.7'
+      - '23.8'
+      labs:
+      - LAB-E
+      assessments:
+      - Mastery-23-D10
+    evidence:
+    - source_type: source_code
+      tier: 1
+      title: knative/serving main/master snapshot
+      repository: https://github.com/knative/serving
+      commit: c5e9503ca03323ba34a18715078148db31193634
+      file: pkg/autoscaler/config/config.go; pkg/reconciler/autoscaling/resources/target.go; pkg/reconciler/autoscaling/resources/metric.go;
+        pkg/autoscaler/scaling/autoscaler.go; pkg/reconciler/autoscaling/kpa/scaler.go
+      symbol: defaultConfig; ResolveMetricTarget; (*autoscaler).Scale; handleScaleToZero
+      entry_point: KPA configuration, metric reconciliation and scale reconciliation
+      execution_path: resolve configured targets/windows; stable and panic recommendations; panic maximum retention;
+        scale-to-zero active age and Activator grace/probe gates
+      verification_date: '2026-11-10'
+      accessed_at: '2026-11-10'
+      url: https://github.com/knative/serving/blob/c5e9503ca03323ba34a18715078148db31193634/pkg/autoscaler/config/config.go
+  - id: CLM-047
+    claim: GKE guidance states that GPU utilization measures duty cycle rather than work accomplished during activity,
+      and preallocated GPU memory in serving systems limits its usefulness for downscaling; it recommends workload-grounded
+      demand signals rather than GPU/CPU/memory alone.
+    provenance: VERIFIED_FACT
+    domain: gpu_platform_operations
+    concepts:
+    - scaling_signal
+    - gpu_utilization
+    confidence: high
+    limitations:
+    - Vendor guidance, not measured universal target or latency guarantee; queue counts need workload calibration.
+    curriculum_usage:
+      lessons:
+      - '23.7'
+      labs:
+      - LAB-E
+      assessments:
+      - Mastery-23-D10
+    evidence:
+    - source_type: official_docs
+      tier: 2
+      title: Best practices for autoscaling LLM inference workloads with GPUs on GKE
+      url: https://cloud.google.com/kubernetes-engine/docs/best-practices/machine-learning/inference/autoscaling
+      accessed_at: '2026-11-10'
+  - id: CLM-048
+    claim: Delayed useful capacity causes transient backlog even if the final replica count is adequate; detection,
+      decision, and cold-start intervals form a causal time-to-capacity decomposition.
+    provenance: DERIVED
+    domain: gpu_platform_operations
+    concepts:
+    - time_to_capacity
+    - transient_backlog
+    confidence: high
+    limitations:
+    - Fluid model is not an LLM tail-latency predictor; windows are not fixed detection delays.
+    curriculum_usage:
+      lessons:
+      - '23.7'
+      labs:
+      - LAB-E
+      assessments:
+      - Mastery-23-D10
+    assumptions:
+    - Non-overlapping causal intervals for additive T_cap; otherwise use critical path.
+    - Initially empty fluid queue; fixed excess arrival rate and no drops/cancellations; added capacity absent before
+      T_cap.
+    derivation: T_cap=T_detect+T_decide+T_cold; integrate dQ/dt=delta_lambda to obtain Q=delta_lambda*T_cap. If mu_new>lambda,
+      drain time=Q/(mu_new-lambda). Synthetic30+15+45=90s;2req/s produces180 requests;3req/s spare drains in60s. Synthetic
+      HPA four values7 target5 gives ratio1.4 and6 replicas;5.4/5=1.08 inside10% band. Zero-filled two missing samples
+      give28/6/5=0.9333; one gives28/5/5=1.12 and ceil(1.12*5)=6. Python-recomputed.
+  - id: CLM-049
+    claim: HydraServe reports a vLLM/Llama2-7B A10 public-cloud startup breakdown of container8.52s, libraries2.65s,
+      CUDA context1.56s, fetch24.5s, load6.87s and first-token inference0.6s.
+    provenance: VERIFIED_FACT
+    domain: gpu_platform_operations
+    concepts:
+    - cold_start_phases
+    - weight_fetch
+    confidence: high
+    limitations:
+    - Author-reported single platform/model breakdown; repetitions and variance not established in inspected sections;
+      not reproduced.
+    curriculum_usage:
+      lessons:
+      - '23.8'
+      labs:
+      - LAB-F
+      assessments:
+      - Mastery-23-D10
+    evidence:
+    - source_type: paper
+      tier: 1
+      title: 'HydraServe: Minimizing Cold Start Latency for Serverless LLM Serving in Public Clouds'
+      url: https://arxiv.org/abs/2502.15524v2
+      section: 2.2, Figure 1 phase breakdown; 8.1
+      version: v2, 2025-09-25
+      accessed_at: '2026-11-10'
+      authors: Lou et al.
+      year: '2025'
+    numeric_metadata:
+      numeric_type: measured_behavior
+      model: Llama2-7B
+      hardware: NVIDIA A10
+      workload: Public-cloud serverless startup,12.5GB checkpoint
+      configuration: vLLM;16Gbps server network
+      metric_definition: Per-phase cold-start elapsed seconds through first token
+      measurement_method: Author-reported paper measurements; not independently reproduced; repetitions/variance only
+        as documented.
+  - id: CLM-050
+    claim: Foundry reports CUDA graph capture as a remaining dominant startup bottleneck and an8s Qwen3-14B startup
+      even with warmed compile caches on2 H200 GPUs.
+    provenance: VERIFIED_FACT
+    domain: gpu_platform_operations
+    concepts:
+    - engine_initialization
+    - graph_capture
+    confidence: high
+    limitations:
+    - Author-reported v1 preprint; vLLM0.11.2/PyTorch2.9/CUDA13.1/driver590.48; local NVMe warmed compile cache; not
+      independent reproduction or universal phase ranking.
+    curriculum_usage:
+      lessons:
+      - '23.8'
+      labs:
+      - LAB-F
+      assessments:
+      - Mastery-23-D10
+    evidence:
+    - source_type: paper
+      tier: 1
+      title: 'Foundry: Template-Based CUDA Graph Context Materialization for Fast LLM Serving Cold Start'
+      url: https://arxiv.org/abs/2604.06664v1
+      section: 2; 6.1-6.2
+      version: v1, 2026-04-08
+      accessed_at: '2026-11-10'
+      authors: Liu et al.
+      year: '2026'
+    numeric_metadata:
+      numeric_type: measured_behavior
+      model: Qwen3-14B
+      hardware: 2xNVIDIA H200
+      workload: Startup with warmed torch.compile cache from local NVMe
+      configuration: vLLM0.11.2;PyTorch2.9;CUDA13.1;driver590.48
+      metric_definition: Startup elapsed seconds, graph capture remains dominant
+      measurement_method: Author-reported paper measurements; not independently reproduced; repetitions/variance only
+        as documented.
+  - id: CLM-051
+    claim: BLITZSCALE separates control-plane setup from loading parameters and argues its own setup optimizations
+      make control-plane overhead negligible; this is a platform-specific observation, not stock-runtime behavior.
+    provenance: VERIFIED_FACT
+    domain: gpu_platform_operations
+    concepts:
+    - cold_start_phases
+    - control_plane
+    confidence: high
+    limitations:
+    - Author-reported checkpoint/restore and Rust/C++ research platform; garbled Figure23 phase timings omitted.
+    curriculum_usage:
+      lessons:
+      - '23.8'
+      labs:
+      - LAB-F
+      assessments:
+      - Mastery-23-D10
+    evidence:
+    - source_type: paper
+      tier: 1
+      title: 'BLITZSCALE: Fast and Live Large Model Autoscaling with O(1) Host Caching'
+      url: https://arxiv.org/abs/2412.17246v2
+      section: 1; 3; 6.3 prose; garbled Figure 23 values excluded
+      version: v2, 2025-06-15
+      accessed_at: '2026-11-10'
+      authors: Zhang et al.
+      year: '2025'
+  - id: CLM-052
+    claim: ServerlessLLM describes local PyTorch loading taking34s for OPT-30B on4 GPUs and84s for LLaMA-2-70B on8
+      GPUs; checkpoint-loading experiments condition cache state rather than measuring every end-to-end startup phase.
+    provenance: VERIFIED_FACT
+    domain: gpu_platform_operations
+    concepts:
+    - model_loading
+    - cache_state
+    confidence: high
+    limitations:
+    - Author-reported historical FP16 baselines; loader study uses8 A5000, RAID0 NVMe12GB/s,20 copies/model and cleared
+      page/inode caches. Not a current-runtime constant or full cold-start comparison.
+    curriculum_usage:
+      lessons:
+      - '23.8'
+      labs:
+      - LAB-F
+      assessments:
+      - Mastery-23-D10
+    evidence:
+    - source_type: paper
+      tier: 1
+      title: 'ServerlessLLM: Low-Latency Serverless Inference for LLMs'
+      url: https://arxiv.org/abs/2401.14351v2
+      section: 2; 7.1-7.2
+      version: v2, 2024-07-25; OSDI 2024
+      accessed_at: '2026-11-10'
+      authors: Fu et al.
+      year: '2024'
+    numeric_metadata:
+      numeric_type: measured_behavior
+      model: OPT-30B;LLaMA-2-70B,FP16
+      hardware: 4 GPUs;8 GPUs; loader study8xA5000,RAID0 NVMe12GB/s
+      workload: Local checkpoint loading,20 copies/model,cold page/inode caches in loader study
+      configuration: Historical PyTorch baselines
+      metric_definition: Checkpoint load seconds, not full end-to-end startup
+      measurement_method: Author-reported paper measurements; not independently reproduced; repetitions/variance only
+        as documented.
+  - id: CLM-053
+    claim: NVIDIA MIG documents separate GPU-instance resource paths and QoS/fault isolation on supported hardware;
+      profile support and model/KV fit still require device-specific verification.
+    provenance: VERIFIED_FACT
+    domain: gpu_platform_operations
+    concepts:
+    - mig
+    - gpu_isolation
+    confidence: high
+    limitations:
+    - Scope limited to inspected sources; not independently reproduced.
+    curriculum_usage:
+      lessons:
+      - '23.8'
+      labs:
+      - LAB-F
+      assessments:
+      - Mastery-23-D10
+    evidence:
+    - source_type: official_docs
+      tier: 2
+      title: 'NVIDIA MIG User Guide: Introduction'
+      url: https://docs.nvidia.com/datacenter/tesla/mig-user-guide/introduction.html
+      accessed_at: '2026-11-10'
+  - id: CLM-054
+    claim: NVIDIA MPS documents isolated client GPU address spaces but limited Volta+ fatal-fault containment across
+      shared GPUs; unsynchronized client termination can leave the server and other clients in an undefined state.
+    provenance: VERIFIED_FACT
+    domain: gpu_platform_operations
+    concepts:
+    - mps
+    - gpu_isolation
+    - fault_domain
+    confidence: high
+    limitations:
+    - Scope limited to inspected sources; not independently reproduced.
+    curriculum_usage:
+      lessons:
+      - '23.8'
+      labs:
+      - LAB-F
+      assessments:
+      - Mastery-23-D10
+    evidence:
+    - source_type: official_docs
+      tier: 2
+      title: 'NVIDIA MPS: When to Use MPS, Memory Protection and Error Containment'
+      url: https://docs.nvidia.com/deploy/mps/when-to-use-mps.html
+      accessed_at: '2026-11-10'
+  - id: CLM-055
+    claim: GPU Operator time-slicing supplies logical replicas without memory/fault isolation or proportional compute
+      guarantees; its docs say DCGM Exporter cannot associate metrics with containers when time-slicing is enabled.
+    provenance: VERIFIED_FACT
+    domain: gpu_platform_operations
+    concepts:
+    - time_slicing
+    - gpu_isolation
+    - metric_attribution
+    confidence: high
+    limitations:
+    - Scope limited to inspected sources; not independently reproduced.
+    curriculum_usage:
+      lessons:
+      - '23.8'
+      labs:
+      - LAB-F
+      assessments:
+      - Mastery-23-D10
+    evidence:
+    - source_type: official_docs
+      tier: 2
+      title: 'NVIDIA GPU Operator: Time-Slicing GPUs in Kubernetes'
+      url: https://docs.nvidia.com/datacenter/cloud-native/gpu-operator/latest/gpu-sharing.html
+      accessed_at: '2026-11-10'
+  - id: CLM-056
+    claim: Startup decomposition and payload-bandwidth floors explain how different phase bottlenecks coexist without
+      yielding a universal loading time.
+    provenance: DERIVED
+    domain: gpu_platform_operations
+    concepts:
+    - cold_start_phases
+    - bandwidth_floor
+    confidence: high
+    limitations:
+    - Nominal NIC bandwidth is only a bound; contention explanation requires measurement. No node-provisioning estimate
+      verified.
+    curriculum_usage:
+      lessons:
+      - '23.8'
+      labs:
+      - LAB-F
+      assessments:
+      - Mastery-23-D10
+    assumptions:
+    - Sequential phases for sums; overlap requires a critical path.
+    - Payload and effective bandwidth use consistent decimal byte/bit units.
+    - HydraServe phase values are author observations, not synthetic platform measurements.
+    derivation: Sum8.52+2.65+1.56+24.5+6.87+0.6=44.70s; fetch24.5/44.7=54.81%. Payload floor12.5GB*8/16Gbps=6.25s;
+      effective100Gb/24.5s=4.08Gbps. T_fetch>=S/B_net and T_h2d>=S/B_h2d,aggregate exclude non-copy initialization.
+      Arithmetic recomputed in Python.
+  - id: CLM-057
+    claim: Pinned vLLM sleep docs distinguish level1 CPU weight offload/KV discard from level2 parameter/KV discard
+      and backup of other load-time allocations; allocator sleep/wake backs up selected tags and unmaps/remaps memory.
+      Documented sleep/wake/status HTTP endpoints require VLLM_SERVER_DEV_MODE=1 and must not be user-exposed.
+    provenance: VERIFIED_FACT
+    domain: gpu_platform_operations
+    concepts:
+    - sleep_mode
+    - model_loading
+    - development_endpoints
+    confidence: high
+    limitations:
+    - Main snapshot, static only; no wake timing reproduced; discarded weights are not restored from a nonexistent
+      weight backup.
+    curriculum_usage:
+      lessons:
+      - '23.8'
+      labs:
+      - LAB-F
+      assessments:
+      - Mastery-23-D10
+    evidence:
+    - source_type: source_code
+      tier: 1
+      title: vllm-project/vllm main/master snapshot
+      repository: https://github.com/vllm-project/vllm
+      commit: feb4cb019f445b2b3cd2bd0ba0f258610100910e
+      file: vllm/device_allocator/cumem.py; docs/features/sleep_mode.md; vllm/v1/metrics/loggers.py
+      symbol: CuMemAllocator.sleep; CuMemAllocator.wake_up; engine_sleep_state
+      entry_point: documented sleep/wake allocation path
+      execution_path: selected tags copied device-to-host; unmap/release; wake remaps and restores backups; documented
+        development endpoint guard and metric instruments
+      verification_date: '2026-11-10'
+      accessed_at: '2026-11-10'
+      url: https://github.com/vllm-project/vllm/blob/feb4cb019f445b2b3cd2bd0ba0f258610100910e/vllm/device_allocator/cumem.py
+  - id: CLM-058
+    claim: Expected idle-state cost can be derived from idle-gap survival, warm cost and cold-start penalty; an exponential
+      toy model has an all-or-nothing keep-alive optimum, not a universal timeout.
+    provenance: DERIVED
+    domain: gpu_platform_operations
+    concepts:
+    - keep_alive
+    - scale_to_zero
+    - idle_cost
+    confidence: high
+    limitations:
+    - Exponential memoryless gaps and constant penalties create the endpoint optimum; empirical heavy tails, cache
+      tiers, residual billing and hard SLOs can change the decision.
+    curriculum_usage:
+      lessons:
+      - '23.8'
+      labs:
+      - LAB-F
+      assessments:
+      - Mastery-23-D10
+    assumptions:
+    - Positive constant warm cost c per second; exponential gaps mean g>0; constant cold penalty P in matching cost
+      units.
+    - Policy retains warm state for K seconds, then zero; request execution common to both policies excluded.
+    - Hard SLO/isolation gates checked separately; sleep residual costs need another state model.
+    derivation: C=c*min(G,K)+P*1[G>K]; E[min(G,K)]=integral_0^K exp(-t/g)dt=g*(1-exp(-K/g)). E[C]=cg*(1-exp(-K/g))+P*exp(-K/g);
+      derivative=exp(-K/g)*(c-P/g). Synthetic g600s with P44.7c gives P/g0.0745c, immediate-zero cost44.7c versus600c
+      always-warm; with miss penalty1800c, P1844.7c gives3.0745c and warm wins. Python-recomputed; no quoted prices
+      or competitive-ratio bound.

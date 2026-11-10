@@ -1,0 +1,227 @@
+module: "37-multi-agent-systems"
+registry_version: "1.0.0"
+
+required_concepts:
+  - "equal_budget_baseline"
+  - "decomposability"
+  - "capability_ceiling"
+  - "information_loss"
+  - "orchestrator_worker"
+  - "handoff"
+  - "debate"
+  - "agent_as_tool"
+  - "context_passing"
+  - "implicit_decision_conflict"
+  - "error_compounding"
+  - "error_amplification"
+  - "verifier_quality"
+  - "coordination_overhead"
+  - "token_multiplier"
+  - "cost_per_success"
+  - "failure_attribution"
+
+prerequisite_concepts:
+  - "agent_loop"
+  - "budget_reservation"
+  - "trajectory_evaluation"
+  - "context_budget"
+  - "lossy_summarization"
+  - "durable_fan_out_join"
+  - "idempotent_effect"
+  - "paired_comparison"
+  - "grader_validation"
+  - "denominator_safe_cost"
+
+first_occurrence_concepts:
+  - "equal_budget_baseline"
+  - "decomposability"
+  - "capability_ceiling"
+  - "information_loss"
+  - "orchestrator_worker"
+  - "handoff"
+  - "agent_as_tool"
+  - "implicit_decision_conflict"
+  - "error_amplification"
+  - "coordination_overhead"
+  - "failure_attribution"
+
+concept_dependencies:
+  - concept: "equal_budget_baseline"
+    depends_on: ["budget_reservation", "paired_comparison"]
+  - concept: "capability_ceiling"
+    depends_on: ["equal_budget_baseline", "decomposability"]
+  - concept: "information_loss"
+    depends_on: ["context_budget", "lossy_summarization"]
+  - concept: "orchestrator_worker"
+    depends_on: ["agent_loop", "durable_fan_out_join", "decomposability"]
+  - concept: "handoff"
+    depends_on: ["agent_loop", "context_passing"]
+  - concept: "agent_as_tool"
+    depends_on: ["agent_loop", "context_passing"]
+  - concept: "debate"
+    depends_on: ["equal_budget_baseline", "token_multiplier"]
+  - concept: "context_passing"
+    depends_on: ["context_budget", "lossy_summarization", "information_loss"]
+  - concept: "implicit_decision_conflict"
+    depends_on: ["context_passing", "idempotent_effect"]
+  - concept: "error_amplification"
+    depends_on: ["error_compounding", "trajectory_evaluation"]
+  - concept: "verifier_quality"
+    depends_on: ["error_compounding", "grader_validation"]
+  - concept: "token_multiplier"
+    depends_on: ["context_passing", "coordination_overhead"]
+  - concept: "cost_per_success"
+    depends_on: ["token_multiplier", "denominator_safe_cost"]
+  - concept: "failure_attribution"
+    depends_on: ["trajectory_evaluation", "grader_validation", "error_amplification"]
+
+mechanisms:
+  - id: "MECH-01"
+    description: "Budget-matched comparison: a multi-agent design is compared with a single agent given the same measured token, call, and tool budget on the same tasks. Without matching, extra spend can explain the gain; with matching, published results range from large gains on decomposable breadth tasks to large losses on sequential planning, and a single agent that already succeeds often tends to lose from added agents."
+    evidence_ids: ["CLM-001", "CLM-002", "CLM-006", "CLM-007", "CLM-036", "CLM-041"]
+    derived_from: []
+
+  - id: "MECH-02"
+    description: "Message passing as a lossy channel: when agent B sees only messages M = g(C) derived from agent A's context C, B cannot have more task information than C held. Decomposition can still win when one context is degraded or overloaded, or when more compute is spent; under equal budgets and clean context a single agent matched or beat every split on multi-hop QA."
+    evidence_ids: ["CLM-012", "CLM-013", "CLM-014", "CLM-015", "CLM-016", "CLM-017"]
+    derived_from: []
+
+  - id: "MECH-03"
+    description: "Topology determines who owns control and who sees what: orchestrator-worker (lead decomposes, workers run in parallel and return), handoff (control and the transcript move to one new owner), debate or critique (peers read each other's answers over rounds), agent-as-tool (a worker runs in an isolated context and returns a string), and historical conversational or SOP pipelines. Each assumes a different degree of task decomposability and coupling."
+    evidence_ids: ["CLM-001", "CLM-004", "CLM-018", "CLM-019", "CLM-020", "CLM-021", "CLM-022", "CLM-023", "CLM-040"]
+    derived_from: []
+
+  - id: "MECH-04"
+    description: "Context-passing regimes: forward-all duplicates the transcript into the receiver (no loss, more tokens), shared message state makes every participant re-read a growing common log, and isolated return gives the worker only its argument and the parent only a final string. Summaries and filters reduce tokens by deleting evidence, and parallel writers that cannot see each other can make conflicting implicit decisions."
+    evidence_ids: ["CLM-019", "CLM-033", "CLM-037"]
+    derived_from: ["MECH-02"]
+
+  - id: "MECH-05"
+    description: "Error propagation: a stage's error becomes the next stage's input. Failures cluster in system design, inter-agent misalignment, and verification; verifiers are often superficial, and a verifier correlated with the producer catches less than an independence model predicts."
+    evidence_ids: ["CLM-026", "CLM-027", "CLM-038"]
+    derived_from: []
+
+  - id: "MECH-06"
+    description: "Trajectory attribution: assigning a failed multi-agent run to a responsible agent and decisive step is a measurement with its own error. Published LLM-judge attribution is far better at agent level than at step level, so attributions must be validated against seeded or replayed ground truth before they drive fixes."
+    evidence_ids: ["CLM-029", "CLM-039", "CLM-004"]
+    derived_from: []
+
+mathematical_models:
+  - id: "MATH-01"
+    description: "Error compounding: k independent stages with per-stage success p give p^k end to end (0.95^20 = 0.358); a verifier with catch rate v and perfect retry gives p_eff = 1 - (1-p)(1-v) (v=0.5: 0.975^20 = 0.603); correlation that cuts the catch rate to v(1-rho) with rho=0.6 gives 0.96^20 = 0.442."
+    evidence_ids: ["CLM-028"]
+    derived_from: []
+
+  - id: "MATH-02"
+    description: "Amplification depends on the metric: Kim et al.'s trace-level A_e (17.2 / 7.8 / 4.4 / 5.1) versus task-level (1 - S_MAS)/(1 - S_SAS) from the same table (1.18 / 0.98 / 1.01 / 1.03)."
+    evidence_ids: ["CLM-008", "CLM-011"]
+    derived_from: []
+
+  - id: "MATH-03"
+    description: "Token multipliers: debate input ~ n(R+1)q + n^2 R a with n(R+1) calls; supervisor re-read cost grows with the sum of rounds times per-round appended context; the 15x/4x chat multiples imply ~3.75x per run only under a shared baseline; Kim et al.'s turn law T = 2.72(n+0.5)^1.724 thins a 4,800-token budget from ~877 to ~93 tokens per turn between n=1 and n=5."
+    evidence_ids: ["CLM-003", "CLM-005", "CLM-009", "CLM-010", "CLM-024", "CLM-033"]
+    derived_from: []
+
+  - id: "MATH-04"
+    description: "Cost per verified success = spend over all offered tasks / verified successes; a 3.4x per-run multiplier became 2.72x per success in the Lesson 37.5 example, and per-task efficiency (success per 1K tokens 67.7 single vs 21.5 centralized at near-equal success) shows the overhead directly."
+    evidence_ids: ["CLM-035", "CLM-008", "CLM-041"]
+    derived_from: ["MATH-03"]
+
+  - id: "MATH-05"
+    description: "Majority voting: independent agents with p > 0.5 gain (0.600 -> 0.648 -> 0.683 for n = 1, 3, 5 at p = 0.6), but a shared-failure component pulls accuracy back toward p (0.641 with a 0.5 shared-outcome mixture at n=5). Sampling-and-voting is the equal-compute baseline for any discussion protocol."
+    evidence_ids: ["CLM-025", "CLM-023", "CLM-017"]
+    derived_from: []
+
+  - id: "MATH-06"
+    description: "Synchronous fan-out latency: orchestrator time + max_i t_i in parallel versus the sum in sequence (90 s vs 160 s in the example); parallelism shortens wall time, not total work or tokens."
+    evidence_ids: ["CLM-034"]
+    derived_from: []
+
+implementation_mechanisms:
+  - id: "IMPL-01"
+    description: "openai-agents-python at d68961657843c7d81dfc25834484f8aac2957eb3: a handoff is a transfer_to_<agent> tool; the receiver sees the full history by default; only the first of several same-turn handoffs executes; nest_handoff_history is an opt-in beta string-formatted summary; remove_all_tools strips tool evidence; Agent.as_tool runs a nested Runner.run and returns only final_output."
+    evidence_ids: ["CLM-030", "CLM-031"]
+    derived_from: []
+
+  - id: "IMPL-02"
+    description: "langgraph-supervisor-py at 88859b34017ac3569bbd4a3092c7e77593a0a960 (archived; LEGACY): star topology with every worker returning to the supervisor, workers invoked with the full shared state, output_mode last_message by default, parallel fan-out only via Send when parallel tool calls are enabled and supported."
+    evidence_ids: ["CLM-032"]
+    derived_from: []
+
+failure_modes:
+  - id: "FAIL-01"
+    description: "Spend-confounded adoption: a team adopts a multi-agent design on the strength of a non-budget-matched comparison and pays several times more per verified success for a gain a single agent at the same spend would also have reached."
+    evidence_ids: ["CLM-002", "CLM-036", "CLM-035"]
+    derived_from: ["MECH-01"]
+
+  - id: "FAIL-02"
+    description: "Context loss or bloat at handoff boundaries: summaries and filters drop evidence the next agent needs (loss of history, information withholding, conversation reset), while forward-all and full_history shared state multiply re-read tokens and latency."
+    evidence_ids: ["CLM-026", "CLM-033", "CLM-030", "CLM-032"]
+    derived_from: ["MECH-04"]
+
+  - id: "FAIL-03"
+    description: "Conflicting parallel writes: isolated workers make incompatible implicit decisions that the merger cannot reconcile."
+    evidence_ids: ["CLM-019", "CLM-037"]
+    derived_from: ["MECH-04"]
+
+  - id: "FAIL-04"
+    description: "Cascading error with a superficial or correlated verifier: an early wrong claim is accepted by a verifier that checks only form or shares the producer's blind spots, so the error propagates to the final answer."
+    evidence_ids: ["CLM-027", "CLM-028", "CLM-038"]
+    derived_from: ["MECH-05", "MATH-01"]
+
+  - id: "FAIL-05"
+    description: "Over-spawning and non-termination: an orchestrator spawns more workers than the task needs or agents repeat steps and do not recognise termination, multiplying cost without changing success."
+    evidence_ids: ["CLM-004", "CLM-026"]
+    derived_from: ["MECH-03"]
+
+  - id: "FAIL-06"
+    description: "Mis-attribution: a judge blames the wrong agent or step, and the fix targets a component that was not the decisive cause."
+    evidence_ids: ["CLM-029"]
+    derived_from: ["MECH-06"]
+
+production_connections:
+  - id: "PROD-01"
+    description: "One vendor's production research agent uses orchestrator-worker with parallel subagents, prompt-encoded effort scaling, artifact passing through a filesystem, synchronous barriers, and an LLM-judge rubric evaluated on end state; these are practices of one system under breadth-first queries, not an industry default."
+    evidence_ids: ["CLM-001", "CLM-004"]
+    derived_from: []
+
+  - id: "PROD-02"
+    description: "A coding-agent vendor argues for single-threaded agents with shared full traces for write-heavy work, the opposite pole to read-parallel research; the two positions describe different task couplings rather than a contradiction."
+    evidence_ids: ["CLM-019", "CLM-003"]
+    derived_from: []
+
+research_connections:
+  - id: "RES-01"
+    description: "Equal-budget studies (2025-2026) disagree by task: decomposable financial reasoning and breadth search can gain, sequential planning and multi-hop QA lose, and small positive margins appear for debate and mixture-of-agents over self-consistency at equal compute. Several are preprints or abstract-only."
+    evidence_ids: ["CLM-006", "CLM-012", "CLM-014", "CLM-015", "CLM-016", "CLM-017", "CLM-018"]
+    derived_from: []
+
+  - id: "RES-02"
+    description: "Debate literature: early non-compute-matched gains, followed by results that a well-prompted single agent or self-consistency matches debate and that debate is hyperparameter-sensitive."
+    evidence_ids: ["CLM-020", "CLM-021", "CLM-022", "CLM-023"]
+    derived_from: []
+
+todo_verify:
+  - id: "TODO-01"
+    description: "Confirm whether Du et al.'s 'two rounds of debate' includes the initial generation (call count 9 vs 6 for n=3), and execute the pinned openai-agents-python and langgraph-supervisor paths to confirm the statically read handoff and output_mode behavior."
+    evidence_ids: ["CLM-024", "CLM-030", "CLM-032"]
+    derived_from: []
+
+candidate_capabilities:
+  - capability: "Decide whether a task warrants multiple agents by running a budget-matched single-agent baseline, checking decomposability and the single-agent success level, and reporting the difference with an interval."
+    mapped_mechanisms: ["MECH-01", "MECH-02", "FAIL-01", "RES-01"]
+
+  - capability: "Select and defend a topology (orchestrator-worker, handoff, debate, agent-as-tool, or single agent) from task coupling, control ownership, and context needs, and trace how a pinned SDK implements it."
+    mapped_mechanisms: ["MECH-03", "IMPL-01", "IMPL-02", "PROD-01", "PROD-02", "RES-02"]
+
+  - capability: "Quantify what each context-passing regime duplicates or loses, and detect conflicting parallel decisions."
+    mapped_mechanisms: ["MECH-04", "MATH-03", "FAIL-02", "FAIL-03"]
+
+  - capability: "Model error compounding and verifier effect, measure amplification with an explicit metric definition, and code failures with a published taxonomy."
+    mapped_mechanisms: ["MECH-05", "MATH-01", "MATH-02", "FAIL-04", "FAIL-05"]
+
+  - capability: "Derive token, call, latency, and cost-per-success multipliers for a multi-agent design and compare them with a single agent and a voting baseline."
+    mapped_mechanisms: ["MATH-03", "MATH-04", "MATH-05", "MATH-06"]
+
+  - capability: "Evaluate multi-agent trajectories, attribute failures to agents and steps, and validate the attribution method before acting on it."
+    mapped_mechanisms: ["MECH-06", "FAIL-06", "TODO-01"]

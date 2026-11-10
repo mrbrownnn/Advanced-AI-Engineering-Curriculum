@@ -51,13 +51,15 @@ depth_contract:
   research_connection: SELECTIVE
 
 estimated_effort:
-  instruction: 5h
-  guided_practice: 3h
-  labs: 17h
+  instruction: 7h
+  guided_practice: 4h
+  labs: 21h
   assessment: 3h
   source_trace: 2h
-  total: 30h
+  total: 37h
 ```
+
+Lesson instruction totals 420m; guided practice totals 240m. LABs A–D retain 17h; LAB E adds 4h. The existing 2h source-trace budget is shared between Lucene and the adaptation snapshot, counted once. Module-local schedule is 37h (formerly 30h); the shared ROADMAP is outside this edit scope.
 
 The learner must be able to implement strong lexical/dense baselines, isolate encoder from ANN loss, tune HNSW under filters and load, construct hybrid fusion, rerank bounded candidates, select metrics from a relevance contract, and diagnose offline-to-production regressions.
 
@@ -87,6 +89,8 @@ Keep three loss boundaries separate:
 1. **Representation/relevance loss:** even exact search ranks the wrong items.
 2. **Approximation/filter loss:** ANN differs from exact search under the same vectors and filters.
 3. **Selection/system loss:** fusion, reranking, truncation, latency, or capacity changes the delivered list.
+
+Adaptation loop: held-out query boundary → positive/negative construction → contrastive or teacher-margin update → corpus re-encoding → exact-search evaluation → ANN and reranking release checks. Lesson 9.7 changes representation and supervision, not the definition of ANN recall.
 
 ## 04 Lessons
 
@@ -456,7 +460,78 @@ Two systems can have the same nDCG while one times out on selective-filter queri
 
 *(Effort: 55m instruction, 35m practice)*
 
+### Lesson 9.7 — Retrieval Adaptation: Contrastive Fine-Tuning, Hard Negatives, and Rerankers
+
+**Engineering Question:**
+When exact retrieval misses domain relevance, how can training improve the representation without teaching false negatives or leaking evaluation answers?
+
+**Concepts & Definitions:**
+- **Contrastive fine-tuning** updates encoder weights so a query scores its positive passage above competing candidates. A **positive** is relevant under the declared task; an unjudged passage is not necessarily a negative. **InfoNCE-style loss** here means negative log probability of the positive in a candidate softmax; DPR supplies this form without a temperature, while E5 uses temperature-scaled cosine (**O**, CLM-021, CLM-022).
+- **In-batch negatives** are other queries' positives reused as competitors. A **hard negative** is a high-scoring but genuinely irrelevant passage. A **false negative** is relevant but assigned a negative training role. Hardness is relative to a particular encoder, query, and corpus, not a permanent document property.
+- **Temperature** $\tau>0$ divides similarities before softmax; scale $s=1/\tau$. Lower temperature concentrates gradient on higher-scoring competitors. It is not the generator's query-sampling temperature.
+- **Mining** retrieves candidate negatives; **denoising** removes likely mislabeled ones. **Distillation** transfers a teacher's scores or score differences to a student. A cross-encoder teacher jointly encodes query/passage; the deployed student can remain a dual encoder (Lesson 9.5).
+- **Domain adaptation** trains for a target corpus/task. **Transductive corpus access** permits training on unlabeled target documents, but not held-out query labels; declare it rather than claiming an untouched-corpus evaluation. Synthetic queries are proposed supervision, not human relevance judgments.
+
+**Mechanism Explanation:**
+1. Freeze train/dev/test query partitions and corpus lineage before mining or generation. Record duplicate groups, generator/teacher revisions, prompts, mining checkpoint, score scale, and filters. Keep test qrels out of selection and threshold tuning.
+2. Encode positives and candidate negatives; compute loss; backpropagate; publish a new encoder checkpoint. Re-encode the corpus for comparison with the new checkpoint: mixing new query vectors with old document vectors confounds training and deployment.
+3. Mine with BM25, a dense retriever, or a teacher. ANCE asynchronously refreshes corpus embeddings and the ANN index while its trainer advances; stale checkpoints and full-corpus encoding are part of that recipe's cost (**O**, CLM-023). Offline mining is an alternative, not the same refresh loop.
+4. Mask known positives and duplicate texts. Inspect a stratified sample by rank and query slice. RocketQA reports that hard-negative training without denoising hurts its MSMARCO setup; its teacher filter is not proof every retained negative is irrelevant (**O**, CLM-024). Positive-aware filtering uses the teacher's positive score as a reference: NV-Retriever's TopK-PercPos retains $s^-<0.95s^+$ in its reported setting (**O**, CLM-025). This threshold is not universal or portable between cosine, logits, and probabilities.
+5. Train a reranker on jointly encoded labeled pairs. For relevance logit $a$ and binary label $y$, use $p=\sigma(a)=1/(1+e^{-a})$ and binary cross entropy $-y\log p-(1-y)\log(1-p)$, averaged over pairs. monoBERT is a reference for this pointwise objective; a probability-like inference score is not necessarily the training logit (**O**, CLM-026). Evaluate at fixed candidate pools before attributing gains to reranker training.
+6. For unlabeled domains, GPL generates queries, mines passages, obtains teacher margins, and trains with Margin-MSE. Promptagator instead includes a round-trip filter: keep generated query/document pairs when the source document is retrieved near the top. Filters can discard valid diverse queries as well as hallucinations (**O**, CLM-027). Compare synthetic-only, filtered, and no-adaptation baselines on independent queries.
+
+**Quantitative Model / Derivation:**
+For $B$ local queries, positive $p_i^+$, candidate multiset $\mathcal C$, similarity $u(q,c)$, and $z_{ic}=u(q_i,c)/\tau$:
+$$L=-\frac1B\sum_i\log\frac{e^{z_{i+}}}{\sum_{c\in\mathcal C}e^{z_{ic}}},\qquad
+\pi_{ic}=\frac{e^{z_{ic}}}{\sum_c e^{z_{ic}}}.$$
+This is dimensionless negative log likelihood. Use log-sum-exp numerically. For one query, $\partial L_i/\partial z_{ic}=\pi_{ic}-\mathbf1[c=p_i^+]$; similarity gradients add the factor $1/\tau$. A high-scoring mislabeled passage therefore receives a strong push away, not just a harmless extra example (**D**, CLM-028).
+
+At the pinned sentence-transformers **main snapshot**, MNRL concatenates all candidate columns, sharing every query's explicit negatives with other queries. With $W$ devices gathered, $B$ queries/device and $n$ explicit negatives/query:
+$$N_{neg}=WB(1+n)-1.$$
+Without gathering, replace $W$ by 1. Of these, $WBn$ are explicit negatives, while $WB-1$ are other positives. Counts assume one positive per query, no masking, and all columns shared. Duplicate and relevant candidates can make the count of *valid distinct* negatives smaller. Ordinary gradient accumulation across separate losses does not enlarge this candidate softmax; GradCache preserves the large-batch candidate comparison while splitting encoder passes (**O**, CLM-029; **D**, CLM-028). Bigger batches are a candidate-pool intervention, not a guarantee of better generalization.
+
+Let $f$ be an assumed independent probability that a selected negative is relevant and $n$ the number selected:
+$$P(\text{at least one false negative})=1-(1-f)^n,\qquad E[F]=nf.$$
+The complement derives from all $n$ being valid negatives. Independence is a toy approximation; rank, duplicate groups, and topic create correlations. Estimate $f$ from adjudicated rank/slice samples, never reuse a paper's sample rate as a corpus constant (**D**, CLM-028).
+
+For student score $S$ and teacher score $T$, Margin-MSE is:
+$$L_{MM}=\frac1B\sum_i\left[(S(q_i,p_i^+)-S(q_i,p_i^-))-(T(q_i,p_i^+)-T(q_i,p_i^-))\right]^2.$$
+A per-query additive teacher offset cancels, but multiplicative scale does not. Cosine differences lie in $[-2,2]$; unbounded teacher logit margins may be unattainable without compatible student scores or scaling. Teacher errors still transfer (**O**, CLM-030; **D**, CLM-028).
+
+**Worked Example (synthetic; all calculations recomputed in Python):**
+One query has positive cosine 0.7, two in-batch competitors 0.5/0.3, and a mined competitor 0.6. At $s=20$ ($\tau=0.05$), logits are 14/10/6/12; softmax probabilities are approximately 0.8666/0.0159/0.0003/0.1173 and loss is 0.1432. At $s=1$, loss is 1.2220 and probabilities are 0.2946/0.2412/0.1975/0.2666. At scale 20 the 0.6 competitor receives $e^{20(0.6-0.3)}=403.43$ times the gradient weight of the 0.3 competitor. If the 0.6 passage is relevant, lowering temperature intensifies the wrong supervision.
+
+For $W=4,B=32,n=3$ with gathering, each query sees $4\cdot32\cdot4-1=511$ nominal negatives, including 384 explicit negatives. With **synthetic** $f=0.10$ for four selected negatives, $P(F\ge1)=1-0.9^4=0.3439$, and $E[F]=0.4$; this is not a measured error rate.
+
+Teacher scores 6 and 2 give target margin 4. Student scores 0.9 and 0.4 give margin 0.5, hence loss $(0.5-4)^2=12.25$. If the teacher instead scores the supposed negative 5.8, target margin is 0.2 and loss is 0.09: the student is not forced to create a large separation. That helps only if the teacher's near-tie reflects actual relevance.
+
+**Evaluation leakage and unjudged-hit pitfalls:**
+Audit exact and near-duplicate query overlap, split-related documents, test-qrel use in mining/filter tuning, generator exposure, and query/document identity collisions. Target-corpus access alone is not test-label leakage; undeclared transduction or generation of held-out questions invalidates the claimed evaluation boundary. Promptagator excludes known generator-overlap datasets, and GPL documents an identical-ID evaluation correction (**O**, CLM-031).
+
+Report Hole@$k$ = unjudged top-$k$ hits / returned top-$k$ hits alongside Lesson 9.6 metrics, with returned count explicit. A new representation may find relevant documents outside the old judgment pool. BEIR's additional annotation changes non-lexical systems' measured quality (**O**, CLM-032). Pool old/new results for blind adjudication; show original-pool and expanded-pool sensitivity, out-of-domain slices, and paired query uncertainty. Neither an unjudged hit nor a falling training loss proves relevance or regression.
+
+**Knowledge Check:**
+1. Why does accumulating four independent microbatch losses not create the same negatives as one large contrastive batch?
+2. Why can increasing hardness worsen exact-search relevance even when training loss falls?
+3. What teacher score transformation cancels in Margin-MSE, and what transformation does not?
+4. When is target-corpus synthetic training transductive rather than test-label leakage?
+
+**Guided Practice:**
+Recompute the cosine fixture at $s=50$; filter the 0.6 competitor and recompute at $s=20$. For teacher positive score 0.70, apply the strict 95% rule to candidates 0.69/0.66/0.60/0.41. Then design a train/dev/test manifest and a blind judgment expansion for a domain slice with new unjudged hits.
+
+**Feedback Contract:**
+- **Expected Evidence:** $L_{s=50}=0.0068$; after removing 0.6 at $s=20$, loss is 0.0185. Threshold is 0.665, retaining 0.66/0.60/0.41. Submit candidate identities, masks, score scale, split/generator lineage, and original/expanded judgment comparison. A small loss is not the release criterion.
+- **Common Failure:** Unjudged equals negative; explicit-negative count equals effective-negative count; probability thresholds applied to logits; test qrels tune mining.
+- **Diagnostic Hint:** Inspect the highest-gradient candidates and their labels before increasing batch size or scale. Check whether evaluation documents were allowed but evaluation queries were not.
+- **Concept to Revisit:** Candidate softmax; false-negative role; teacher margin; evaluation boundary.
+
+**Learning Outcome:** Design and falsify a retrieval adaptation recipe that separates negative quality, representation gain, teacher bias, and evaluation contamination.
+
+*(Effort: 120m instruction, 60m practice; adaptation experiment in LAB E counted separately)*
+
 ## 05 Literature & Production Source Map
+
+**Adaptation evidence update:** sources in Lesson 9.7 were inspected in the authorized dossier on 2026-11-10. This is a scoped extension, not a new verification of unchanged claims or an exhaustive currentness survey.
 
 **REFERENCE / BASELINE**
 
@@ -466,6 +541,14 @@ Two systems can have the same nDCG while one times out on selective-filter queri
 - [Reciprocal Rank Fusion](https://dl.acm.org/doi/10.1145/1571941.1572114) — Cormack, Clarke, and Büttcher (SIGIR 2009). Reading pointer: §1, the RRFscore formula with $k=60$ ([author-hosted copy](https://plg.uwaterloo.ca/~gvcormac/cormacksigir09-rrf.pdf), read 2026-09-30).
 - [ColBERT](https://arxiv.org/abs/2004.12832) — Khattab and Zaharia (SIGIR 2020). Reading pointers: §3.1 (late interaction as a sum of MaxSim) and §3.2 (query `[mask]` augmentation, L2-normalized embeddings).
 - [BEIR](https://arxiv.org/abs/2104.08663) — Thakur et al. (2021).
+
+**ADAPTATION REFERENCES / WORKLOAD-DEPENDENT** (full-text reading recorded 2026-11-10; no benchmark table numbers imported):
+- [DPR v3](https://arxiv.org/abs/2004.04906v3), Karpukhin et al., 2020: §3.1–3.2, candidate NLL and in-batch negatives (CLM-021). [E5 v2](https://arxiv.org/abs/2212.03533v2), Wang et al., 2024 revision: §3–4, temperature-scaled cosine and training stages (CLM-022). Neither establishes a universal temperature.
+- [ANCE v2](https://arxiv.org/abs/2007.00808v2), Xiong et al., 2020/ICLR 2021: §3–6 and App. A.3, asynchronous mining/index refresh (CLM-023). [RocketQA v2](https://arxiv.org/abs/2010.08191v2), Qu et al., 2021: §4–5.3, false-negative denoising and negative results (CLM-024).
+- [NV-Retriever v2](https://arxiv.org/abs/2407.15831v2), Moreira et al., 2025 revision: §2.2–4, positive-aware filtering (CLM-025). WORKLOAD-DEPENDENT/FRONTIER, not an industry default.
+- [Passage Re-ranking with BERT v5](https://arxiv.org/abs/1901.04085v5), Nogueira and Cho, 2020 revision: joint pair scoring and binary cross entropy (CLM-026). [Margin-MSE v2](https://arxiv.org/abs/2010.02666v2), Hofstätter et al., 2021: §3, teacher score-difference objective (CLM-030).
+- [GPL v3](https://arxiv.org/abs/2112.07577v3), Wang et al., 2022: §3–7 and App. D, generated queries, mined negatives, pseudo-margins, identical-ID correction. [Promptagator v1](https://arxiv.org/abs/2209.11755v1), Dai et al., 2022: §3–5, round-trip filtering and generator-overlap exclusions (CLM-027, CLM-031). Synthetic supervision is not independent validation.
+- [GradCache v2](https://arxiv.org/abs/2101.06983v2), Gao et al., 2021: §3.2–3.3, staged gradient caching rather than ordinary accumulation (CLM-029). [BEIR v4](https://arxiv.org/abs/2104.08663v4): §5–6, incomplete judgment pools and additional annotation (CLM-032); no parsed table values retained.
 
 **CURRENT DEFAULT** (the module's *recommended baseline*, derived from CLM-001, CLM-004, CLM-006, and CLM-010; not a measured survey of industry adoption or of any one engine's defaults): a measured BM25 baseline, embedding-version pinning, ANN-versus-exact audit, hybrid candidate lineage where justified, bounded reranking, slice metrics, and end-to-end timing.
 
@@ -491,6 +574,12 @@ Two systems can have the same nDCG while one times out on selective-filter queri
   - `HnswGraphSearcher.searchLevel` adds neighbors that fail `acceptOrds` to the candidate queue but does not collect them as results.
   - `AbstractKnnVectorQuery.getLeafResults` chooses exact search when the filter cost is at most the per-leaf $k$, passes `cost + 1` as the visit limit otherwise, and falls back to exact search when the approximate search stops early (CLM-014).
 - Scope: pinned Lucene behavior, not a universal BM25/HNSW or filtered-search definition. Engines built on Lucene may configure or override these paths.
+
+**ADAPTATION SOURCE TRACE — main snapshot, not a release**
+- Repository: [huggingface/sentence-transformers](https://github.com/huggingface/sentence-transformers/tree/a89a0fb5394edc2e601c7972ca4e3ec7de6390e3); commit `a89a0fb5394edc2e601c7972ca4e3ec7de6390e3`, statically inspected in the dossier 2026-11-10. No training or example logs reproduced. Do not call this a stable release.
+- Entry `MultipleNegativesRankingLoss.compute_loss_from_embeddings`, file `sentence_transformers/sentence_transformer/losses/multiple_negatives_ranking.py`: concatenate document columns → cosine × scale → positive column/log-sum-exp → mean NLL. Default scale 20 means temperature 0.05; cross-device gathering is opt-in (CLM-029).
+- `sentence_transformers/util/hard_negatives.py::mine_hard_negatives`: corpus plus positives → deduplicate → mask known positives → optional teacher rescoring/margins → rank/select. Margin filtering is not enabled by default. Its relative margin is based on the absolute positive score, so equivalence with 95% multiplication holds only for positive scores (CLM-033).
+- `sentence_transformers/sentence_transformer/losses/margin_mse.py::MarginMSELoss`: pairwise student differences versus detached target margins (CLM-030). Scope: library choices, not a universal recipe.
 
 ### LAYER 2: ENGINEERING PRACTICE LAYER
 
@@ -537,6 +626,31 @@ All labs follow `PREDICT → BUILD → MEASURE → EXPLAIN → BREAK → IMPROVE
 - **Break & Falsify:** include no-relevant queries, bursts, timeouts, cancellations, stale replicas, and changed traffic mix.
 - **Alignment:** Lesson 9.6 and Incident 09.1.
 - **Effort Estimate:** 4h.
+
+### LAB E — Adaptation, Negative Audit, and Held-Out Release
+
+- **Hardware:** CPU for loss checks, mining/audit on a small corpus, and supplied or clearly synthetic score replay; COLAB-GPU optional for small-encoder training. No local GPU required. A replay demonstrates analysis, not an empirical model-quality gain.
+- **Objective:** compare no adaptation, random/in-batch supervision, filtered hard negatives, and teacher-margin supervision with exact-search evaluation before ANN tuning.
+- **Pre-Registered Hypothesis:** on the declared domain slice, audited hard negatives improve held-out exact relevance over matched random negatives without exceeding a predeclared out-of-domain regression margin; reject this hypothesis if paired query intervals or expanded judgments do not support it.
+- **Independent Variables:** negative source/filter, temperature, shared candidate count, teacher margin, synthetic-query filter; hold encoder initialization, corpus, query partitions, candidate budget, and update budget fixed or report their differences.
+- **Dependent Variables:** loss/gradient weights, duplicate/false-negative sample rate by rank, exact Recall/nDCG with paired uncertainty, Hole@k and judgment sensitivity, domain slices, training/mining/re-encoding cost, fixed-pool reranker quality and served latency.
+- **Loop:** predict → construct/replay candidate batches → measure → inject a duplicate positive and mislabeled hard negative → explain gradient effects → filter/relabel → falsify on independent queries and an out-of-domain slice → defend release or no-change.
+- **Evidence:** split/generator/teacher manifest; sampled label audit; baseline and adaptation ablation; exact-before-ANN comparison; original/expanded judgment results; candidate-pool-controlled reranker comparison; rollback to a compatible encoder/index pair. Never tune on test qrels. Submit with the module release report; no new submission platform is implied.
+- **Alignment:** Lesson 9.7; Mastery deliverables 2, 5, 8–9 extended with the adaptation ablation and contamination audit.
+- **Effort Estimate:** 4h, separate from Lesson 9.7 guided practice. Source reading shares the existing source-trace budget.
+
+**Runnable arithmetic check (CPU, synthetic; not a quality experiment):**
+```python
+import math
+scores = [0.7, 0.5, 0.3, 0.6]
+z = [20 * x for x in scores]
+m = max(z)
+loss = math.log(sum(math.exp(x - m) for x in z)) + m - z[0]
+assert math.isclose(loss, 0.1432223697088979, abs_tol=1e-12)
+assert 4 * 32 * (1 + 3) - 1 == 511
+assert math.isclose(1 - 0.9 ** 4, 0.3439)
+assert math.isclose(((0.9 - 0.4) - (6 - 2)) ** 2, 12.25)
+```
 
 ## 07 Break / Incident Scenarios
 
@@ -599,11 +713,15 @@ Submit manifests, raw branch/stage rankings, exact–ANN/filter comparisons, jud
 | Reranking and late interaction | 9.5 | 9.5 Guided Practice (a) MaxSim, (b) depth sweep; LAB C | Mastery deliverable 4; Incident 09.1 step 2 (reranker truncation) | LAB C depth frontier with pre/post-rerank quality and full cost |
 | Metrics and system trade-offs | 9.6 | 9.6 Guided Practice (a) nDCG/MRR, (b) loaded evaluation; LAB D | Mastery deliverables 5–6, 9; Incident 09.1 steps 4, 6 | LAB D judgment policy (zero-IDCG, unjudged, tie rules), per-query metrics with uncertainty, loaded stage/tail results, goodput |
 
+| Retrieval adaptation and negative/evaluation audit | 9.7 | Guided Practice; LAB E | Mastery deliverables 2, 5, 8–9 with adaptation ablation | Split and teacher manifest; loss checks; negative audit; exact relevance and fixed-pool reranker deltas; expanded judgments; compatible encoder/index rollback |
+
 ## 11 Exit Criteria & Module Wrap-Up
 
 ### Exit Criteria
 
 A learner passes when they can reproduce BM25 behavior, validate embedding/metric semantics, isolate exact-versus-ANN loss, break filtered HNSW, verify update/delete visibility, justify fusion by complementarity, prove reranker candidate bounds, choose correct metrics, trace current source, and defend a quality–latency–capacity release with rollback.
+
+Adaptation exit check: explain temperature and effective negative counts; audit false negatives and synthetic-query exposure; reproduce Margin-MSE; reject a contaminated or judgment-biased gain; defend adaptation versus no-change using LAB E evidence.
 
 ### Module Wrap-Up (Final Mental Model Reconstruction)
 

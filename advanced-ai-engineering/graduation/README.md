@@ -4,6 +4,8 @@
 
 Graduation is a comprehensive architecture review under realistic constraints: ambiguous requirements, incomplete information, security constraints, SLOs, budget limits, and growth projections.
 
+[Design-doc/RFC guide](design-docs.md) · [Fill-in design-doc template](../templates/design-doc.md)
+
 ## What Is Tested
 
 - Ambiguous requirements → structured assumptions

@@ -1,0 +1,1082 @@
+module: "38-tool-ecosystem-protocols"
+registry_version: "1.0.0"
+research_cutoff: "2026-11-10"
+change_reason: "Initial registry for Module 38 (Tool Ecosystem & Protocols). Sources were opened on 2026-11-10 as recorded in the module dossier: MCP specification revision 2026-07-28 at modelcontextprotocol/modelcontextprotocol 632a0c9a65c9b4fbc889d8aface5c9cf5edef3b7, MCP registry docs, Anthropic and OpenAI tool-use documentation, A2A at 9fff3e08ab33bb7674e7d98fc7c08ae8592bb4bd, OpenAPI 3.2.1 at 4f86429f134f7e48b6351563549b4502fc69de52, RFC 9728 and RFC 8707, tool-selection papers (several abstract-only, marked per claim), BFCL at 6ea57973c7a6097fd7c5915698c54c17c5b1b6c8, and modelcontextprotocol/python-sdk at 77001c96f9507be0f4d009b83210a384a5e08bda (static reads only). The python-sdk files server.py, tool_manager.py, settings.py, caching.py, bearer_auth.py, and lowlevel/server.py were opened again at the same SHA on 2026-11-10 while authoring; that re-read added CLM-045's unknown-tool observation. Nothing was executed against an MCP server."
+
+changed_claims: []
+
+out_of_scope_candidates:
+  - "Tool-description poisoning, tool-selection hijacking, attack-success-rate methodology, and gateway policy (owned by Module 18; referenced, not re-taught)"
+  - "Contract semantics, effect classes, dispatch predicate, and unknown-effect handling (owned by Module 12, Lesson 12.2; referenced)"
+  - "Durable idempotency and replay across crashes (owned by Module 14)"
+  - "Multi-agent coordination topologies (owned by Module 37); A2A is covered only as a protocol contrast"
+  - "A2A security sections and push-notification authentication (not read)"
+  - "MCP draft revision after 2026-07-28 (not reviewed)"
+
+claims:
+  # ---------------- MCP specification 2026-07-28 (S1) ----------------
+  - id: CLM-001
+    claim: "MCP revision 2026-07-28 defines JSON-RPC 2.0 messages between hosts (LLM applications that initiate connections), clients (connectors inside the host), and servers. Servers offer Resources, Prompts, and Tools (functions the model executes). The architecture page states that full conversation history stays with the host and that the host process enforces security boundaries. The versioning page names 2026-07-28 as the current protocol version, schema.ts sets LATEST_PROTOCOL_VERSION to 2026-07-28, and the previous revision is 2025-11-25."
+    provenance: "VERIFIED_FACT"
+    domain: "tool_protocols"
+    concepts: ["mcp_architecture", "host_client_server", "protocol_revision"]
+    confidence: "high"
+    currentness_status: "CURRENT DEFAULT (specification is current; adoption not surveyed)"
+    evidence:
+      - { source_type: "specification", tier: 1, title: "Model Context Protocol Specification, revision 2026-07-28", repository: "https://github.com/modelcontextprotocol/modelcontextprotocol", commit: "632a0c9a65c9b4fbc889d8aface5c9cf5edef3b7", file: "docs/specification/2026-07-28/index.mdx; schema/2026-07-28/schema.ts", section: "architecture/index.mdx; docs/docs/2026-07-28/learn/versioning.mdx; schema.ts L30", url: "https://github.com/modelcontextprotocol/modelcontextprotocol/tree/632a0c9a65c9b4fbc889d8aface5c9cf5edef3b7/docs/specification/2026-07-28", accessed_at: "2026-11-10" }
+    limitations: ["The specification states normative intent. It does not show what any client or server enforces.", "A draft directory exists. Changes after 2026-07-28 were not reviewed."]
+    applicability: "Wire-protocol vocabulary for Lessons 38.2 to 38.6."
+    curriculum_usage: { lessons: ["38.2"], labs: ["LAB-B"], assessments: ["Mastery-38"] }
+
+  - id: CLM-002
+    claim: "The 2026-07-28 changelog removes the initialize/initialized handshake and the Mcp-Session-Id header. Each request carries the _meta keys io.modelcontextprotocol/protocolVersion and io.modelcontextprotocol/clientCapabilities. Servers MUST implement server/discover. A version mismatch returns UnsupportedProtocolVersionError (code -32022) with data.supported. ping and logging/setLevel are removed."
+    provenance: "VERIFIED_FACT"
+    domain: "tool_protocols"
+    concepts: ["stateless_requests", "server_discover", "version_negotiation"]
+    confidence: "high"
+    currentness_status: "CURRENT DEFAULT (specification)"
+    evidence:
+      - { source_type: "specification", tier: 1, title: "MCP 2026-07-28 changelog and schema", repository: "https://github.com/modelcontextprotocol/modelcontextprotocol", commit: "632a0c9a65c9b4fbc889d8aface5c9cf5edef3b7", file: "docs/specification/2026-07-28/changelog.mdx; docs/specification/2026-07-28/server/discover.mdx; schema/2026-07-28/schema.ts", section: "changelog items 1-3; schema.ts UNSUPPORTED_PROTOCOL_VERSION = -32022 (L450)", url: "https://github.com/modelcontextprotocol/modelcontextprotocol/blob/632a0c9a65c9b4fbc889d8aface5c9cf5edef3b7/docs/specification/2026-07-28/changelog.mdx", accessed_at: "2026-11-10" }
+    limitations: ["Changelog summaries were used. The full SEP texts were not read."]
+    applicability: "Lesson 38.2 lifecycle; LAB B version negotiation."
+    related_claims: ["CLM-004", "CLM-042"]
+    curriculum_usage: { lessons: ["38.2"], labs: ["LAB-B"], assessments: ["Mastery-38"] }
+
+  - id: CLM-003
+    claim: "In MCP 2026-07-28, SSE resumability with Last-Event-ID is removed, so a broken stream means the request is re-issued with a new id. Every result carries a resultType of complete or input_required, and a result without it is treated as complete. Multi Round-Trip Requests replace server-initiated sampling/createMessage, elicitation/create, and roots/list. Extensions are negotiated through capabilities.extensions, and Tasks moved to the extension io.modelcontextprotocol/tasks."
+    provenance: "VERIFIED_FACT"
+    domain: "tool_protocols"
+    concepts: ["stateless_requests", "multi_round_trip_requests", "result_type"]
+    confidence: "high"
+    currentness_status: "CURRENT DEFAULT (specification)"
+    evidence:
+      - { source_type: "specification", tier: 1, title: "MCP 2026-07-28 changelog", repository: "https://github.com/modelcontextprotocol/modelcontextprotocol", commit: "632a0c9a65c9b4fbc889d8aface5c9cf5edef3b7", file: "docs/specification/2026-07-28/changelog.mdx", section: "changelog items 5, 8, 9", url: "https://github.com/modelcontextprotocol/modelcontextprotocol/blob/632a0c9a65c9b4fbc889d8aface5c9cf5edef3b7/docs/specification/2026-07-28/changelog.mdx", accessed_at: "2026-11-10" }
+    limitations: ["The specification does not say what happens to a non-idempotent tool effect when a stream breaks. CLM-062 derives that consequence."]
+    applicability: "Lesson 38.2; Incident and Mastery reasoning about dropped streams."
+    related_claims: ["CLM-062"]
+    curriculum_usage: { lessons: ["38.2"], labs: ["LAB-B"] }
+
+  - id: CLM-004
+    claim: "MCP basic/versioning.mdx defines modern implementations (2026-07-28) and legacy ones (2025-11-25 or earlier, which use the handshake). A modern client talking to a legacy server fails. A legacy client talking to a modern server fails, because legacy clients have no fall-forward mechanism. Dual-era implementations work in both directions. Clients SHOULD cache the era per process for stdio and per origin for HTTP."
+    provenance: "VERIFIED_FACT"
+    domain: "tool_protocols"
+    concepts: ["era_compatibility", "version_negotiation"]
+    confidence: "high"
+    currentness_status: "CURRENT DEFAULT (specification)"
+    evidence:
+      - { source_type: "specification", tier: 1, title: "MCP 2026-07-28 versioning", repository: "https://github.com/modelcontextprotocol/modelcontextprotocol", commit: "632a0c9a65c9b4fbc889d8aface5c9cf5edef3b7", file: "docs/specification/2026-07-28/basic/versioning.mdx", section: "era compatibility table", url: "https://github.com/modelcontextprotocol/modelcontextprotocol/blob/632a0c9a65c9b4fbc889d8aface5c9cf5edef3b7/docs/specification/2026-07-28/basic/versioning.mdx", accessed_at: "2026-11-10" }
+    limitations: ["How many deployed clients and servers are dual-era is unknown."]
+    applicability: "Lesson 38.2 compatibility matrix; Mastery legacy-server constraint."
+    related_claims: ["CLM-002"]
+    curriculum_usage: { lessons: ["38.2", "38.4"], labs: ["LAB-B"], assessments: ["Mastery-38"] }
+
+  - id: CLM-005
+    claim: "MCP server/tools.mdx (2026-07-28): tools/list returns the set of tools currently available to the requesting client. The set MUST NOT vary per connection or as a side effect of other requests, and MAY vary by the authorization presented on the request, for example returning only the tools the caller's granted scopes permit. Servers SHOULD return tools in a deterministic order. The stated reasons are reliable client caching and better LLM prompt cache hit rates when tools are included in model context."
+    provenance: "VERIFIED_FACT"
+    domain: "tool_protocols"
+    concepts: ["tools_list_semantics", "deterministic_ordering", "prompt_cache_prefix"]
+    confidence: "high"
+    currentness_status: "CURRENT DEFAULT (specification)"
+    evidence:
+      - { source_type: "specification", tier: 1, title: "MCP 2026-07-28 Tools", repository: "https://github.com/modelcontextprotocol/modelcontextprotocol", commit: "632a0c9a65c9b4fbc889d8aface5c9cf5edef3b7", file: "docs/specification/2026-07-28/server/tools.mdx", section: "Listing Tools (lines 60-75 at the pinned SHA)", url: "https://github.com/modelcontextprotocol/modelcontextprotocol/blob/632a0c9a65c9b4fbc889d8aface5c9cf5edef3b7/docs/specification/2026-07-28/server/tools.mdx", accessed_at: "2026-11-10" }
+    limitations: ["Deterministic ordering is SHOULD-level. The specification does not say how much cache benefit to expect."]
+    applicability: "Lessons 38.2 and 38.3; LAB B ordering test; Incident 38.1."
+    related_claims: ["CLM-059"]
+    curriculum_usage: { lessons: ["38.2", "38.3", "38.5"], labs: ["LAB-B"], assessments: ["Incident-38.1"] }
+
+  - id: CLM-006
+    claim: "In MCP 2026-07-28, notifications/tools/list_changed goes only to clients that opened subscriptions/listen with toolsListChanged: true. List results carry ttlMs and cacheScope (public or private). A private result MUST NOT be shared across authorization contexts (CacheableResult in schema.ts L1081-1110)."
+    provenance: "VERIFIED_FACT"
+    domain: "tool_protocols"
+    concepts: ["list_changed_subscription", "cache_hints"]
+    confidence: "high"
+    currentness_status: "CURRENT DEFAULT (specification)"
+    evidence:
+      - { source_type: "specification", tier: 1, title: "MCP 2026-07-28 Tools and schema", repository: "https://github.com/modelcontextprotocol/modelcontextprotocol", commit: "632a0c9a65c9b4fbc889d8aface5c9cf5edef3b7", file: "docs/specification/2026-07-28/server/tools.mdx; schema/2026-07-28/schema.ts", section: "List Changed Notification; CacheableResult L1081-1110", url: "https://github.com/modelcontextprotocol/modelcontextprotocol/blob/632a0c9a65c9b4fbc889d8aface5c9cf5edef3b7/schema/2026-07-28/schema.ts", accessed_at: "2026-11-10" }
+    limitations: ["Notification delivery latency is not specified."]
+    applicability: "Lesson 38.4 staleness; LAB B."
+    related_claims: ["CLM-048", "CLM-058", "CLM-068"]
+    curriculum_usage: { lessons: ["38.2", "38.4"], labs: ["LAB-B"] }
+
+  - id: CLM-007
+    claim: "MCP 2026-07-28 Tool fields are name, title, description, icons, inputSchema, optional outputSchema, and annotations. A name SHOULD be 1-128 characters from [A-Za-z0-9_.-] and is unique only within one server. inputSchema has root type object and defaults to the JSON Schema 2020-12 dialect, with any 2020-12 keyword allowed since SEP-2106. Aggregators SHOULD disambiguate colliding names, for example by prefixing a server id, and serverInfo.name is not guaranteed to be unique. The schema.ts doc comment on Tool warns that type constraints inside oneOf branches are not enforced for whichever branch does not match. The 2025-11-25 schema restricted inputSchema and outputSchema to {type: object, properties, required} (L1260-1284)."
+    provenance: "VERIFIED_FACT"
+    domain: "tool_protocols"
+    concepts: ["tool_definition", "tool_name_rules", "schema_dialect", "name_collision"]
+    confidence: "high"
+    currentness_status: "CURRENT DEFAULT (specification)"
+    evidence:
+      - { source_type: "specification", tier: 1, title: "MCP 2026-07-28 Tools and schema", repository: "https://github.com/modelcontextprotocol/modelcontextprotocol", commit: "632a0c9a65c9b4fbc889d8aface5c9cf5edef3b7", file: "docs/specification/2026-07-28/server/tools.mdx; schema/2026-07-28/schema.ts; schema/2025-11-25/schema.ts", section: "Tool (schema.ts L1979-2024); 2025-11-25 schema L1260-1284", url: "https://github.com/modelcontextprotocol/modelcontextprotocol/blob/632a0c9a65c9b4fbc889d8aface5c9cf5edef3b7/schema/2026-07-28/schema.ts", accessed_at: "2026-11-10" }
+    limitations: ["Name rules are SHOULD-level. A server can still emit noncompliant names, and a client must decide what to do with them."]
+    applicability: "Lessons 38.1, 38.4; Incident 38.1 name collision."
+    related_claims: ["CLM-043", "CLM-060"]
+    curriculum_usage: { lessons: ["38.1", "38.4"], labs: ["LAB-D"], assessments: ["Incident-38.1"] }
+
+  - id: CLM-008
+    claim: "MCP ToolAnnotations (schema.ts L1900-1954) are readOnlyHint (default false), destructiveHint (default true, meaningful only when not read-only), idempotentHint (default false), and openWorldHint (default true). The schema states that all of them are hints and that clients should never make tool-use decisions based on annotations received from untrusted servers. tools.mdx requires clients to treat annotations as untrusted unless the server is trusted."
+    provenance: "VERIFIED_FACT"
+    domain: "tool_protocols"
+    concepts: ["tool_annotations", "trust_boundary"]
+    confidence: "high"
+    currentness_status: "CURRENT DEFAULT (specification)"
+    evidence:
+      - { source_type: "specification", tier: 1, title: "MCP 2026-07-28 schema ToolAnnotations", repository: "https://github.com/modelcontextprotocol/modelcontextprotocol", commit: "632a0c9a65c9b4fbc889d8aface5c9cf5edef3b7", file: "schema/2026-07-28/schema.ts; docs/specification/2026-07-28/server/tools.mdx", section: "ToolAnnotations L1900-1954", url: "https://github.com/modelcontextprotocol/modelcontextprotocol/blob/632a0c9a65c9b4fbc889d8aface5c9cf5edef3b7/schema/2026-07-28/schema.ts", accessed_at: "2026-11-10" }
+    limitations: ["The specification does not define what makes a server trusted."]
+    applicability: "Lesson 38.1 effect class versus annotation."
+    related_claims: ["CLM-063"]
+    curriculum_usage: { lessons: ["38.1"], labs: ["LAB-D"] }
+
+  - id: CLM-009
+    claim: "MCP 2026-07-28 separates two error kinds. Protocol errors are JSON-RPC errors, for example an unknown tool or a request that fails the CallToolRequest schema; the specification's unknown-tool example uses code -32602. Tool execution errors are results with isError: true, and they include input-validation errors. Clients SHOULD feed execution errors back to the model so it can self-correct."
+    provenance: "VERIFIED_FACT"
+    domain: "tool_protocols"
+    concepts: ["error_taxonomy", "protocol_error", "tool_execution_error"]
+    confidence: "high"
+    currentness_status: "CURRENT DEFAULT (specification)"
+    evidence:
+      - { source_type: "specification", tier: 1, title: "MCP 2026-07-28 Tools, Error Handling", repository: "https://github.com/modelcontextprotocol/modelcontextprotocol", commit: "632a0c9a65c9b4fbc889d8aface5c9cf5edef3b7", file: "docs/specification/2026-07-28/server/tools.mdx", section: "Error Handling (lines 741-765 at the pinned SHA)", url: "https://github.com/modelcontextprotocol/modelcontextprotocol/blob/632a0c9a65c9b4fbc889d8aface5c9cf5edef3b7/docs/specification/2026-07-28/server/tools.mdx", accessed_at: "2026-11-10" }
+    limitations: ["The text lists examples. It does not give a complete classification of every failure."]
+    applicability: "Lessons 38.1 and 38.6; LAB D conformance assertions."
+    related_claims: ["CLM-045"]
+    curriculum_usage: { lessons: ["38.1", "38.6"], labs: ["LAB-D"] }
+
+  - id: CLM-010
+    claim: "In MCP 2026-07-28, structuredContent may be any JSON value; in 2025-11-25 it was an object map. When a tool declares an outputSchema, servers MUST return conforming structured results and clients SHOULD validate them. For backward compatibility a tool SHOULD also return the serialized JSON as TextContent."
+    provenance: "VERIFIED_FACT"
+    domain: "tool_protocols"
+    concepts: ["structured_tool_output", "output_schema"]
+    confidence: "high"
+    currentness_status: "CURRENT DEFAULT (specification)"
+    evidence:
+      - { source_type: "specification", tier: 1, title: "MCP 2026-07-28 Tools, structured content", repository: "https://github.com/modelcontextprotocol/modelcontextprotocol", commit: "632a0c9a65c9b4fbc889d8aface5c9cf5edef3b7", file: "docs/specification/2026-07-28/server/tools.mdx; schema/2025-11-25/schema.ts", section: "Structured Content; Output Schema; 2025-11-25 schema L1113", url: "https://github.com/modelcontextprotocol/modelcontextprotocol/blob/632a0c9a65c9b4fbc889d8aface5c9cf5edef3b7/docs/specification/2026-07-28/server/tools.mdx", accessed_at: "2026-11-10" }
+    limitations: ["Client-side validation is SHOULD-level."]
+    applicability: "Lessons 38.1 and 38.4 schema evolution."
+    curriculum_usage: { lessons: ["38.1", "38.4"], labs: ["LAB-D"] }
+
+  - id: CLM-011
+    claim: "MCP 2026-07-28 deprecates Roots, Sampling, and Logging (SEP-2577), the HTTP+SSE transport, and Dynamic Client Registration (in favour of Client ID Metadata Documents). The minimum deprecation window is 12 months."
+    provenance: "VERIFIED_FACT"
+    domain: "tool_protocols"
+    concepts: ["deprecation_window", "protocol_revision"]
+    confidence: "high"
+    currentness_status: "CURRENT DEFAULT (specification)"
+    evidence:
+      - { source_type: "specification", tier: 1, title: "MCP 2026-07-28 deprecations and changelog", repository: "https://github.com/modelcontextprotocol/modelcontextprotocol", commit: "632a0c9a65c9b4fbc889d8aface5c9cf5edef3b7", file: "docs/specification/2026-07-28/changelog.mdx", section: "deprecated.mdx; changelog", url: "https://github.com/modelcontextprotocol/modelcontextprotocol/blob/632a0c9a65c9b4fbc889d8aface5c9cf5edef3b7/docs/specification/2026-07-28/changelog.mdx", accessed_at: "2026-11-10" }
+    limitations: ["SEP-2577 itself was not read."]
+    applicability: "Lesson 38.2 migration planning; Mastery deliverable on legacy servers."
+    curriculum_usage: { lessons: ["38.2"], assessments: ["Mastery-38"] }
+
+  - id: CLM-012
+    claim: "MCP tools.mdx Security Considerations (2026-07-28): servers MUST validate tool inputs, implement access controls, rate-limit invocations, and sanitize outputs. Clients SHOULD prompt for confirmation on sensitive operations, show tool inputs before calling, validate results, and implement timeouts. A human who can deny invocations SHOULD always be in the loop."
+    provenance: "VERIFIED_FACT"
+    domain: "tool_protocols"
+    concepts: ["tool_security_requirements", "human_in_the_loop"]
+    confidence: "high"
+    currentness_status: "CURRENT DEFAULT (specification)"
+    evidence:
+      - { source_type: "specification", tier: 1, title: "MCP 2026-07-28 Tools, Security Considerations", repository: "https://github.com/modelcontextprotocol/modelcontextprotocol", commit: "632a0c9a65c9b4fbc889d8aface5c9cf5edef3b7", file: "docs/specification/2026-07-28/server/tools.mdx", section: "Security Considerations", url: "https://github.com/modelcontextprotocol/modelcontextprotocol/blob/632a0c9a65c9b4fbc889d8aface5c9cf5edef3b7/docs/specification/2026-07-28/server/tools.mdx", accessed_at: "2026-11-10" }
+    limitations: ["Client obligations are SHOULD-level."]
+    applicability: "Lesson 38.5 defensive baseline."
+    curriculum_usage: { lessons: ["38.5"], labs: ["LAB-C"] }
+
+  # ---------------- MCP Authorization (S2) ----------------
+  - id: CLM-013
+    claim: "MCP Authorization (2026-07-28) is OPTIONAL. HTTP transports SHOULD conform to it; stdio transports SHOULD NOT and get credentials from the environment. It profiles OAuth 2.1 (draft-ietf-oauth-v2-1-13), with the MCP server acting as an OAuth resource server and the MCP client as an OAuth client. Servers MUST implement RFC 9728 Protected Resource Metadata, and clients MUST use it to discover the authorization server."
+    provenance: "VERIFIED_FACT"
+    domain: "tool_authorization"
+    concepts: ["mcp_authorization", "protected_resource_metadata", "oauth_roles"]
+    confidence: "high"
+    currentness_status: "CURRENT DEFAULT (specification)"
+    evidence:
+      - { source_type: "specification", tier: 1, title: "MCP 2026-07-28 Authorization", repository: "https://github.com/modelcontextprotocol/modelcontextprotocol", commit: "632a0c9a65c9b4fbc889d8aface5c9cf5edef3b7", file: "docs/specification/2026-07-28/basic/authorization/index.mdx", section: "Introduction; Standards Compliance; Authorization Server Discovery", url: "https://github.com/modelcontextprotocol/modelcontextprotocol/blob/632a0c9a65c9b4fbc889d8aface5c9cf5edef3b7/docs/specification/2026-07-28/basic/authorization/index.mdx", accessed_at: "2026-11-10" }
+    limitations: ["Normative text; client conformance in the field is not surveyed."]
+    applicability: "Lesson 38.5; LAB C."
+    related_claims: ["CLM-021"]
+    curriculum_usage: { lessons: ["38.5"], labs: ["LAB-C"], assessments: ["Mastery-38"] }
+
+  - id: CLM-014
+    claim: "MCP clients MUST send the RFC 8707 resource parameter, set to the MCP server's canonical URI, in both the authorization request and the token request, regardless of whether the authorization server supports it."
+    provenance: "VERIFIED_FACT"
+    domain: "tool_authorization"
+    concepts: ["resource_indicator", "audience_binding"]
+    confidence: "high"
+    currentness_status: "CURRENT DEFAULT (specification)"
+    evidence:
+      - { source_type: "specification", tier: 1, title: "MCP 2026-07-28 Authorization, Resource Parameter", repository: "https://github.com/modelcontextprotocol/modelcontextprotocol", commit: "632a0c9a65c9b4fbc889d8aface5c9cf5edef3b7", file: "docs/specification/2026-07-28/basic/authorization/index.mdx", section: "Resource Parameter Implementation", url: "https://github.com/modelcontextprotocol/modelcontextprotocol/blob/632a0c9a65c9b4fbc889d8aface5c9cf5edef3b7/docs/specification/2026-07-28/basic/authorization/index.mdx", accessed_at: "2026-11-10" }
+    limitations: ["If the authorization server ignores the parameter, the issued token may not be audience-restricted. The server's own audience check is then the remaining control (CLM-015)."]
+    applicability: "Lesson 38.5; LAB C."
+    related_claims: ["CLM-015", "CLM-021"]
+    curriculum_usage: { lessons: ["38.5"], labs: ["LAB-C"] }
+
+  - id: CLM-015
+    claim: "MCP servers MUST validate that access tokens were issued for them as the intended audience and MUST NOT accept or transit any other tokens. Clients MUST NOT send tokens other than those issued by the MCP server's authorization server. Tokens MUST NOT appear in query strings and must be sent on every HTTP request."
+    provenance: "VERIFIED_FACT"
+    domain: "tool_authorization"
+    concepts: ["audience_binding", "token_passthrough"]
+    confidence: "high"
+    currentness_status: "CURRENT DEFAULT (specification)"
+    evidence:
+      - { source_type: "specification", tier: 1, title: "MCP 2026-07-28 Authorization, Token Handling", repository: "https://github.com/modelcontextprotocol/modelcontextprotocol", commit: "632a0c9a65c9b4fbc889d8aface5c9cf5edef3b7", file: "docs/specification/2026-07-28/basic/authorization/index.mdx", section: "Access Token Usage; Token Handling (line 297 at the pinned SHA)", url: "https://github.com/modelcontextprotocol/modelcontextprotocol/blob/632a0c9a65c9b4fbc889d8aface5c9cf5edef3b7/docs/specification/2026-07-28/basic/authorization/index.mdx", accessed_at: "2026-11-10" }
+    limitations: ["How a server validates the audience (JWT aud, introspection, or a verifier-reported resource) is left to the implementation."]
+    applicability: "Lessons 38.5 and 38.6; LAB C; LAB D."
+    related_claims: ["CLM-049", "CLM-050", "CLM-066"]
+    curriculum_usage: { lessons: ["38.5", "38.6"], labs: ["LAB-C", "LAB-D"], assessments: ["Mastery-38"] }
+
+  - id: CLM-016
+    claim: "MCP scope selection (2026-07-28): during initial authorization, clients SHOULD use the scope from the WWW-Authenticate challenge of the 401 response, and if none is given, all scopes in scopes_supported from the Protected Resource Metadata. Clients MUST treat challenged scopes as authoritative for the current operation. A runtime under-scoped request receives 403 insufficient_scope with scope= and resource_metadata, which triggers step-up re-authorization, and clients SHOULD request the union of previously granted and newly challenged scopes. The specification states that scopes_supported is intended to represent the minimal set needed for basic functionality, with additional scopes requested incrementally."
+    provenance: "VERIFIED_FACT"
+    domain: "tool_authorization"
+    concepts: ["scope_selection", "step_up_authorization", "scopes_supported"]
+    confidence: "high"
+    currentness_status: "CURRENT DEFAULT (specification)"
+    evidence:
+      - { source_type: "specification", tier: 1, title: "MCP 2026-07-28 Authorization, Scope Selection and Step-Up", repository: "https://github.com/modelcontextprotocol/modelcontextprotocol", commit: "632a0c9a65c9b4fbc889d8aface5c9cf5edef3b7", file: "docs/specification/2026-07-28/basic/authorization/index.mdx", section: "Scope Selection Strategy (lines 100-135 at the pinned SHA); Scope Challenge Handling; Step-Up Authorization Flow", url: "https://github.com/modelcontextprotocol/modelcontextprotocol/blob/632a0c9a65c9b4fbc889d8aface5c9cf5edef3b7/docs/specification/2026-07-28/basic/authorization/index.mdx", accessed_at: "2026-11-10" }
+    limitations: ["The all-scopes fallback is least-privileged only if servers keep scopes_supported minimal (CLM-065)."]
+    applicability: "Lesson 38.5; LAB C step-up test."
+    related_claims: ["CLM-020", "CLM-061", "CLM-065"]
+    curriculum_usage: { lessons: ["38.5"], labs: ["LAB-C"], assessments: ["Mastery-38"] }
+
+  - id: CLM-017
+    claim: "New in MCP 2026-07-28 Authorization: authorization servers SHOULD send the RFC 9207 iss response parameter, and when it is present clients MUST validate it. Client credentials are keyed by issuer."
+    provenance: "VERIFIED_FACT"
+    domain: "tool_authorization"
+    concepts: ["issuer_validation", "mcp_authorization"]
+    confidence: "high"
+    currentness_status: "CURRENT DEFAULT (specification)"
+    evidence:
+      - { source_type: "specification", tier: 1, title: "MCP 2026-07-28 Authorization, Issuer Identification", repository: "https://github.com/modelcontextprotocol/modelcontextprotocol", commit: "632a0c9a65c9b4fbc889d8aface5c9cf5edef3b7", file: "docs/specification/2026-07-28/basic/authorization/index.mdx", section: "iss parameter (around line 209 at the pinned SHA)", url: "https://github.com/modelcontextprotocol/modelcontextprotocol/blob/632a0c9a65c9b4fbc889d8aface5c9cf5edef3b7/docs/specification/2026-07-28/basic/authorization/index.mdx", accessed_at: "2026-11-10" }
+    limitations: ["RFC 9207 itself was not opened. The specification expects a future revision to upgrade iss from SHOULD to MUST."]
+    applicability: "Lesson 38.5 client checklist."
+    curriculum_usage: { lessons: ["38.5"], labs: ["LAB-C"] }
+
+  # ---------------- MCP Security Best Practices (S3) ----------------
+  - id: CLM-018
+    claim: "The MCP Security Best Practices page (2026-07-28 docs tree) describes an OAuth-proxy confused-deputy scenario. It requires four conditions together: the proxy uses a static client ID with a third-party authorization server, the proxy allows dynamic client registration, the third-party authorization server sets a consent cookie, and the proxy has no per-client consent. The stated outcome is an authorization code redirected to an attacker-controlled redirect_uri. The required mitigation is that proxies MUST implement per-client consent."
+    provenance: "VERIFIED_FACT"
+    domain: "tool_authorization"
+    concepts: ["oauth_proxy_confused_deputy", "per_client_consent"]
+    confidence: "high"
+    currentness_status: "CURRENT DEFAULT (maintainer guidance)"
+    evidence:
+      - { source_type: "official_docs", tier: 2, title: "MCP Security Best Practices", repository: "https://github.com/modelcontextprotocol/modelcontextprotocol", commit: "632a0c9a65c9b4fbc889d8aface5c9cf5edef3b7", file: "docs/docs/2026-07-28/tutorials/security/security_best_practices.mdx", section: "Confused Deputy Problem", url: "https://github.com/modelcontextprotocol/modelcontextprotocol/blob/632a0c9a65c9b4fbc889d8aface5c9cf5edef3b7/docs/docs/2026-07-28/tutorials/security/security_best_practices.mdx", accessed_at: "2026-11-10" }
+    limitations: ["Maintainer guidance, not the normative specification. It covers only the OAuth-proxy case; the general agent-as-deputy case belongs to Module 18."]
+    applicability: "Lesson 38.5 defensive design."
+    curriculum_usage: { lessons: ["38.5"], assessments: ["Mastery-38"] }
+
+  - id: CLM-019
+    claim: "The MCP Security Best Practices page calls token passthrough an anti-pattern that is explicitly forbidden. The listed risks are bypassed security controls, lost audit attribution, and crossed trust boundaries."
+    provenance: "VERIFIED_FACT"
+    domain: "tool_authorization"
+    concepts: ["token_passthrough"]
+    confidence: "high"
+    currentness_status: "CURRENT DEFAULT (maintainer guidance)"
+    evidence:
+      - { source_type: "official_docs", tier: 2, title: "MCP Security Best Practices", repository: "https://github.com/modelcontextprotocol/modelcontextprotocol", commit: "632a0c9a65c9b4fbc889d8aface5c9cf5edef3b7", file: "docs/docs/2026-07-28/tutorials/security/security_best_practices.mdx", section: "Token Passthrough", url: "https://github.com/modelcontextprotocol/modelcontextprotocol/blob/632a0c9a65c9b4fbc889d8aface5c9cf5edef3b7/docs/docs/2026-07-28/tutorials/security/security_best_practices.mdx", accessed_at: "2026-11-10" }
+    limitations: ["Guidance document."]
+    applicability: "Lesson 38.5; Mastery gateway design."
+    related_claims: ["CLM-015"]
+    curriculum_usage: { lessons: ["38.5"], labs: ["LAB-C"], assessments: ["Mastery-38"] }
+
+  - id: CLM-020
+    claim: "The MCP Security Best Practices page recommends scope minimization: a minimal initial scope set (example mcp:tools-basic) plus incremental elevation. Its Common Mistakes list includes publishing all possible scopes in scopes_supported, using wildcard or omnibus scopes, and treating scopes claimed in a token as sufficient without server-side authorization logic."
+    provenance: "VERIFIED_FACT"
+    domain: "tool_authorization"
+    concepts: ["scope_minimization", "scopes_supported"]
+    confidence: "high"
+    currentness_status: "CURRENT DEFAULT (maintainer guidance)"
+    evidence:
+      - { source_type: "official_docs", tier: 2, title: "MCP Security Best Practices", repository: "https://github.com/modelcontextprotocol/modelcontextprotocol", commit: "632a0c9a65c9b4fbc889d8aface5c9cf5edef3b7", file: "docs/docs/2026-07-28/tutorials/security/security_best_practices.mdx", section: "Scope Minimization; Common Mistakes", url: "https://github.com/modelcontextprotocol/modelcontextprotocol/blob/632a0c9a65c9b4fbc889d8aface5c9cf5edef3b7/docs/docs/2026-07-28/tutorials/security/security_best_practices.mdx", accessed_at: "2026-11-10" }
+    limitations: ["Guidance; no measurement of scope sizes in the field."]
+    applicability: "Lesson 38.5."
+    related_claims: ["CLM-016", "CLM-065"]
+    curriculum_usage: { lessons: ["38.5"], labs: ["LAB-C"], assessments: ["Mastery-38"] }
+
+  - id: CLM-021
+    claim: "RFC 9728 (Jones, Hunt, Parecki; April 2025) defines OAuth Protected Resource Metadata at /.well-known/oauth-protected-resource and the resource_metadata parameter of the WWW-Authenticate header. RFC 8707 (Campbell, Bradley, Tschofenig; February 2020) defines the resource request parameter, and states that the authorization server SHOULD audience-restrict the access tokens it issues."
+    provenance: "VERIFIED_FACT"
+    domain: "tool_authorization"
+    concepts: ["protected_resource_metadata", "resource_indicator"]
+    confidence: "high"
+    currentness_status: "REFERENCE / BASELINE"
+    evidence:
+      - { source_type: "specification", tier: 1, title: "RFC 9728: OAuth 2.0 Protected Resource Metadata", authors: "M. Jones, P. Hunt, A. Parecki", year: "2025", url: "https://www.rfc-editor.org/rfc/rfc9728.txt", accessed_at: "2026-11-10" }
+      - { source_type: "specification", tier: 1, title: "RFC 8707: Resource Indicators for OAuth 2.0", authors: "B. Campbell, J. Bradley, H. Tschofenig", year: "2020", url: "https://www.rfc-editor.org/rfc/rfc8707.txt", accessed_at: "2026-11-10" }
+    limitations: ["In RFC 8707 audience restriction is SHOULD-level for the authorization server, so the resource server must still check."]
+    applicability: "Lesson 38.5 standards background."
+    curriculum_usage: { lessons: ["38.5"], labs: ["LAB-C"] }
+
+  # ---------------- MCP Registry (S4) ----------------
+  - id: CLM-022
+    claim: "The MCP Registry documentation states that the registry is currently in preview, that breaking changes or data resets may occur, and that it is the official centralized metadata repository for publicly accessible MCP servers. It hosts metadata, not packages. Namespaces are DNS-verified. Private servers are not supported, and the documentation suggests hosting your own private registry instead. Downstream aggregators are expected to pull on a regular but infrequent basis, for example once per hour. The registry publishes an OpenAPI specification that other registries can implement. A live GET /v0/servers?limit=1 on 2026-11-10 returned a server.json whose $schema points to the 2025-12-11 server schema and whose remotes[].type was streamable-http."
+    provenance: "VERIFIED_FACT"
+    domain: "tool_registry"
+    concepts: ["mcp_registry", "registry_aggregation"]
+    confidence: "high"
+    currentness_status: "FRONTIER (preview)"
+    evidence:
+      - { source_type: "official_docs", tier: 2, title: "MCP Registry: About", repository: "https://github.com/modelcontextprotocol/modelcontextprotocol", commit: "632a0c9a65c9b4fbc889d8aface5c9cf5edef3b7", file: "docs/registry/about.mdx", section: "preview notice (line 7); aggregators (line 54)", url: "https://github.com/modelcontextprotocol/modelcontextprotocol/blob/632a0c9a65c9b4fbc889d8aface5c9cf5edef3b7/docs/registry/about.mdx", accessed_at: "2026-11-10" }
+    limitations: ["The registry repository code (head d39ac76b47a5ae3e780202b1fbf3922ea498ef91, release v1.8.8) and server.schema.json were not read. The live API was sampled with one request."]
+    applicability: "Lesson 38.4."
+    related_claims: ["CLM-023", "CLM-064"]
+    curriculum_usage: { lessons: ["38.4"], assessments: ["Mastery-38"] }
+
+  - id: CLM-023
+    claim: "MCP Registry versioning documentation: a version string is required and MUST be unique for each publication, and once published the version string and its other metadata cannot be changed. SemVer is recommended but not required. A version that does not parse as SemVer is always marked latest. The page gives comparison rules for aggregators."
+    provenance: "VERIFIED_FACT"
+    domain: "tool_registry"
+    concepts: ["immutable_registry_metadata", "registry_versioning"]
+    confidence: "high"
+    currentness_status: "FRONTIER (preview)"
+    evidence:
+      - { source_type: "official_docs", tier: 2, title: "MCP Registry: Versioning", repository: "https://github.com/modelcontextprotocol/modelcontextprotocol", commit: "632a0c9a65c9b4fbc889d8aface5c9cf5edef3b7", file: "docs/registry/versioning.mdx", url: "https://github.com/modelcontextprotocol/modelcontextprotocol/blob/632a0c9a65c9b4fbc889d8aface5c9cf5edef3b7/docs/registry/versioning.mdx", accessed_at: "2026-11-10" }
+    limitations: ["Registry metadata is per server. It does not version individual tool schemas or descriptions."]
+    applicability: "Lesson 38.4 pinning."
+    related_claims: ["CLM-064"]
+    curriculum_usage: { lessons: ["38.4"], labs: ["LAB-B"], assessments: ["Mastery-38"] }
+
+  # ---------------- Vendor tool-use documentation (S5-S7) ----------------
+  - id: CLM-024
+    claim: "Anthropic Claude API tool-use documentation states that Claude decides whether to call a tool based on the user's request and the tool's description, that strict: true guarantees schema conformance, and that tool definitions are billed as input tokens. It lists a fixed tool-use system-prompt overhead added on top of the definitions, for example 286 tokens for Opus 5.5 with tool_choice auto or none, 286/406 for Opus 5 (auto/any), and 675/804 for Opus 4.7. The define-tools page advises extremely detailed descriptions, calls this by far the most important factor in tool performance, and suggests at least 3-4 sentences."
+    provenance: "VERIFIED_FACT"
+    domain: "tool_selection"
+    concepts: ["tool_description_quality", "tool_context_cost", "vendor_guidance"]
+    confidence: "medium"
+    currentness_status: "CURRENT DEFAULT (one vendor's documentation)"
+    evidence:
+      - { source_type: "official_docs", tier: 2, title: "Claude API docs: Tool use overview; Define tools", url: "https://platform.claude.com/docs/en/agents-and-tools/tool-use/overview", accessed_at: "2026-11-10" }
+    limitations: ["Vendor guidance without a published method. The 'most important factor' statement is not a measurement.", "The overhead values belong to the named models and can change with model revisions."]
+    applicability: "Lessons 38.1 and 38.3; c0 in the context-cost model."
+    related_claims: ["CLM-051"]
+    curriculum_usage: { lessons: ["38.1", "38.3"], labs: ["LAB-A"], assessments: ["Mastery-38"] }
+
+  - id: CLM-025
+    claim: "Anthropic's tool-search documentation states that a five-server setup uses about 55k tokens in tool definitions and that tool search typically reduces this by over 85 percent. It states that Claude's ability to pick the right tool degrades once you exceed 30-50 available tools. defer_loading: true keeps a tool out of context until it is found by search. Search returns 5 tools by default, the limit can be 1 to 10,000, and a request can carry at most 10,000 deferred tools. A deferred tool cannot also carry cache_control (a 400 error)."
+    provenance: "VERIFIED_FACT"
+    domain: "tool_selection"
+    concepts: ["tool_search", "deferred_loading", "vendor_guidance"]
+    confidence: "medium"
+    currentness_status: "CURRENT DEFAULT (one vendor's documentation)"
+    evidence:
+      - { source_type: "official_docs", tier: 2, title: "Claude API docs: Tool search tool", url: "https://platform.claude.com/docs/en/agents-and-tools/tool-use/tool-search-tool", accessed_at: "2026-11-10" }
+    limitations: ["The 30-50 tool figure and the 85 percent reduction are vendor guidance without a stated method, workload, or uncertainty."]
+    applicability: "Lesson 38.3 vendor-guidance row; Mastery."
+    related_claims: ["CLM-067"]
+    curriculum_usage: { lessons: ["38.3"], labs: ["LAB-A"], assessments: ["Mastery-38"] }
+
+  - id: CLM-026
+    claim: "Anthropic Engineering's 'Advanced tool use' post (2025-11-24) reports tool-definition token costs per server: GitHub 35 tools about 26K tokens, Slack 11 tools about 21K, Sentry 5 about 3K, Grafana 5 about 3K, Splunk 2 about 2K, for a total of 58 tools at about 55K tokens. Jira alone is about 17K. The post reports seeing tool definitions consume 134K tokens before optimization, and names the most common failures as wrong tool selection and incorrect parameters, especially for tools with similar names. Internal testing with Tool Search moved Opus 4 from 49% to 74% and Opus 4.5 from 79.5% to 88.1% on MCP evaluations."
+    provenance: "VERIFIED_FACT"
+    domain: "tool_selection"
+    concepts: ["tool_context_cost", "vendor_guidance"]
+    confidence: "medium"
+    currentness_status: "CURRENT DEFAULT (vendor engineering report)"
+    evidence:
+      - { source_type: "official_blog", tier: 2, title: "Advanced tool use", year: "2025", url: "https://www.anthropic.com/engineering/advanced-tool-use", accessed_at: "2026-11-10" }
+    limitations: ["The accuracy numbers come from an internal evaluation with no published task definition. Token counts are approximate per-server values."]
+    applicability: "Lesson 38.3 worked example inputs."
+    related_claims: ["CLM-051", "CLM-052"]
+    curriculum_usage: { lessons: ["38.3"], labs: ["LAB-A"], assessments: ["Incident-38.1", "Mastery-38"] }
+
+  - id: CLM-027
+    claim: "OpenAI's function-calling guide says to aim for fewer than 20 functions available at the start of a turn, calls this just a soft suggestion, and says to evaluate performance with different numbers of functions. tool_search with defer_loading is supported only on gpt-5.4 and later. Namespaces group tools by domain; detailed guidance belongs in the function description, with a concise namespace description. Functions are injected into the system message, count against the context limit, and are billed as input tokens. The guide notes that examples may hurt performance for reasoning models."
+    provenance: "VERIFIED_FACT"
+    domain: "tool_selection"
+    concepts: ["vendor_guidance", "tool_context_cost", "tool_namespaces"]
+    confidence: "medium"
+    currentness_status: "CURRENT DEFAULT (one vendor's documentation)"
+    evidence:
+      - { source_type: "official_docs", tier: 2, title: "OpenAI API docs: Function calling", url: "https://developers.openai.com/api/docs/guides/function-calling", accessed_at: "2026-11-10" }
+    limitations: ["Guidance, not measurement. The OpenAI tool-search guide was not opened."]
+    applicability: "Lessons 38.1, 38.2, and 38.3."
+    related_claims: ["CLM-067"]
+    curriculum_usage: { lessons: ["38.1", "38.2", "38.3"], labs: ["LAB-A"] }
+
+  - id: CLM-028
+    claim: "OpenAI's function-calling guide states that strict mode requires additionalProperties: false on every object and every property listed as required, with optional fields expressed as nullable. With strict: true an incompatible schema is rejected. With strict omitted, the Responses API tries to normalize the schema and falls back to non-strict, while Chat Completions stays non-strict."
+    provenance: "VERIFIED_FACT"
+    domain: "tool_protocols"
+    concepts: ["strict_schema", "provider_function_calling"]
+    confidence: "medium"
+    currentness_status: "CURRENT DEFAULT (one vendor's documentation)"
+    evidence:
+      - { source_type: "official_docs", tier: 2, title: "OpenAI API docs: Function calling (strict mode)", url: "https://developers.openai.com/api/docs/guides/function-calling", accessed_at: "2026-11-10" }
+    limitations: ["The structured-outputs supported-schema list was not opened."]
+    applicability: "Lesson 38.2 contrast between a provider function-calling dialect and the MCP 2020-12 default."
+    curriculum_usage: { lessons: ["38.1", "38.2"], labs: ["LAB-D"] }
+
+  # ---------------- A2A and OpenAPI (S8-S9) ----------------
+  - id: CLM-029
+    claim: "The A2A Protocol specification (a2aproject/A2A, latest released version 1.0.0) targets communication between independent, potentially opaque agent systems that do not need access to each other's internal state, memory, or tools. It has JSON-RPC 2.0, gRPC, and HTTP/REST bindings, and names specification/a2a.proto as the single authoritative normative definition. Discovery uses an Agent Card at /.well-known/agent-card.json, and an authenticated Extended Agent Card can expose more skills. Versioning uses an A2A-Version: Major.Minor header; an empty value is treated as 0.3, and an unsupported version returns VersionNotSupportedError."
+    provenance: "VERIFIED_FACT"
+    domain: "tool_protocols"
+    concepts: ["a2a_protocol", "agent_card", "version_negotiation"]
+    confidence: "high"
+    currentness_status: "CURRENT DEFAULT (specification; adoption not surveyed)"
+    evidence:
+      - { source_type: "specification", tier: 1, title: "A2A Protocol Specification", repository: "https://github.com/a2aproject/A2A", commit: "9fff3e08ab33bb7674e7d98fc7c08ae8592bb4bd", file: "docs/specification.md; docs/topics/a2a-and-mcp.md", url: "https://github.com/a2aproject/A2A/blob/9fff3e08ab33bb7674e7d98fc7c08ae8592bb4bd/docs/specification.md", accessed_at: "2026-11-10" }
+    limitations: ["Only the purpose, binding, discovery, and versioning sections were read. The topic page's 'MCP is vertical, A2A is horizontal' is vendor framing, not evidence. Security sections were not read."]
+    applicability: "Lesson 38.2 narrow contrast."
+    curriculum_usage: { lessons: ["38.2"] }
+
+  - id: CLM-030
+    claim: "OpenAPI Specification 3.2.1 (released 2026-09-10) states that operationId MUST be unique among all operations described in the API, is case-sensitive, and MAY be used by tools and libraries to uniquely identify an operation. jsonSchemaDialect sets the default $schema, and Schema Objects default to JSON Schema 2020-12 support."
+    provenance: "VERIFIED_FACT"
+    domain: "tool_protocols"
+    concepts: ["openapi_operation", "schema_dialect"]
+    confidence: "high"
+    currentness_status: "REFERENCE / BASELINE"
+    evidence:
+      - { source_type: "specification", tier: 1, title: "OpenAPI Specification 3.2.1", repository: "https://github.com/OAI/OpenAPI-Specification", commit: "4f86429f134f7e48b6351563549b4502fc69de52", file: "versions/3.2.1.md", section: "Operation Object (operationId); OpenAPI Object (jsonSchemaDialect)", url: "https://github.com/OAI/OpenAPI-Specification/blob/4f86429f134f7e48b6351563549b4502fc69de52/versions/3.2.1.md", accessed_at: "2026-11-10" }
+    limitations: ["Contains no LLM-specific guidance."]
+    applicability: "Lesson 38.2 operation-to-tool mapping."
+    related_claims: ["CLM-075"]
+    curriculum_usage: { lessons: ["38.2"] }
+
+  # ---------------- Tool-selection papers (S11-S20) ----------------
+  - id: CLM-031
+    claim: "RAG-MCP (Gan and Sun, arXiv:2505.03275v1, 2025-05-06) reports, in Table 1 on the web-search subset of MCPBench with qwen-max-0125, 20 trials, and an LLM judge: RAG-MCP 43.13% accuracy at 1,084 prompt tokens, a keyword pre-filter 18.20% at 1,646 tokens, and all descriptions in context ('Blank') 13.62% at 2,133.84 tokens. Its stress test varies the candidate pool from 1 to 11,100. The authors' figure shows success above 90% for target positions below 30, variable success from 31 to 70, and failures dominating beyond position ~100 (read from a figure, so qualitative)."
+    provenance: "VERIFIED_FACT"
+    domain: "tool_selection"
+    concepts: ["tool_retrieval", "tool_count_scaling"]
+    confidence: "medium"
+    currentness_status: "FRONTIER (2025 preprint)"
+    evidence:
+      - { source_type: "paper", tier: 1, title: "RAG-MCP (arXiv:2505.03275v1)", authors: "Gan, Sun", year: "2025", url: "https://arxiv.org/abs/2505.03275v1", table: "Table 1", section: "HTML full text; stress-test figure", accessed_at: "2026-11-10" }
+    limitations: ["One base model, a small testbed, and an LLM judge.", "The paper conflates server selection with tool selection."]
+    applicability: "Lesson 38.3."
+    related_claims: ["CLM-055", "CLM-070"]
+    curriculum_usage: { lessons: ["38.3"], labs: ["LAB-A"] }
+
+  - id: CLM-032
+    claim: "'How Many Tools Should an LLM Agent See?' (Repantis et al., arXiv:2605.24660v2, 2026-06-07) defines the chance rate of a shortlist of K tools from N as P_rand = 1 - C(N-R_q, K)/C(N, K), which equals K/N when one tool is relevant (R_q = 1). It defines bits over random as BoR = log2(P_obs/P_rand), with BoR_max(K) = log2(N/K) for a single relevant tool."
+    provenance: "VERIFIED_FACT"
+    domain: "tool_selection"
+    concepts: ["bits_over_random", "shortlist_depth"]
+    confidence: "high"
+    currentness_status: "FRONTIER (2026 preprint)"
+    evidence:
+      - { source_type: "paper", tier: 1, title: "How Many Tools Should an LLM Agent See?", authors: "Repantis et al.", year: "2026", url: "https://arxiv.org/abs/2605.24660v2", section: "metric definition (HTML full text)", accessed_at: "2026-11-10" }
+    limitations: ["A metric definition. It does not predict downstream selection accuracy."]
+    applicability: "Lesson 38.3 chance-corrected depth."
+    related_claims: ["CLM-033", "CLM-054"]
+    curriculum_usage: { lessons: ["38.3"], labs: ["LAB-A"] }
+
+  - id: CLM-033
+    claim: "Repantis et al. (arXiv:2605.24660v2) report that on BFCL (370 tools) a learned depth policy reaches 90.3% coverage with about 7 tools shown, against 90.8% with 50. On ToolBench (3,251 tools) a fixed K = 5 has higher aggregate coverage (64.7% against 61.9%) but finds nothing on hard queries. Downstream with Claude Sonnet 4.6 the reported success is 93.1% against 87.1% for always-5, and 76.8% against 60.9% on medium-difficulty queries. They estimate roughly 200 tokens per tool description, so a 100-tool shortlist is about 20K tokens."
+    provenance: "VERIFIED_FACT"
+    domain: "tool_selection"
+    concepts: ["shortlist_depth", "tool_retrieval"]
+    confidence: "medium"
+    currentness_status: "FRONTIER (2026 preprint)"
+    evidence:
+      - { source_type: "paper", tier: 1, title: "How Many Tools Should an LLM Agent See?", authors: "Repantis et al.", year: "2026", url: "https://arxiv.org/abs/2605.24660v2", section: "results (HTML full text)", accessed_at: "2026-11-10" }
+    limitations: ["Author-reported limitations: small DQN or tabular policies, single-seed MetaTool, and an evaluation of presentation rather than execution.", "The 200-token figure is description-only and is not the same quantity as full definition cost."]
+    applicability: "Lesson 38.3; LAB A."
+    related_claims: ["CLM-054", "CLM-070"]
+    curriculum_usage: { lessons: ["38.3"], labs: ["LAB-A"], assessments: ["Mastery-38"] }
+
+  - id: CLM-034
+    claim: "'MCP Tool Descriptions Are Smelly!' (Hasan, Li, Rajbahadur, Adams, Hassan; arXiv:2602.14878v3, 2026-05-31) reports that, of 856 tools on 103 servers, 97.1% have at least one description smell and 56% fail to state their purpose clearly, measured with a foundation-model-based scanner and a six-component rubric. Augmenting descriptions on MCP-Universe (18 servers, 202 tools) raised task success by a median 5.85 percentage points and partial completion by 15.12%, but raised execution steps by 67.46% and caused regressions in 16.67% of cases. Compact ablations preserved reliability with fewer tokens."
+    provenance: "VERIFIED_FACT"
+    domain: "tool_selection"
+    concepts: ["tool_description_quality", "description_smells"]
+    confidence: "medium"
+    currentness_status: "FRONTIER (2026 preprint)"
+    evidence:
+      - { source_type: "paper", tier: 1, title: "MCP Tool Descriptions Are Smelly!", authors: "Hasan, Li, Rajbahadur, Adams, Hassan", year: "2026", url: "https://arxiv.org/abs/2602.14878v3", section: "HTML full text; Section 8.1 threats to validity", accessed_at: "2026-11-10" }
+    limitations: ["The scanner is LLM-based.", "The dataset comes from prior studies, which the authors list as an external-validity threat (Section 8.1)."]
+    applicability: "Lesson 38.1."
+    related_claims: ["CLM-056", "CLM-069"]
+    curriculum_usage: { lessons: ["38.1"], labs: ["LAB-A"], assessments: ["Mastery-38"] }
+
+  - id: CLM-035
+    claim: "'From Docs to Descriptions' (Wang et al., arXiv:2602.18914v1, 2026-02-21; abstract only) reports a study of 10,831 MCP servers with 18 smell categories in 4 dimensions and '73% repeated tool names'. In mutation tests the functionality and accuracy dimensions have effects of +11.6% and +8.8% (p<0.001). Among functionally equivalent servers, standard-compliant descriptions reach 72% selection probability against a 20% baseline."
+    provenance: "VERIFIED_FACT"
+    domain: "tool_selection"
+    concepts: ["tool_description_quality", "name_collision"]
+    confidence: "low"
+    currentness_status: "FRONTIER (2026 preprint, abstract only)"
+    evidence:
+      - { source_type: "paper", tier: 1, title: "From Docs to Descriptions", authors: "Wang et al.", year: "2026", url: "https://arxiv.org/abs/2602.18914v1", section: "Abstract only", accessed_at: "2026-11-10" }
+    limitations: ["Abstract only; methods, denominators, and the meaning of 'repeated tool names' were not audited."]
+    applicability: "Lessons 38.1 and 38.4 as an abstract-level pointer."
+    curriculum_usage: { lessons: ["38.1", "38.4"] }
+
+  - id: CLM-036
+    claim: "'Learning to Rewrite Tool Descriptions' (Trace-Free+; Guo, Dong, Gao, Das; arXiv:2602.20426v2, 2026-04-29; abstract only) reports improved robustness as catalogs scale to 150+ candidates, 'reducing accuracy degradation by 29.23% and improving average query-level success by 60.89% on StableToolBench'."
+    provenance: "VERIFIED_FACT"
+    domain: "tool_selection"
+    concepts: ["tool_description_quality", "description_rewriting"]
+    confidence: "low"
+    currentness_status: "FRONTIER (2026 preprint, abstract only)"
+    evidence:
+      - { source_type: "paper", tier: 1, title: "Learning to Rewrite Tool Descriptions", authors: "Guo, Dong, Gao, Das", year: "2026", url: "https://arxiv.org/abs/2602.20426v2", section: "Abstract only", accessed_at: "2026-11-10" }
+    limitations: ["Abstract only; the baselines of the relative percentages were not checked."]
+    applicability: "Lesson 38.1 frontier pointer."
+    curriculum_usage: { lessons: ["38.1"] }
+
+  - id: CLM-037
+    claim: "'Tool Preferences in Agentic LLMs are Unreliable' (Faghih et al., arXiv:2505.18135v2, 2025-09-21; abstract only) reports that edited tool descriptions receive more than 10 times more usage from GPT-4.1 and Qwen2.5-7B against competing tools, in a study covering 17 models."
+    provenance: "VERIFIED_FACT"
+    domain: "tool_selection"
+    concepts: ["tool_description_quality", "selection_bias"]
+    confidence: "low"
+    currentness_status: "FRONTIER (2025 preprint, abstract only)"
+    evidence:
+      - { source_type: "paper", tier: 1, title: "Tool Preferences in Agentic LLMs are Unreliable", authors: "Faghih et al.", year: "2025", url: "https://arxiv.org/abs/2505.18135v2", section: "Abstract only", accessed_at: "2026-11-10" }
+    limitations: ["Abstract only. Adversarial use of this effect belongs to Module 18 (CLM-025 there)."]
+    applicability: "Lesson 38.1: description text is a ranking signal that the description author controls."
+    curriculum_usage: { lessons: ["38.1", "38.4"] }
+
+  - id: CLM-038
+    claim: "JSPLIT (Antonioni et al., arXiv:2510.14537v1, 2025-10-16; abstract only) describes a taxonomy-driven tool filter that reduces prompt size and states that as the number of available tools grows substantially it even improves tool selection accuracy. The abstract gives no numbers."
+    provenance: "VERIFIED_FACT"
+    domain: "tool_selection"
+    concepts: ["tool_retrieval", "tool_filtering"]
+    confidence: "low"
+    currentness_status: "FRONTIER (2025 preprint, abstract only)"
+    evidence:
+      - { source_type: "paper", tier: 1, title: "JSPLIT", authors: "Antonioni et al.", year: "2025", url: "https://arxiv.org/abs/2510.14537v1", section: "Abstract only", accessed_at: "2026-11-10" }
+    limitations: ["Abstract only, with no numbers."]
+    applicability: "Lesson 38.3 frontier pointer."
+    curriculum_usage: { lessons: ["38.3"] }
+
+  - id: CLM-039
+    claim: "Baseline tool-use papers, read at abstract level only. Gorilla/APIBench (Patil, Zhang, Wang, Gonzalez; arXiv:2305.15334v1, 2023): a retriever plus a fine-tuned LLaMA adapts to test-time document changes and reduces hallucinated API calls. ToolLLM/ToolBench (Qin et al.; arXiv:2307.16789v2, 2023): 16,464 RapidAPI APIs in 49 categories, a neural API retriever, and ToolEval. AnyTool (Du, Wei, Zhang; arXiv:2402.04253v1, 2024): hierarchical retrieval over 16k APIs; it finds that the prior evaluation protocol leads to an artificially high pass rate."
+    provenance: "VERIFIED_FACT"
+    domain: "tool_selection"
+    concepts: ["tool_retrieval", "benchmark_validity"]
+    confidence: "medium"
+    currentness_status: "REFERENCE / BASELINE"
+    evidence:
+      - { source_type: "paper", tier: 1, title: "Gorilla: Large Language Model Connected with Massive APIs (APIBench)", authors: "Patil, Zhang, Wang, Gonzalez", year: "2023", url: "https://arxiv.org/abs/2305.15334v1", section: "Abstract only", accessed_at: "2026-11-10" }
+      - { source_type: "paper", tier: 1, title: "ToolLLM (ToolBench)", authors: "Qin et al.", year: "2023", url: "https://arxiv.org/abs/2307.16789v2", section: "Abstract only", accessed_at: "2026-11-10" }
+      - { source_type: "paper", tier: 1, title: "AnyTool", authors: "Du, Wei, Zhang", year: "2024", url: "https://arxiv.org/abs/2402.04253v1", section: "Abstract only", accessed_at: "2026-11-10" }
+    limitations: ["Abstract-level reading only. No number beyond the abstracts is used."]
+    applicability: "Lesson 38.3 reference baselines."
+    curriculum_usage: { lessons: ["38.3"] }
+
+  - id: CLM-040
+    claim: "BFCL (Berkeley Function Calling Leaderboard) at ShishirPatil/gorilla 6ea57973c7a6097fd7c5915698c54c17c5b1b6c8 documents versions v1 to V4, covering AST simple, parallel, and multiple calls, live user-contributed data, multi-turn, agentic web search and memory, and format sensitivity. Categories include irrelevance and live_irrelevance (irrelevant function documentation), multi_turn_miss_func, multi_turn_miss_param, and multi_turn_long_context. Unevaluated categories count as 0 in summary columns."
+    provenance: "VERIFIED_FACT"
+    domain: "tool_selection"
+    concepts: ["function_calling_benchmark", "benchmark_validity"]
+    confidence: "high"
+    currentness_status: "REFERENCE / BASELINE"
+    evidence:
+      - { source_type: "official_docs", tier: 1, title: "BFCL README and TEST_CATEGORIES (benchmark artifact)", repository: "https://github.com/ShishirPatil/gorilla", commit: "6ea57973c7a6097fd7c5915698c54c17c5b1b6c8", verification_date: "2026-11-10", file: "berkeley-function-call-leaderboard/README.md; berkeley-function-call-leaderboard/TEST_CATEGORIES.md", url: "https://github.com/ShishirPatil/gorilla/blob/6ea57973c7a6097fd7c5915698c54c17c5b1b6c8/berkeley-function-call-leaderboard/TEST_CATEGORIES.md", accessed_at: "2026-11-10" }
+    limitations: ["No leaderboard numbers were read. The v3/v4 blog posts were not opened."]
+    applicability: "Lessons 38.3 and 38.6; LAB A category choice."
+    related_claims: ["CLM-041"]
+    curriculum_usage: { lessons: ["38.3", "38.6"], labs: ["LAB-A"] }
+
+  - id: CLM-041
+    claim: "'Asking Earns Nothing' (Liu and Han, arXiv:2610.04429v1, 2026-10-03; abstract only) reports that the BFCL multi-turn scorer never looks at 'should-ask' turns, and that adding one prompt line raised gpt-5.4's official score by 13.5-23.5 points with no change in decision accuracy."
+    provenance: "VERIFIED_FACT"
+    domain: "tool_selection"
+    concepts: ["benchmark_validity"]
+    confidence: "low"
+    currentness_status: "FRONTIER (2026 preprint, abstract only)"
+    evidence:
+      - { source_type: "paper", tier: 1, title: "Asking Earns Nothing", authors: "Liu, Han", year: "2026", url: "https://arxiv.org/abs/2610.04429v1", section: "Abstract only", accessed_at: "2026-11-10" }
+    limitations: ["Abstract only; the scorer path was not traced in the BFCL code."]
+    applicability: "Lessons 38.3 and 38.6: a benchmark score is a measurement instrument to audit."
+    curriculum_usage: { lessons: ["38.3", "38.6"] }
+
+  # ---------------- Pinned MCP python-sdk (C1) ----------------
+  - id: CLM-042
+    claim: "At modelcontextprotocol/python-sdk 77001c96f9507be0f4d009b83210a384a5e08bda, src/mcp-types/mcp_types/version.py stores protocol versions as enumerated tuples: KNOWN_PROTOCOL_VERSIONS, HANDSHAKE_PROTOCOL_VERSIONS (2024-11-05 through 2025-11-25), and MODERN_PROTOCOL_VERSIONS = ('2026-07-28',). is_version_at_least compares tuple positions rather than dates and returns False for a version string it does not know."
+    provenance: "VERIFIED_FACT"
+    domain: "sdk_implementation"
+    concepts: ["version_negotiation", "sdk_source_trace"]
+    confidence: "high"
+    currentness_status: "CURRENT SDK SNAPSHOT (main, newer than release v2.3.0)"
+    evidence:
+      - { source_type: "source_code", tier: 1, title: "MCP python-sdk version module", repository: "https://github.com/modelcontextprotocol/python-sdk", commit: "77001c96f9507be0f4d009b83210a384a5e08bda", verification_date: "2026-11-10", file: "src/mcp-types/mcp_types/version.py", symbol: "KNOWN_PROTOCOL_VERSIONS; MODERN_PROTOCOL_VERSIONS; is_version_at_least", entry_point: "is_version_at_least(version, minimum)", execution_path: "membership check in KNOWN_PROTOCOL_VERSIONS -> index comparison", url: "https://github.com/modelcontextprotocol/python-sdk/blob/77001c96f9507be0f4d009b83210a384a5e08bda/src/mcp-types/mcp_types/version.py", accessed_at: "2026-11-10" }
+    limitations: ["Static read; not executed. A main-branch snapshot, not a release."]
+    applicability: "Lesson 38.2 and LAB B version handling."
+    related_claims: ["CLM-002"]
+    curriculum_usage: { lessons: ["38.2", "38.6"], labs: ["LAB-B", "LAB-D"] }
+
+  - id: CLM-043
+    claim: "At python-sdk 77001c96, registration goes MCPServer.tool/add_tool -> ToolManager.add_tool -> Tool.from_function. The name defaults to the function name and is checked by validate_and_warn_tool_name, which only warns. The description defaults to the docstring, so it can be an empty string. inputSchema is generated from a Pydantic argument model. An invalid x-mcp-header raises InvalidSignature. If a tool with the same name exists, ToolManager.add_tool logs a warning (when warn_on_duplicate_tools is set) and returns the existing tool, so the first registration wins."
+    provenance: "VERIFIED_FACT"
+    domain: "sdk_implementation"
+    concepts: ["tool_registration", "name_collision", "sdk_source_trace"]
+    confidence: "high"
+    currentness_status: "CURRENT SDK SNAPSHOT"
+    evidence:
+      - { source_type: "source_code", tier: 1, title: "MCP python-sdk ToolManager", repository: "https://github.com/modelcontextprotocol/python-sdk", commit: "77001c96f9507be0f4d009b83210a384a5e08bda", verification_date: "2026-11-10", file: "src/mcp/server/mcpserver/tools/tool_manager.py; src/mcp/server/mcpserver/tools/base.py", symbol: "ToolManager.add_tool; Tool.from_function", entry_point: "MCPServer.add_tool(fn, name=...)", execution_path: "MCPServer.add_tool -> ToolManager.add_tool -> Tool.from_function -> self._tools.get(name) -> return existing on duplicate", url: "https://github.com/modelcontextprotocol/python-sdk/blob/77001c96f9507be0f4d009b83210a384a5e08bda/src/mcp/server/mcpserver/tools/tool_manager.py", accessed_at: "2026-11-10" }
+    limitations: ["Static read; not executed. Behavior is specific to this SDK."]
+    applicability: "Lessons 38.4 and 38.6; Incident 38.1."
+    related_claims: ["CLM-007", "CLM-060"]
+    curriculum_usage: { lessons: ["38.4", "38.6"], labs: ["LAB-D"], assessments: ["Incident-38.1"] }
+
+  - id: CLM-044
+    claim: "At python-sdk 77001c96, MCPServer._handle_list_tools ignores its pagination params and returns ListToolsResult(tools=await self.list_tools()). list_tools builds the tools from the ToolManager dictionary in insertion order, with fields name, title, description, input_schema, output_schema, annotations, icons, and _meta. No pagination cursor is used."
+    provenance: "VERIFIED_FACT"
+    domain: "sdk_implementation"
+    concepts: ["tools_list_semantics", "deterministic_ordering", "sdk_source_trace"]
+    confidence: "high"
+    currentness_status: "CURRENT SDK SNAPSHOT"
+    evidence:
+      - { source_type: "source_code", tier: 1, title: "MCP python-sdk MCPServer", repository: "https://github.com/modelcontextprotocol/python-sdk", commit: "77001c96f9507be0f4d009b83210a384a5e08bda", verification_date: "2026-11-10", file: "src/mcp/server/mcpserver/server.py", symbol: "MCPServer._handle_list_tools; MCPServer.list_tools", entry_point: "tools/list request -> on_list_tools", execution_path: "_handle_list_tools(ctx, params) -> list_tools() -> ToolManager tools in dict insertion order -> ListToolsResult", url: "https://github.com/modelcontextprotocol/python-sdk/blob/77001c96f9507be0f4d009b83210a384a5e08bda/src/mcp/server/mcpserver/server.py", accessed_at: "2026-11-10" }
+    limitations: ["The order is deterministic within one process but follows registration order. Two deployments that register in a different order list tools in a different order."]
+    applicability: "Lessons 38.2 and 38.6; LAB B."
+    related_claims: ["CLM-005", "CLM-059"]
+    curriculum_usage: { lessons: ["38.2", "38.6"], labs: ["LAB-B", "LAB-D"] }
+
+  - id: CLM-045
+    claim: "At python-sdk 77001c96, MCPServer._handle_call_tool calls call_tool -> ToolManager.call_tool. An unknown tool name raises ToolError('Unknown tool: ...'), and argument ValidationError becomes ToolError. _handle_call_tool re-raises only MCPError. Every other exception, including both of those ToolErrors, is returned as CallToolResult(is_error=True) with the exception text, and validation failures log only the rejected field names. An unexpected exception becomes UnexpectedToolError. So on this path argument validation follows the specification (a tool execution error), while an unknown tool also comes back as an isError result, not as the JSON-RPC protocol error the specification describes."
+    provenance: "VERIFIED_FACT"
+    domain: "sdk_implementation"
+    concepts: ["error_taxonomy", "sdk_source_trace", "spec_conformance"]
+    confidence: "medium"
+    currentness_status: "CURRENT SDK SNAPSHOT"
+    evidence:
+      - { source_type: "source_code", tier: 1, title: "MCP python-sdk MCPServer call path", repository: "https://github.com/modelcontextprotocol/python-sdk", commit: "77001c96f9507be0f4d009b83210a384a5e08bda", verification_date: "2026-11-10", file: "src/mcp/server/mcpserver/server.py; src/mcp/server/mcpserver/tools/tool_manager.py", symbol: "MCPServer._handle_call_tool; ToolManager.call_tool", entry_point: "tools/call request -> on_call_tool=_handle_call_tool", execution_path: "_handle_call_tool -> MCPServer.call_tool -> ToolManager.call_tool -> get_tool(name) is None -> raise ToolError -> except Exception -> CallToolResult(is_error=True)", url: "https://github.com/modelcontextprotocol/python-sdk/blob/77001c96f9507be0f4d009b83210a384a5e08bda/src/mcp/server/mcpserver/server.py", accessed_at: "2026-11-10" }
+    limitations: ["Static read, not executed. The unknown-tool observation came from opening server.py and tool_manager.py at this SHA on 2026-11-10; the dossier recorded only the ToolError. Low-level server and runner layers were searched for an earlier unknown-tool check and none was found, but they were not read exhaustively. A conformance test (LAB D) must confirm the wire response."]
+    applicability: "Lesson 38.6 conformance gap; LAB D."
+    related_claims: ["CLM-009", "CLM-066", "CLM-071"]
+    curriculum_usage: { lessons: ["38.6"], labs: ["LAB-D"], assessments: ["Mastery-38"] }
+
+  - id: CLM-046
+    claim: "At python-sdk 77001c96, lowlevel Server.get_capabilities sets listChanged for tools, prompts, and resources under MODERN_PROTOCOL_VERSIONS to whether a subscriptions/listen handler is served; for legacy versions it comes from NotificationOptions. Server._handle_discover returns supported_versions = list(MODERN_PROTOCOL_VERSIONS), the capabilities computed at call time, and instructions."
+    provenance: "VERIFIED_FACT"
+    domain: "sdk_implementation"
+    concepts: ["server_discover", "list_changed_subscription", "sdk_source_trace"]
+    confidence: "high"
+    currentness_status: "CURRENT SDK SNAPSHOT"
+    evidence:
+      - { source_type: "source_code", tier: 1, title: "MCP python-sdk lowlevel Server", repository: "https://github.com/modelcontextprotocol/python-sdk", commit: "77001c96f9507be0f4d009b83210a384a5e08bda", verification_date: "2026-11-10", file: "src/mcp/server/lowlevel/server.py", symbol: "Server.get_capabilities; Server._handle_discover", entry_point: "server/discover request", execution_path: "_handle_discover -> get_capabilities -> listen_served = 'subscriptions/listen' in self._request_handlers", url: "https://github.com/modelcontextprotocol/python-sdk/blob/77001c96f9507be0f4d009b83210a384a5e08bda/src/mcp/server/lowlevel/server.py", accessed_at: "2026-11-10" }
+    limitations: ["Static read; not executed."]
+    applicability: "Lessons 38.2 and 38.6; LAB B."
+    curriculum_usage: { lessons: ["38.2", "38.6"], labs: ["LAB-B"] }
+
+  - id: CLM-047
+    claim: "At python-sdk 77001c96, the lowlevel Server.get_tool_input_schema docstring states that it is used for Mcp-Param-* header validation on the 2026-07-28 Streamable HTTP path, is called before middleware runs and so is not scoped to the caller, and that if it raises, the error is logged and the call is served unvalidated. MCPServer._tool_input_schema's docstring states that it also finds a tool that middleware hides from the caller."
+    provenance: "VERIFIED_FACT"
+    domain: "sdk_implementation"
+    concepts: ["fail_open_validation", "sdk_source_trace"]
+    confidence: "high"
+    currentness_status: "CURRENT SDK SNAPSHOT"
+    evidence:
+      - { source_type: "source_code", tier: 1, title: "MCP python-sdk input-schema lookup", repository: "https://github.com/modelcontextprotocol/python-sdk", commit: "77001c96f9507be0f4d009b83210a384a5e08bda", verification_date: "2026-11-10", file: "src/mcp/server/lowlevel/server.py; src/mcp/server/mcpserver/server.py", symbol: "Server.__init__ get_tool_input_schema docstring (L431-437); MCPServer._tool_input_schema", entry_point: "Streamable HTTP request with Mcp-Param-* headers", execution_path: "header validation -> get_tool_input_schema(name) -> on exception: log and serve unvalidated", url: "https://github.com/modelcontextprotocol/python-sdk/blob/77001c96f9507be0f4d009b83210a384a5e08bda/src/mcp/server/lowlevel/server.py", accessed_at: "2026-11-10" }
+    limitations: ["Observed from docstrings at the pinned SHA. The fail-open branch itself was not executed. Not generalizable beyond this SDK."]
+    applicability: "Lesson 38.6; LAB D fail-open test."
+    related_claims: ["CLM-066"]
+    curriculum_usage: { lessons: ["38.6"], labs: ["LAB-D"] }
+
+  - id: CLM-048
+    claim: "At python-sdk 77001c96, src/mcp/server/caching.py CacheHint defaults to ttl_ms = 0 and cache_scope 'private'. apply_cache_hint fills each field only when the handler did not set it explicitly, so values set by the handler win per field. Input-required (Multi Round-Trip) results never receive hints."
+    provenance: "VERIFIED_FACT"
+    domain: "sdk_implementation"
+    concepts: ["cache_hints", "sdk_source_trace"]
+    confidence: "high"
+    currentness_status: "CURRENT SDK SNAPSHOT"
+    evidence:
+      - { source_type: "source_code", tier: 1, title: "MCP python-sdk caching", repository: "https://github.com/modelcontextprotocol/python-sdk", commit: "77001c96f9507be0f4d009b83210a384a5e08bda", verification_date: "2026-11-10", file: "src/mcp/server/caching.py; src/mcp/server/runner.py", symbol: "CacheHint; apply_cache_hint", entry_point: "ServerRunner after a list handler returns", execution_path: "handler result -> apply_cache_hint(result, hint) -> fill ttl_ms/cache_scope if not in model_fields_set", url: "https://github.com/modelcontextprotocol/python-sdk/blob/77001c96f9507be0f4d009b83210a384a5e08bda/src/mcp/server/caching.py", accessed_at: "2026-11-10" }
+    limitations: ["Static read; not executed."]
+    applicability: "Lesson 38.4 cache defaults; LAB B."
+    related_claims: ["CLM-006", "CLM-058"]
+    curriculum_usage: { lessons: ["38.4", "38.6"], labs: ["LAB-B"] }
+
+  - id: CLM-049
+    claim: "At python-sdk 77001c96, BearerAuthBackend.authenticate rejects expired tokens and, when constructed with a resource_server_url, rejects a token whose verifier-reported AccessToken.resource is not that URL (compared as URLs, ignoring a trailing slash). RequireAuthMiddleware returns 401 invalid_token when authentication is missing, and 403 insufficient_scope for the first missing required scope, with resource_metadata in WWW-Authenticate. required_scopes is set per HTTP app; no per-tool scope gate was found in the files read."
+    provenance: "VERIFIED_FACT"
+    domain: "sdk_implementation"
+    concepts: ["audience_binding", "per_tool_scoping", "sdk_source_trace"]
+    confidence: "high"
+    currentness_status: "CURRENT SDK SNAPSHOT"
+    evidence:
+      - { source_type: "source_code", tier: 1, title: "MCP python-sdk bearer auth middleware", repository: "https://github.com/modelcontextprotocol/python-sdk", commit: "77001c96f9507be0f4d009b83210a384a5e08bda", verification_date: "2026-11-10", file: "src/mcp/server/auth/middleware/bearer_auth.py", symbol: "BearerAuthBackend.authenticate; BearerAuthBackend._issued_for_this_resource; RequireAuthMiddleware.__call__", entry_point: "HTTP request with Authorization: Bearer", execution_path: "authenticate -> token_verifier.verify_token -> expiry check -> resource check if resource_server_url -> RequireAuthMiddleware scope loop -> 401/403", url: "https://github.com/modelcontextprotocol/python-sdk/blob/77001c96f9507be0f4d009b83210a384a5e08bda/src/mcp/server/auth/middleware/bearer_auth.py", accessed_at: "2026-11-10" }
+    limitations: ["Static read; not executed. Whether any other part of the SDK gates scopes per tool is TODO_VERIFY (CLM-074)."]
+    applicability: "Lessons 38.5 and 38.6; LAB C; LAB D."
+    related_claims: ["CLM-050", "CLM-074"]
+    curriculum_usage: { lessons: ["38.5", "38.6"], labs: ["LAB-C", "LAB-D"] }
+
+  - id: CLM-050
+    claim: "At python-sdk 77001c96, AuthSettings.validate_token_resource defaults to None. When resource_server_url is set and validate_token_resource is None, the settings validator emits an MCPDeprecationWarning, and MCPServer builds BearerAuthBackend with resource_server_url=None unless validate_token_resource is truthy (server.py around L1199-1202). The middleware therefore performs no audience check unless the setting is enabled or the TokenVerifier checks the audience itself. The field description says 3.0 makes True the default."
+    provenance: "VERIFIED_FACT"
+    domain: "sdk_implementation"
+    concepts: ["audience_binding", "secure_defaults", "sdk_source_trace"]
+    confidence: "high"
+    currentness_status: "CURRENT SDK SNAPSHOT (default announced to change in 3.0)"
+    evidence:
+      - { source_type: "source_code", tier: 1, title: "MCP python-sdk AuthSettings", repository: "https://github.com/modelcontextprotocol/python-sdk", commit: "77001c96f9507be0f4d009b83210a384a5e08bda", verification_date: "2026-11-10", file: "src/mcp/server/auth/settings.py; src/mcp/server/mcpserver/server.py", symbol: "AuthSettings.validate_token_resource; AuthSettings._check_validate_token_resource; MCPServer streamable HTTP app middleware construction", entry_point: "MCPServer with settings.auth configured", execution_path: "AuthSettings validator warns -> MCPServer builds BearerAuthBackend(resource_server_url=... if validate_token_resource else None)", url: "https://github.com/modelcontextprotocol/python-sdk/blob/77001c96f9507be0f4d009b83210a384a5e08bda/src/mcp/server/auth/settings.py", accessed_at: "2026-11-10" }
+    limitations: ["Static read; not executed. A deployment whose TokenVerifier checks aud is not affected."]
+    applicability: "Lessons 38.5 and 38.6; LAB D audience test; Mastery."
+    related_claims: ["CLM-015", "CLM-049", "CLM-066"]
+    curriculum_usage: { lessons: ["38.5", "38.6"], labs: ["LAB-C", "LAB-D"], assessments: ["Mastery-38"] }
+
+  # ---------------- Derivations ----------------
+  - id: CLM-051
+    claim: "The context cost of a tool surface sent every turn is C_tools = c0 + sum over tools of (t_name + t_desc + t_schema), where c0 is the provider's fixed tool-use system-prompt overhead. From the per-server figures in CLM-026, the mean is 55,000/58 = 948.3 tokens per tool, but it varies by server: GitHub 26,000/35 = 742.9, Slack 21,000/11 = 1,909.1, Sentry and Grafana 600, Splunk 1,000. As a fraction of a declared window W = 200,000 tokens, 55K is f = 0.275 and the reported 134K is f = 0.67. Without caching, a session of n turns re-sends about n * C_tools tokens, for example 20 * (286 + 55,000) = 1,105,720 tokens."
+    provenance: "DERIVED"
+    domain: "tool_context_economics"
+    concepts: ["tool_context_cost", "per_tool_token_budget"]
+    confidence: "high"
+    currentness_status: "REFERENCE / BASELINE"
+    assumptions: ["Tool definitions are re-sent on every model call (stated by both vendors: billed as input tokens, injected into the system message).", "c0 = 286 tokens (Opus 5.5, tool_choice auto, CLM-024) is used only as an example.", "W = 200,000 tokens is an exercise value, not a property of any model."]
+    derivation: "Sum of components. Per-tool means are server tokens divided by server tool count: 26000/35 = 742.857; 21000/11 = 1909.09; 3000/5 = 600; 2000/2 = 1000; 55000/58 = 948.28. f = 55000/200000 = 0.275; 134000/200000 = 0.67. Session: 20 * 55286 = 1,105,720. Recomputed in Python on 2026-11-10."
+    limitations: ["The source token counts are approximate, so the per-tool means are approximate.", "Prompt caching changes the billed cost but not the context occupancy."]
+    applicability: "Lesson 38.3 and Incident 38.1."
+    related_claims: ["CLM-024", "CLM-026", "CLM-052"]
+    curriculum_usage: { lessons: ["38.3"], labs: ["LAB-A"], assessments: ["Incident-38.1", "Mastery-38"] }
+
+  - id: CLM-052
+    claim: "Given a declared share f of a context window W for tool definitions, the number of tools that fit is n_max = floor((f*W - c0)/t_bar), where t_bar is the mean definition cost per tool. With f = 0.10, W = 200,000, and c0 = 286, n_max is 20 at 948.3 tokens per tool, 26 at GitHub-like 742.9, 10 at Slack-like 1,909.1, and 98 at a description-only 200 tokens. Because n_max scales as 1/t_bar, a mean computed over a catalog with a few large tools can overstate how many tools fit."
+    provenance: "DERIVED"
+    domain: "tool_context_economics"
+    concepts: ["per_tool_token_budget", "tool_context_cost"]
+    confidence: "high"
+    currentness_status: "REFERENCE / BASELINE"
+    assumptions: ["f and W are design choices declared by the engineer.", "Every loaded tool costs t_bar; for a heterogeneous catalog, sum the actual costs of the chosen tools instead."]
+    derivation: "f*W - c0 = 20,000 - 286 = 19,714 tokens. 19714/948.28 = 20.79 -> 20; 19714/742.86 = 26.54 -> 26; 19714/1909.09 = 10.33 -> 10; 19714/200 = 98.57 -> 98. Recomputed in Python on 2026-11-10."
+    limitations: ["The 200-token description-only figure (CLM-033) excludes the schema, so the 98 is not comparable with the other rows."]
+    applicability: "Lesson 38.3 budget; Mastery deliverable 2."
+    related_claims: ["CLM-051", "CLM-033"]
+    curriculum_usage: { lessons: ["38.3"], labs: ["LAB-A"], assessments: ["Mastery-38"] }
+
+  - id: CLM-053
+    claim: "For a pipeline that retrieves a shortlist of K tools and lets the model choose, P(correct call) = P(gold in shortlist | K) * P(model chooses gold | gold shown, K) * P(arguments valid | gold chosen). The first factor is non-decreasing in K. The second can fall as K grows because more competitors are shown. The best K depends on how the two factors trade off on the workload."
+    provenance: "DERIVED"
+    domain: "tool_selection"
+    concepts: ["tool_retrieval", "shortlist_depth"]
+    confidence: "high"
+    currentness_status: "REFERENCE / BASELINE"
+    assumptions: ["One gold tool per query.", "A call counts as correct only if the gold tool is chosen and its arguments are valid; with several valid tools, generalize the first factor."]
+    derivation: "Chain rule of probability over three sequential events: shortlist contains gold; choice is gold given it was shown; arguments valid given gold chosen. A retriever adding tools to the shortlist cannot remove the gold tool, so the first factor is monotone in K. The second factor's dependence on K is empirical. Illustration with synthetic factor values: 0.903 * 0.95 * 0.97 = 0.832 against 0.908 * 0.90 * 0.97 = 0.793."
+    limitations: ["The factors are not independent of the workload. Repantis et al. measure only the first factor broadly and validate the second only on BFCL."]
+    applicability: "Lesson 38.3; LAB A."
+    related_claims: ["CLM-033", "CLM-070"]
+    curriculum_usage: { lessons: ["38.3"], labs: ["LAB-A"] }
+
+  - id: CLM-054
+    claim: "Applying the BoR definition (CLM-032) to the BFCL numbers in CLM-033 with N = 370 and one gold tool: K = 7 with P_obs = 0.903 gives P_rand = 0.0189 and BoR = log2(0.903 * 370/7) = 5.58 bits of a maximum log2(370/7) = 5.72. K = 50 with P_obs = 0.908 gives P_rand = 0.135 and BoR = 2.75 bits of a maximum 2.89. Nearly the same coverage carries about twice the information per shortlist at the smaller K."
+    provenance: "DERIVED"
+    domain: "tool_selection"
+    concepts: ["bits_over_random", "shortlist_depth"]
+    confidence: "high"
+    currentness_status: "REFERENCE / BASELINE"
+    assumptions: ["R_q = 1 so P_rand = K/N.", "The reported coverage values are used as P_obs."]
+    derivation: "7/370 = 0.01892; 0.903/0.01892 = 47.73; log2 = 5.577. log2(370/7) = 5.724. 50/370 = 0.13514; 0.908/0.13514 = 6.719; log2 = 2.748. log2(370/50) = 2.888. Recomputed in Python on 2026-11-10."
+    limitations: ["Bits over random measures shortlist efficiency, not downstream call correctness."]
+    applicability: "Lesson 38.3 worked example."
+    related_claims: ["CLM-032", "CLM-033"]
+    curriculum_usage: { lessons: ["38.3"], labs: ["LAB-A"] }
+
+  - id: CLM-055
+    claim: "From RAG-MCP Table 1 (CLM-031), retrieving and showing a shortlist instead of all descriptions cut prompt tokens by 1 - 1,084/2,133.84 = 49.2% and multiplied accuracy by 43.13/13.62 = 3.17 on that testbed. The 49.2% differs from the abstract's 'over 50%', which compares against unspecified baselines."
+    provenance: "DERIVED"
+    domain: "tool_selection"
+    concepts: ["tool_retrieval", "tool_context_cost"]
+    confidence: "high"
+    currentness_status: "REFERENCE / BASELINE"
+    assumptions: ["Table 1 values as reported; same model, judge, and trial count across rows."]
+    derivation: "1084/2133.84 = 0.50800; 1 - 0.508 = 0.4920. 43.13/13.62 = 3.1667. Recomputed in Python on 2026-11-10."
+    limitations: ["One model and one subset; the ratio does not transfer to other catalogs or models."]
+    applicability: "Lesson 38.3."
+    related_claims: ["CLM-031"]
+    curriculum_usage: { lessons: ["38.3"] }
+
+  - id: CLM-056
+    claim: "A description rewrite is worth adopting for a workload only if delta_success * V > delta_steps * c_step + delta_C_tools * c_tok * turns, where V is the value of one verified success, c_step the cost of one extra execution step, delta_C_tools the added definition tokens re-sent per turn, c_tok the price per input token, and turns the number of model calls per episode. All terms are per episode. Because measured rewrites can raise steps (CLM-034) and add tokens on every turn, a rewrite that raises success can still lose."
+    provenance: "DERIVED"
+    domain: "tool_context_economics"
+    concepts: ["tool_description_quality", "description_rewriting"]
+    confidence: "high"
+    currentness_status: "REFERENCE / BASELINE"
+    assumptions: ["Costs and value are additive per episode.", "Regressions are inside delta_success, measured on the same paired episodes."]
+    derivation: "Net value of adopting = benefit - cost = delta_success*V - (delta_steps*c_step + delta_C_tools*c_tok*turns). Adopt when positive. Lesson 38.1 applies it to CLM-057's synthetic inputs: full rewrite 0.12 < 0.151 (reject); compact rewrite 0.08 > 0.0498 (adopt). Recomputed in Python on 2026-11-10."
+    limitations: ["Ignores latency and context-window pressure except through token cost.", "Assumes delta_success is measured with a paired design and stated uncertainty (Module 15)."]
+    applicability: "Lesson 38.1; LAB A."
+    related_claims: ["CLM-034", "CLM-057", "CLM-069"]
+    curriculum_usage: { lessons: ["38.1"], labs: ["LAB-A"], assessments: ["Mastery-38"] }
+
+  - id: CLM-057
+    claim: "SYNTHETIC LESSON 38.1 WORKED-EXAMPLE INPUTS (exercise assumptions, not measurements): 30 tools; value V = 2.00 USD per verified success; c_step = 0.004 USD per execution step; baseline 6 steps per episode; 10 model calls per episode; input price 3e-6 USD per token. Full rewrite: delta_success = +0.06, delta_steps = +4.0, +150 tokens per tool. Compact rewrite: delta_success = +0.04, delta_steps = +1.2, +50 tokens per tool."
+    provenance: "EXERCISE_ASSUMPTION"
+    domain: "tool_context_economics"
+    concepts: ["description_rewriting"]
+    confidence: "high"
+    currentness_status: "WORKLOAD-DEPENDENT"
+    assumptions: ["Values are chosen for arithmetic. The +4.0 steps on a 6-step baseline (+67%) echoes the order of the effect in CLM-034 but is not taken from it."]
+    limitations: ["Describes no real catalog, model, or price list."]
+    applicability: "Lesson 38.1 worked example."
+    related_claims: ["CLM-056"]
+    curriculum_usage: { lessons: ["38.1"] }
+
+  - id: CLM-058
+    claim: "If a server's tool list changes as a Poisson process with rate lambda and a client re-fetches every T seconds (TTL), the probability that the cached list is stale at a uniformly random read time is p_stale = 1 - (1 - exp(-lambda*T))/(lambda*T). For T = 300 s it is 0.17% at one change per day, 4.05% at one change per hour, and 21.3% at one change per 10 minutes."
+    provenance: "DERIVED"
+    domain: "tool_registry"
+    concepts: ["cache_staleness", "cache_hints"]
+    confidence: "high"
+    currentness_status: "REFERENCE / BASELINE"
+    assumptions: ["Changes form a Poisson process with constant rate lambda.", "Reads are uniform in time within each TTL interval.", "Fetch latency is negligible against T."]
+    derivation: "A read at time u after the fetch is stale iff at least one change occurred in [0, u]: probability 1 - exp(-lambda*u). Averaging over u uniform on [0, T]: (1/T) * integral_0^T (1 - exp(-lambda*u)) du = 1 - (1 - exp(-lambda*T))/(lambda*T). x = lambda*T = 300/86400 = 0.003472 -> 0.001734; 300/3600 = 0.08333 -> 0.04053; 300/600 = 0.5 -> 0.21306. Recomputed in Python on 2026-11-10."
+    limitations: ["Real tool changes are bursty (deployments), which the Poisson model does not capture.", "With a list_changed subscription, staleness is bounded by notification latency instead (CLM-068)."]
+    applicability: "Lesson 38.4; LAB B."
+    related_claims: ["CLM-006", "CLM-048", "CLM-068"]
+    curriculum_usage: { lessons: ["38.4"], labs: ["LAB-B"], assessments: ["Mastery-38"] }
+
+  - id: CLM-059
+    claim: "When a provider's prompt cache matches an exact token prefix and tool definitions come before the conversation, the reusable prefix ends at the first position where the serialized tool list differs between requests. With c0 = 286 and 20 tools of 1,000 tokens each (20,286 tokens), swapping tools 3 and 4 leaves a shared prefix of 286 + 2*1,000 = 2,286 tokens (11.3%), while a deterministic order keeps all 20,286 reusable. This is why the specification asks for deterministic tools/list ordering (CLM-005)."
+    provenance: "DERIVED"
+    domain: "tool_context_economics"
+    concepts: ["prompt_cache_prefix", "deterministic_ordering"]
+    confidence: "high"
+    currentness_status: "REFERENCE / BASELINE"
+    assumptions: ["Exact-prefix cache semantics as taught in Module 03, Lesson 3.6; a given provider's cache rules must be checked separately.", "Tools are serialized in list order ahead of messages.", "Synthetic sizes chosen for arithmetic."]
+    derivation: "Total = 286 + 20*1000 = 20,286. The first differing token is at the start of tool 3, so the prefix = 286 + 2*1000 = 2,286; 2286/20286 = 0.1127. Recomputed in Python on 2026-11-10."
+    limitations: ["The amount actually billed as cache reads depends on provider breakpoints and minimum cacheable lengths."]
+    applicability: "Lessons 38.2 and 38.3; LAB B; Incident 38.1."
+    related_claims: ["CLM-005", "CLM-044"]
+    curriculum_usage: { lessons: ["38.2", "38.3"], labs: ["LAB-B"], assessments: ["Incident-38.1"] }
+
+  - id: CLM-060
+    claim: "If s servers each expose a tool with the same name and an aggregator merges them without prefixes into one namespace with first-registration-wins semantics (as the python-sdk ToolManager does within one server, CLM-043), s - 1 tools become unreachable while the merged list looks valid. Prefixing with a client-assigned server id, not serverInfo.name, which is not guaranteed to be unique (CLM-007), removes the collisions as long as the ids are unique and the prefixed name stays within 128 characters."
+    provenance: "DERIVED"
+    domain: "tool_registry"
+    concepts: ["name_collision", "tool_name_rules"]
+    confidence: "high"
+    currentness_status: "REFERENCE / BASELINE"
+    assumptions: ["The aggregator keys tools by name only.", "Server ids are assigned by the client and are unique within the client."]
+    derivation: "With first-wins keying, one of s identically named tools is kept and s - 1 are dropped. Prefixing maps (server_id, name) to a distinct key whenever server ids are distinct. Example: 3 servers each with 'search' -> 2 shadowed unprefixed, 0 prefixed."
+    limitations: ["Other aggregators may use last-wins, error, or rename; the shadow count holds for any policy that keeps exactly one."]
+    applicability: "Lesson 38.4; Incident 38.1."
+    related_claims: ["CLM-007", "CLM-043"]
+    curriculum_usage: { lessons: ["38.4"], labs: ["LAB-D"], assessments: ["Incident-38.1", "Mastery-38"] }
+
+  - id: CLM-061
+    claim: "A simple exposure measure for a token is E = sum over intervals of |granted scopes| * interval length (scope-seconds). Requesting all four of four scopes for a 3,600 s token gives E = 14,400. Starting with one scope and stepping up to the union of two scopes at 1,800 s gives 1*1,800 + 2*1,800 = 5,400, or 2.67 times less, at the cost of one extra authorization round trip. The specification's fallback of requesting all of scopes_supported (CLM-016) maximizes |granted scopes| unless scopes_supported is kept minimal."
+    provenance: "DERIVED"
+    domain: "tool_authorization"
+    concepts: ["scope_minimization", "step_up_authorization"]
+    confidence: "medium"
+    currentness_status: "REFERENCE / BASELINE"
+    assumptions: ["Every scope is weighted equally; a weighted sum is needed when scopes differ in impact.", "The token is valid for its whole lifetime unless revoked.", "Synthetic scope counts and lifetimes."]
+    derivation: "All-scopes: 4 * 3600 = 14,400. Step-up: 1 * 1800 + 2 * 1800 = 5,400. Ratio 14400/5400 = 2.667. Recomputed in Python on 2026-11-10."
+    limitations: ["Scope-seconds is a proxy for blast radius, not a risk score. A narrow scope can still be high-impact."]
+    applicability: "Lesson 38.5 worked example."
+    related_claims: ["CLM-016", "CLM-020", "CLM-065"]
+    curriculum_usage: { lessons: ["38.5"], labs: ["LAB-C"], assessments: ["Mastery-38"] }
+
+  - id: CLM-062
+    claim: "Because MCP 2026-07-28 removed SSE resumability (a broken stream means the request is re-issued with a new id, CLM-003), a tools/call for a non-idempotent tool whose stream breaks after dispatch leaves the effect unknown. Re-issuing it is a new call, not a resume. Under Module 12's rule the client must verify the postcondition before any retry, or rely on an application-level idempotency key carried in the arguments."
+    provenance: "DERIVED"
+    domain: "tool_protocols"
+    concepts: ["stateless_requests", "effect_unknown"]
+    confidence: "high"
+    currentness_status: "REFERENCE / BASELINE"
+    assumptions: ["The server may have started or committed the effect before the stream broke.", "No protocol-level deduplication of re-issued requests exists in the revision."]
+    derivation: "A new request id gives the server no way to link the retry to the first attempt, so at-most-once execution needs an application key or a postcondition check (Module 12 Lesson 12.3 failure table; Module 14 Lesson 14.2)."
+    limitations: ["The tasks extension (io.modelcontextprotocol/tasks) was not read and may offer other semantics."]
+    applicability: "Lesson 38.2; Mastery deliverable on write tools."
+    related_claims: ["CLM-003"]
+    curriculum_usage: { lessons: ["38.2"], labs: ["LAB-B"], assessments: ["Mastery-38"] }
+
+  - id: CLM-063
+    claim: "Because ToolAnnotations are hints that clients must treat as untrusted unless the server is trusted (CLM-008), a client cannot derive Module 12's effect class (read-only, idempotent, reversible, irreversible) from a server's readOnlyHint or idempotentHint. The effect class must come from a trusted, reviewed source such as a client-side contract registry. Annotations can be compared against that registry, and a mismatch flags a review."
+    provenance: "DERIVED"
+    domain: "tool_protocols"
+    concepts: ["tool_annotations", "effect_class"]
+    confidence: "high"
+    currentness_status: "REFERENCE / BASELINE"
+    assumptions: ["The server is not inside the client's trust boundary, or its trust has not been established."]
+    derivation: "A decision input written by the party being constrained cannot be an authority input (Module 18 Lesson 18.4 rule for authorization inputs). The specification says annotations must not drive tool-use decisions from untrusted servers."
+    limitations: ["For a first-party server under the same review process, annotations can be part of the reviewed contract."]
+    applicability: "Lesson 38.1; LAB D."
+    related_claims: ["CLM-008"]
+    curriculum_usage: { lessons: ["38.1"], labs: ["LAB-D"], assessments: ["Mastery-38"] }
+
+  - id: CLM-064
+    claim: "Pinning a server version in the MCP Registry fixes the published server metadata (CLM-023) but not the tool names, descriptions, or schemas that the live server returns from tools/list, because registry metadata does not version individual tools. To pin what the model actually sees, a client must hash the canonical tools/list result it reviewed and refuse or re-review a changed hash (the manifest-pinning control of Module 18)."
+    provenance: "DERIVED"
+    domain: "tool_registry"
+    concepts: ["manifest_pinning", "immutable_registry_metadata"]
+    confidence: "high"
+    currentness_status: "REFERENCE / BASELINE"
+    assumptions: ["The server can change its tools/list response without publishing a new registry version.", "The canonical serialization used for hashing is fixed (sorted keys, stable ordering)."]
+    derivation: "Two objects with different lifetimes: immutable registry metadata per published version and a live list served per request (which MAY also vary by authorization, CLM-005). Equality of the first says nothing about the second."
+    limitations: ["Hashing per authorization context is needed when the list varies by scope."]
+    applicability: "Lesson 38.4; Mastery."
+    related_claims: ["CLM-005", "CLM-022", "CLM-023"]
+    curriculum_usage: { lessons: ["38.4"], labs: ["LAB-B"], assessments: ["Incident-38.1", "Mastery-38"] }
+
+  - id: CLM-065
+    claim: "The specification's fallback (request all of scopes_supported when the challenge carries no scope, CLM-016) and the best-practices Common Mistake (publishing all possible scopes in scopes_supported, CLM-020) together yield least privilege only if servers keep scopes_supported minimal, as the specification also states it is intended to be. A server that lists every scope turns the fallback into an omnibus grant."
+    provenance: "DERIVED"
+    domain: "tool_authorization"
+    concepts: ["scopes_supported", "scope_minimization"]
+    confidence: "high"
+    currentness_status: "REFERENCE / BASELINE"
+    assumptions: ["The client follows the specification's priority order."]
+    derivation: "Granted scopes at first authorization = challenged scope if present, otherwise scopes_supported. Minimal scopes_supported => minimal fallback grant; full scopes_supported => full grant."
+    limitations: ["A server can always challenge with an explicit scope, which bypasses the fallback."]
+    applicability: "Lesson 38.5; LAB C."
+    related_claims: ["CLM-016", "CLM-020", "CLM-061"]
+    curriculum_usage: { lessons: ["38.5"], labs: ["LAB-C"], assessments: ["Mastery-38"] }
+
+  - id: CLM-066
+    claim: "A conformance suite must assert observable wire behavior, not configuration or documentation, because an SDK can meet a specification MUST only when it is configured to. At python-sdk 77001c96 the specification's audience MUST (CLM-015) is enforced by the middleware only when validate_token_resource is enabled (CLM-050), the header-schema check fails open when its lookup raises (CLM-047), and an unknown tool is answered as an isError result rather than a protocol error (CLM-045). Each is a test whose expected result is set by the specification, run against the deployed configuration."
+    provenance: "DERIVED"
+    domain: "spec_conformance"
+    concepts: ["spec_conformance", "secure_defaults"]
+    confidence: "high"
+    currentness_status: "REFERENCE / BASELINE"
+    assumptions: ["The suite runs against the configuration actually deployed, not a reference configuration."]
+    derivation: "Conformance = for every tested requirement r, observed(r, deployed_config) matches expected(r). Where behavior depends on configuration, a passing reference configuration says nothing about the deployed one."
+    limitations: ["The three SDK observations are static reads; LAB D executes them."]
+    applicability: "Lesson 38.6; LAB D; Mastery."
+    related_claims: ["CLM-045", "CLM-047", "CLM-050", "CLM-071"]
+    curriculum_usage: { lessons: ["38.6"], labs: ["LAB-D"], assessments: ["Mastery-38"] }
+
+  # ---------------- Hypotheses ----------------
+  - id: CLM-067
+    claim: "Tool-selection accuracy for a given model degrades past a workload-specific number of loaded tools. The vendor figures (fewer than 20 functions; 30-50 tools) are guidance without published methods, so the knee must be measured for the model, catalog, and description style in use."
+    provenance: "HYPOTHESIS"
+    domain: "tool_selection"
+    concepts: ["tool_count_scaling", "vendor_guidance"]
+    confidence: "medium"
+    currentness_status: "WORKLOAD-DEPENDENT"
+    hypothesis:
+      prediction: "On a fixed query set, selection accuracy stays within a tolerance up to some N and then falls, and the N differs between catalogs with near-duplicate names and catalogs with distinct names."
+      measurement_target: "Selection accuracy and argument validity against the number of loaded tools N, with fixed queries and gold labels, repeated over seeds, for two catalogs."
+      falsifying_observation: "Accuracy is flat within uncertainty across the full N range for both catalogs, or the knee lands at the same N for both."
+    limitations: ["Results are specific to the model and catalog tested."]
+    applicability: "Lesson 38.3; LAB A."
+    related_claims: ["CLM-025", "CLM-027"]
+    curriculum_usage: { lessons: ["38.3"], labs: ["LAB-A"], assessments: ["Incident-38.1"] }
+
+  - id: CLM-068
+    claim: "A client that subscribes to list_changed bounds tool-list staleness by notification latency instead of by its TTL, so its stale-read probability is far below the TTL model's when changes are frequent."
+    provenance: "HYPOTHESIS"
+    domain: "tool_registry"
+    concepts: ["list_changed_subscription", "cache_staleness"]
+    confidence: "medium"
+    currentness_status: "WORKLOAD-DEPENDENT"
+    hypothesis:
+      prediction: "With changes every 10 minutes and T = 300 s, the measured stale-read fraction is about 21% for TTL-only clients and below 1% for subscribed clients."
+      measurement_target: "Time from server change to client refresh, and stale-read fraction over randomized read times, for TTL-only and subscribed clients."
+      falsifying_observation: "The subscribed client's stale fraction is not materially lower than the TTL client's, for example because notifications are dropped or refresh is slow."
+    limitations: ["Depends on the transport keeping the listen stream open."]
+    applicability: "Lesson 38.4; LAB B."
+    related_claims: ["CLM-006", "CLM-058"]
+    curriculum_usage: { lessons: ["38.4"], labs: ["LAB-B"] }
+
+  - id: CLM-069
+    claim: "The effect of a description rewrite on selection depends on the model and the competing tools in the catalog, and a compact rewrite keeps most of a full rewrite's success gain for a fraction of its added tokens and steps."
+    provenance: "HYPOTHESIS"
+    domain: "tool_selection"
+    concepts: ["description_rewriting", "tool_description_quality"]
+    confidence: "medium"
+    currentness_status: "WORKLOAD-DEPENDENT"
+    hypothesis:
+      prediction: "On paired episodes, compact rewrites reach at least half the full rewrite's success gain at under half its added tokens, and the sign of the gain differs for at least one model or catalog slice."
+      measurement_target: "Paired success, steps, tokens, and regressions for original, full, and compact descriptions across two models and two catalogs."
+      falsifying_observation: "Compact rewrites retain under half the gain everywhere, or the gain has the same sign and similar size across all models and catalogs."
+    limitations: ["Needs paired evaluation with stated uncertainty (Module 15)."]
+    applicability: "Lesson 38.1; LAB A."
+    related_claims: ["CLM-034", "CLM-056"]
+    curriculum_usage: { lessons: ["38.1"], labs: ["LAB-A"] }
+
+  - id: CLM-070
+    claim: "Retrieving a shortlist moves the scaling problem from model selection to retrieval recall. As the catalog N grows at fixed K, the probability that the gold tool is in the shortlist falls, and end-to-end accuracy follows it even when choice accuracy among shown tools holds."
+    provenance: "HYPOTHESIS"
+    domain: "tool_selection"
+    concepts: ["tool_retrieval", "tool_count_scaling"]
+    confidence: "medium"
+    currentness_status: "WORKLOAD-DEPENDENT"
+    hypothesis:
+      prediction: "At fixed K, recall@K of the gold tool and end-to-end accuracy both decline as N grows, while choice accuracy given gold shown stays roughly constant."
+      measurement_target: "recall@K, choice accuracy conditional on gold shown, and end-to-end accuracy across N for a fixed retriever and model."
+      falsifying_observation: "recall@K stays flat as N grows while end-to-end accuracy falls, which would place the loss in choice rather than retrieval."
+    limitations: ["Retriever quality and description style dominate; results are catalog-specific."]
+    applicability: "Lesson 38.3; LAB A."
+    related_claims: ["CLM-031", "CLM-033", "CLM-053"]
+    curriculum_usage: { lessons: ["38.3"], labs: ["LAB-A"] }
+
+  - id: CLM-071
+    claim: "Running specification-derived conformance tests against the pinned python-sdk in its default configuration will show the three divergences found by static reading: an unknown tool answered as an isError result, a token for another audience accepted when validate_token_resource is unset and the verifier does not check the audience, and header validation skipped when the schema lookup raises."
+    provenance: "HYPOTHESIS"
+    domain: "spec_conformance"
+    concepts: ["spec_conformance", "sdk_source_trace"]
+    confidence: "medium"
+    currentness_status: "CURRENT SDK SNAPSHOT"
+    hypothesis:
+      prediction: "Each of the three tests fails against the default configuration, and the audience test passes once validate_token_resource=True."
+      measurement_target: "Wire responses for an unknown tool, a wrong-audience token, and a raising schema lookup against python-sdk 77001c96 in default and hardened configurations."
+      falsifying_observation: "Any of the three behaves as the specification requires in the default configuration, which would show that the static reading missed a code path."
+    limitations: ["One SDK revision; the TypeScript SDK and releases are not covered."]
+    applicability: "Lesson 38.6; LAB D."
+    related_claims: ["CLM-045", "CLM-047", "CLM-050", "CLM-066"]
+    curriculum_usage: { lessons: ["38.6"], labs: ["LAB-D"], assessments: ["Mastery-38"] }
+
+  # ---------------- Exercise fixtures ----------------
+  - id: CLM-072
+    claim: "SYNTHETIC MASTERY FIXTURE (exercise assumption, not a measurement): an internal tool gateway aggregates 9 MCP servers exposing 240 tools at a mean of 948 definition tokens each (227,520 tokens). The model context window is declared as 200,000 tokens, with at most 10% (20,000) for tool definitions, a tool-use overhead c0 = 286, and 30 model calls per session. Three servers are legacy (2025-11-25 handshake only). Four servers expose a tool named search. Six servers require OAuth, and one of them publishes 12 scopes in scopes_supported. One write tool (create_ticket) has no idempotency key. The deployed python-sdk servers run at commit 77001c96 with default AuthSettings."
+    provenance: "EXERCISE_ASSUMPTION"
+    domain: "tool_ecosystem"
+    concepts: ["reference_workload"]
+    confidence: "high"
+    currentness_status: "WORKLOAD-DEPENDENT"
+    assumptions: ["All values are synthetic and chosen for arithmetic and design trade-offs."]
+    limitations: ["Answers are conditional on these inputs."]
+    applicability: "Section 08 Mastery and Section 09 reference checks."
+    related_claims: ["CLM-051", "CLM-052"]
+    curriculum_usage: { lessons: ["38.3"], assessments: ["Mastery-38"] }
+
+  - id: CLM-073
+    claim: "SYNTHETIC INCIDENT 38.1 TELEMETRY (exercise assumption): before the change, 2 servers and 40 tools at a mean of 900 tokens (36,286 tokens per call with c0 = 286); after adding a third server, 64 tools (57,886 tokens per call, 1.60 times more). Selection accuracy on a fixed probe set fell from 0.91 to 0.78. Cache-read tokens per call fell from about 34,000 to near 0. Two tools named search exist after the change, and the new server returns tools in a different order on each request."
+    provenance: "EXERCISE_ASSUMPTION"
+    domain: "tool_ecosystem"
+    concepts: ["reference_workload"]
+    confidence: "high"
+    currentness_status: "WORKLOAD-DEPENDENT"
+    assumptions: ["Synthetic incident values; 286 + 40*900 = 36,286 and 286 + 64*900 = 57,886; ratio 1.595."]
+    limitations: ["The diagnosis is conditional on these signals; real incidents need the missing evidence listed in the protocol."]
+    applicability: "Incident 38.1."
+    related_claims: ["CLM-051", "CLM-059", "CLM-060"]
+    curriculum_usage: { lessons: ["38.3"], assessments: ["Incident-38.1"] }
+
+  - id: CLM-074
+    claim: "TODO_VERIFY: whether python-sdk 77001c96 enforces per-tool scopes anywhere outside the files read (RequireAuthMiddleware checks scopes per HTTP app); how its client side (client/session.py) caches tool lists, handles list_changed, and paginates; and how the TypeScript SDK behaves on the same conformance tests."
+    provenance: "TODO_VERIFY"
+    domain: "sdk_implementation"
+    concepts: ["per_tool_scoping", "sdk_source_trace"]
+    confidence: "low"
+    currentness_status: "UNVERIFIED"
+    limitations: ["Not inspected. Must not be taught as fact."]
+    applicability: "Lesson 38.5 and 38.6 open questions; LAB D extension."
+    related_claims: ["CLM-049"]
+    curriculum_usage: { lessons: ["38.5", "38.6"], labs: ["LAB-D"] }
+
+  - id: CLM-075
+    claim: "OpenAPI's operationId is unique and case-sensitive within one API description (CLM-030), and MCP tool names are unique only within one server (CLM-007). An OpenAPI-to-MCP mapping can therefore use operationId as the tool name within one server, but it needs a server prefix when several APIs are merged. Both default to JSON Schema 2020-12, so a parameter schema can carry across without a dialect change, while a provider's strict function-calling dialect (CLM-028) may still reject it."
+    provenance: "DERIVED"
+    domain: "tool_protocols"
+    concepts: ["openapi_operation", "schema_dialect", "name_collision"]
+    confidence: "medium"
+    currentness_status: "REFERENCE / BASELINE"
+    assumptions: ["operationId values satisfy the MCP name character rules; if not, they need a deterministic, reversible rename.", "No OpenAPI-to-MCP converter was inspected."]
+    derivation: "Uniqueness domains: operationId per API description; tool name per MCP server. Merging k APIs into one server breaks uniqueness unless names are prefixed. The dialect default is the same (2020-12) on both sides; the strict-mode subset (additionalProperties false, all required) is narrower."
+    limitations: ["Operation semantics (HTTP method, idempotency, auth) do not carry over automatically into a tool contract."]
+    applicability: "Lesson 38.2 contrast."
+    related_claims: ["CLM-007", "CLM-028", "CLM-030"]
+    curriculum_usage: { lessons: ["38.2"] }
+
+  - id: CLM-076
+    claim: "For a tool schema change, input compatibility holds if every argument object valid under the old inputSchema is also valid under the new one. Output compatibility holds if every structured result valid under the new outputSchema is also valid under the old one. Adding an optional input property, or relaxing an input constraint, keeps input compatibility. Adding a required input property, narrowing an enum, or tightening a bound breaks it. Adding a required output property keeps output compatibility for consumers that allow extra properties."
+    provenance: "DERIVED"
+    domain: "tool_registry"
+    concepts: ["schema_evolution", "output_schema"]
+    confidence: "high"
+    currentness_status: "REFERENCE / BASELINE"
+    assumptions: ["Callers produce arguments that were valid under the old schema; consumers validate results against the schema they were built for.", "additionalProperties behavior is stated explicitly in each schema."]
+    derivation: "A caller built for the old schema emits instances in L(old_in); the new server accepts L(new_in); safe iff L(old_in) is a subset of L(new_in). A consumer built for the old output schema accepts L(old_out); the new server emits L(new_out); safe iff L(new_out) is a subset of L(old_out). Classify each change by whether it widens or narrows the accepted set."
+    limitations: ["Language inclusion for full JSON Schema is not decidable by simple rules in general; use rule-based classification plus fixture tests.", "Semantic changes with identical schemas are not caught."]
+    applicability: "Lesson 38.4 schema evolution; LAB B."
+    related_claims: ["CLM-010"]
+    curriculum_usage: { lessons: ["38.4"], labs: ["LAB-B"], assessments: ["Mastery-38"] }

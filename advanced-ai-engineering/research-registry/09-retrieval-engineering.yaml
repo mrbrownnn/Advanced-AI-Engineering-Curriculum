@@ -1,9 +1,9 @@
 module: "09-retrieval-engineering"
-registry_version: "1.1.0"
-previous_version: "1.0.0"
-research_cutoff: "2026-09-26"
-change_reason: "WP-D1 (AUD-09-01, AUD-G04, AUD-G05): add solved fixtures for BM25 with a stated IDF convention, RRF, an HNSW layer-search trace, MaxSim, and MRR/nDCG with zero-IDCG, unjudged, and tie rules; record Lucene implementation specifics re-read at the pinned commit on 2026-09-30; replace the generic 2025-2026 frontier line with sources opened on 2026-09-30 plus an explicit TODO_VERIFY. Unchanged claims keep their 2026-09-26 cutoff and were not re-verified in this revision."
-changed_claims: ["CLM-005", "CLM-007", "CLM-009", "CLM-011", "CLM-013", "CLM-014", "CLM-015", "CLM-016", "CLM-017", "CLM-018", "CLM-019", "CLM-020"]
+registry_version: "1.2.0"
+previous_version: "1.1.0"
+research_cutoff: "2026-11-10"
+change_reason: "Scoped dossier-backed lesson extension, sources inspected 2026-11-10. Unchanged claims retain original evidence/verification dates and were not re-verified. New arithmetic checked in Python; no parsed-table values or unverified dossier items imported."
+changed_claims: ["CLM-021", "CLM-022", "CLM-023", "CLM-024", "CLM-025", "CLM-026", "CLM-027", "CLM-028", "CLM-029", "CLM-030", "CLM-031", "CLM-032", "CLM-033"]
 claims:
   - id: CLM-001
     claim: "BM25 combines inverse document frequency, saturating term frequency, and document-length normalization; tokenization, field statistics, k1, b, corpus, and query terms are part of its behavior, so it is not a parameter-free lexical baseline."
@@ -273,3 +273,414 @@ claims:
     limitations: ["Placeholder for a primary-source survey; must not support any required outcome."]
     applicability: "Research backlog for the frontier source map."
     curriculum_usage: { lessons: ["9.5"], labs: [], assessments: [] }
+
+  - id: CLM-021
+    claim: DPR trains a positive passage against competing passages with negative log likelihood of its dot-product
+      softmax probability; other positives in a batch supply in-batch negatives. DPR Eq. 2 contains no temperature.
+    provenance: VERIFIED_FACT
+    domain: retrieval_adaptation
+    concepts:
+    - contrastive_loss
+    - in_batch_negatives
+    confidence: high
+    limitations:
+    - Scope limited to inspected sources; not independently reproduced.
+    curriculum_usage:
+      lessons:
+      - '9.7'
+      labs:
+      - LAB-E
+      assessments:
+      - Mastery-09
+    evidence:
+    - source_type: paper
+      tier: 1
+      title: Dense Passage Retrieval for Open-Domain Question Answering
+      url: https://arxiv.org/abs/2004.04906v3
+      section: 3.1-3.2; Eq. 2
+      version: v3, 2020-09-30
+      accessed_at: '2026-11-10'
+      authors: Karpukhin et al.
+      year: '2020'
+  - id: CLM-022
+    claim: E5 uses cosine similarity divided by temperature, with temperature 0.01 in its reported recipe; this is
+      not a universal retrieval temperature.
+    provenance: VERIFIED_FACT
+    domain: retrieval_adaptation
+    concepts:
+    - temperature
+    - contrastive_loss
+    confidence: high
+    limitations:
+    - Scope limited to inspected sources; not independently reproduced.
+    curriculum_usage:
+      lessons:
+      - '9.7'
+      labs:
+      - LAB-E
+      assessments:
+      - Mastery-09
+    evidence:
+    - source_type: paper
+      tier: 1
+      title: Text Embeddings by Weakly-Supervised Contrastive Pre-training
+      url: https://arxiv.org/abs/2212.03533v2
+      section: 3-4; 5.3
+      version: v2, 2024-02-22
+      accessed_at: '2026-11-10'
+      authors: Wang et al.
+      year: '2024'
+  - id: CLM-023
+    claim: ANCE runs an inferencer that re-encodes the corpus and refreshes an ANN index asynchronously alongside
+      training; corpus re-encoding and checkpoint staleness are part of this negative-mining mechanism.
+    provenance: VERIFIED_FACT
+    domain: retrieval_adaptation
+    concepts:
+    - hard_negative_mining
+    - index_refresh
+    confidence: high
+    limitations:
+    - Scope limited to inspected sources; not independently reproduced.
+    curriculum_usage:
+      lessons:
+      - '9.7'
+      labs:
+      - LAB-E
+      assessments:
+      - Mastery-09
+    evidence:
+    - source_type: paper
+      tier: 1
+      title: Approximate Nearest Neighbor Negative Contrastive Learning for Dense Text Retrieval
+      url: https://arxiv.org/abs/2007.00808v2
+      section: 3-6; Appendix A.3
+      version: v2, 2020-10-20
+      accessed_at: '2026-11-10'
+      authors: Xiong et al.
+      year: '2020'
+  - id: CLM-024
+    claim: RocketQA reports that undenoised mined hard negatives hurt its MSMARCO retrieval setup and uses a cross-encoder
+      to denoise retrieved negatives; unlabeled high-scoring passages cannot be assumed irrelevant.
+    provenance: VERIFIED_FACT
+    domain: retrieval_adaptation
+    concepts:
+    - false_negatives
+    - negative_denoising
+    confidence: high
+    limitations:
+    - Author-reported MSMARCO/open-domain QA recipe; PaddlePaddle, up to 8 V100; not a transferable false-negative
+      rate or reproduced result. No table numbers retained.
+    curriculum_usage:
+      lessons:
+      - '9.7'
+      labs:
+      - LAB-E
+      assessments:
+      - Mastery-09
+    evidence:
+    - source_type: paper
+      tier: 1
+      title: 'RocketQA: An Optimized Training Approach to Dense Passage Retrieval for Open-Domain Question Answering'
+      url: https://arxiv.org/abs/2010.08191v2
+      section: 4; 5.3
+      version: v2, 2021-05-12
+      accessed_at: '2026-11-10'
+      authors: Qu et al.
+      year: '2021'
+  - id: CLM-025
+    claim: NV-Retriever defines positive-aware filters; its TopK-PercPos setting retains negative scores below 95%
+      of the teacher positive score.
+    provenance: VERIFIED_FACT
+    domain: retrieval_adaptation
+    concepts:
+    - positive_aware_filter
+    - hard_negative_mining
+    confidence: high
+    limitations:
+    - Teacher/model/score-scale-dependent setting, not an industry default or universal threshold. No benchmark table
+      values imported.
+    curriculum_usage:
+      lessons:
+      - '9.7'
+      labs:
+      - LAB-E
+      assessments:
+      - Mastery-09
+    evidence:
+    - source_type: paper
+      tier: 1
+      title: 'NV-Retriever: Improving text embedding models with effective hard-negative mining'
+      url: https://arxiv.org/abs/2407.15831v2
+      section: 2.2; 3-4; Algorithms 1-3
+      version: v2, 2025-02-07
+      accessed_at: '2026-11-10'
+      authors: Moreira et al.
+      year: '2025'
+  - id: CLM-026
+    claim: monoBERT jointly encodes query/passage pairs and trains binary relevance scores with positive/negative
+      cross entropy.
+    provenance: VERIFIED_FACT
+    domain: retrieval_adaptation
+    concepts:
+    - cross_encoder_training
+    - binary_cross_entropy
+    confidence: high
+    limitations:
+    - Scope limited to inspected sources; not independently reproduced.
+    curriculum_usage:
+      lessons:
+      - '9.7'
+      labs:
+      - LAB-E
+      assessments:
+      - Mastery-09
+    evidence:
+    - source_type: paper
+      tier: 1
+      title: Passage Re-ranking with BERT
+      url: https://arxiv.org/abs/1901.04085v5
+      section: Joint query/passage encoding and training loss
+      version: v5, 2020-04-14
+      accessed_at: '2026-11-10'
+      authors: Nogueira, Cho
+      year: '2020'
+  - id: CLM-027
+    claim: GPL generates target-corpus queries, mines negatives, obtains cross-encoder pseudo-margins and trains with
+      Margin-MSE; Promptagator includes round-trip retrieval filtering of synthetic query/document pairs and reports
+      that filtering can hurt some datasets.
+    provenance: VERIFIED_FACT
+    domain: retrieval_adaptation
+    concepts:
+    - synthetic_query_adaptation
+    - margin_mse
+    - round_trip_filter
+    confidence: high
+    limitations:
+    - Different recipes, not one combined executed pipeline; synthetic labels and teacher errors require independent
+      held-out validation. No performance ratios retained.
+    curriculum_usage:
+      lessons:
+      - '9.7'
+      labs:
+      - LAB-E
+      assessments:
+      - Mastery-09
+    evidence:
+    - &id002
+      source_type: paper
+      tier: 1
+      title: 'GPL: Generative Pseudo Labeling for Unsupervised Domain Adaptation of Dense Retrieval'
+      url: https://arxiv.org/abs/2112.07577v3
+      section: 3-7; Appendix D
+      version: v3, 2022-04-25
+      accessed_at: '2026-11-10'
+      authors: Wang, Thakur, Reimers, Gurevych
+      year: '2022'
+    - &id001
+      source_type: paper
+      tier: 1
+      title: 'Promptagator: Few-shot Dense Retrieval From 8 Examples'
+      url: https://arxiv.org/abs/2209.11755v1
+      section: 3-5; round-trip filter and contamination exclusions
+      version: v1, 2022-09-23
+      accessed_at: '2026-11-10'
+      authors: Dai et al.
+      year: '2022'
+  - id: CLM-028
+    claim: Candidate-softmax gradients, nominal shared-negative counts, independent false-negative probability, and
+      teacher-margin invariances follow from the declared training model; worked-example inputs are synthetic.
+    provenance: DERIVED
+    domain: retrieval_adaptation
+    concepts:
+    - contrastive_loss
+    - temperature
+    - false_negatives
+    - margin_mse
+    confidence: high
+    limitations:
+    - Negative correlations invalidate the independent probability expression; valid distinct negatives can be fewer
+      than nominal columns. Toy arithmetic does not predict quality.
+    curriculum_usage:
+      lessons:
+      - '9.7'
+      labs:
+      - LAB-E
+      assessments:
+      - Mastery-09
+    assumptions:
+    - One positive/query; all WB(1+n) candidates shared without masking for the count; score scale 1/tau.
+    - Independent Bernoulli false-negative probability f only for the toy probability model.
+    - Student and teacher score differences compared on the same query/triple.
+    derivation: For one query dL/dz_c=pi_c-indicator(c=positive), and dL/du adds 1/tau. N_neg=WB(1+n)-1. P(F>=1)=1-(1-f)^n
+      and E[F]=nf. Per-query additive teacher constants cancel but scaling does not. Synthetic scores 0.7/0.5/0.3/0.6
+      at scale20 yield loss0.1432; scale1 gives1.2220; scale50 gives0.0068; removing0.6 at scale20 gives0.0185. W4
+      B32 n3 gives511 negatives,384 explicit. f0.1 n4 gives0.3439. Margins4 versus0.5 give12.25; target0.2 gives0.09.
+      Strict0.95*0.70 threshold0.665 retains0.66/0.60/0.41. All arithmetic recomputed in Python.
+  - id: CLM-029
+    claim: At the sentence-transformers main snapshot, MNRL defaults to cosine times scale20, shares all document
+      columns, and optionally gathers across devices. GradCache separates embedding and encoder gradient stages; ordinary
+      accumulation across separate contrastive microbatch losses does not reproduce the large candidate softmax.
+    provenance: VERIFIED_FACT
+    domain: retrieval_adaptation
+    concepts:
+    - in_batch_negatives
+    - temperature
+    - gradient_cache
+    confidence: high
+    limitations:
+    - Main snapshot, not a release; static inspection only. Gradient equivalence requires matching stochastic computation.
+      No throughput or quality result asserted.
+    curriculum_usage:
+      lessons:
+      - '9.7'
+      labs:
+      - LAB-E
+      assessments:
+      - Mastery-09
+    evidence:
+    - source_type: source_code
+      tier: 1
+      title: huggingface/sentence-transformers main/master snapshot
+      repository: https://github.com/huggingface/sentence-transformers
+      commit: a89a0fb5394edc2e601c7972ca4e3ec7de6390e3
+      file: sentence_transformers/sentence_transformer/losses/multiple_negatives_ranking.py
+      symbol: MultipleNegativesRankingLoss.compute_loss_from_embeddings
+      entry_point: MultipleNegativesRankingLoss
+      execution_path: concatenate document embeddings; optional all-gather; cosine times scale; positive scores and
+        logsumexp; mean NLL
+      verification_date: '2026-11-10'
+      accessed_at: '2026-11-10'
+      url: https://github.com/huggingface/sentence-transformers/blob/a89a0fb5394edc2e601c7972ca4e3ec7de6390e3/sentence_transformers/sentence_transformer/losses/multiple_negatives_ranking.py
+    - source_type: paper
+      tier: 1
+      title: Scaling Deep Contrastive Learning Batch Size under Memory Limited Setup
+      url: https://arxiv.org/abs/2101.06983v2
+      section: 3.2-3.3
+      version: v2, 2021-06-14
+      accessed_at: '2026-11-10'
+      authors: Gao, Zhang, Han, Callan
+      year: '2021'
+  - id: CLM-030
+    claim: Margin-MSE trains student positive-minus-negative score differences against teacher differences. The pinned
+      sentence-transformers implementation defaults to pairwise dot scores and detaches target margins.
+    provenance: VERIFIED_FACT
+    domain: retrieval_adaptation
+    concepts:
+    - margin_mse
+    - distillation
+    confidence: high
+    limitations:
+    - Main snapshot implementation, static only; transfer remains teacher/task dependent; raw scale mismatch is not
+      removed by subtracting offsets.
+    curriculum_usage:
+      lessons:
+      - '9.7'
+      labs:
+      - LAB-E
+      assessments:
+      - Mastery-09
+    evidence:
+    - source_type: paper
+      tier: 1
+      title: Improving Efficient Neural Ranking Models with Cross-Architecture Knowledge Distillation
+      url: https://arxiv.org/abs/2010.02666v2
+      section: 3, Margin-MSE
+      version: v2, 2021-01-22
+      accessed_at: '2026-11-10'
+      authors: Hofstätter et al.
+      year: '2021'
+    - source_type: source_code
+      tier: 1
+      title: huggingface/sentence-transformers main/master snapshot
+      repository: https://github.com/huggingface/sentence-transformers
+      commit: a89a0fb5394edc2e601c7972ca4e3ec7de6390e3
+      file: sentence_transformers/sentence_transformer/losses/margin_mse.py
+      symbol: MarginMSELoss
+      entry_point: MarginMSELoss
+      execution_path: pairwise dot-score differences; detached label margins; MSE
+      verification_date: '2026-11-10'
+      accessed_at: '2026-11-10'
+      url: https://github.com/huggingface/sentence-transformers/blob/a89a0fb5394edc2e601c7972ca4e3ec7de6390e3/sentence_transformers/sentence_transformer/losses/margin_mse.py
+  - id: CLM-031
+    claim: Promptagator excludes evaluation datasets with known generator-training overlap; GPL Appendix D records
+      an evaluation correction removing identical query/document IDs.
+    provenance: VERIFIED_FACT
+    domain: retrieval_adaptation
+    concepts:
+    - evaluation_leakage
+    - synthetic_query_adaptation
+    confidence: high
+    limitations:
+    - Scope limited to inspected sources; not independently reproduced.
+    curriculum_usage:
+      lessons:
+      - '9.7'
+      labs:
+      - LAB-E
+      assessments:
+      - Mastery-09
+    evidence:
+    - *id001
+    - *id002
+  - id: CLM-032
+    claim: BEIR discusses incomplete judgment pools and reports additional annotation that changes measured quality
+      of non-lexical systems; unjudged retrieved items must not be equated with known irrelevant documents.
+    provenance: VERIFIED_FACT
+    domain: retrieval_adaptation
+    concepts:
+    - unjudged_hits
+    - evaluation_leakage
+    confidence: high
+    limitations:
+    - Scope limited to inspected sources; not independently reproduced.
+    curriculum_usage:
+      lessons:
+      - '9.7'
+      labs:
+      - LAB-E
+      assessments:
+      - Mastery-09
+    evidence:
+    - source_type: paper
+      tier: 1
+      title: 'BEIR: A Heterogenous Benchmark for Zero-shot Evaluation of Information Retrieval Models'
+      url: https://arxiv.org/abs/2104.08663v4
+      section: 5-6, incomplete judgments and additional annotation; no parsed numeric columns used
+      version: v4, 2021-10-21
+      accessed_at: '2026-11-10'
+      authors: Thakur et al.
+      year: '2021'
+  - id: CLM-033
+    claim: At the pinned sentence-transformers main snapshot, mine_hard_negatives includes positives in the deduplicated
+      corpus, masks known positives, optionally rescores with a cross-encoder and applies margins, then selects candidates;
+      margin filtering is not enabled by default and relative_margin uses absolute positive-score magnitude.
+    provenance: VERIFIED_FACT
+    domain: retrieval_adaptation
+    concepts:
+    - hard_negative_mining
+    - positive_aware_filter
+    confidence: high
+    limitations:
+    - Main snapshot, not a release; static only. Relative-margin equality with 95% multiplication only holds for positive
+      reference scores. No example-log statistics reproduced.
+    curriculum_usage:
+      lessons:
+      - '9.7'
+      labs:
+      - LAB-E
+      assessments:
+      - Mastery-09
+    evidence:
+    - source_type: source_code
+      tier: 1
+      title: huggingface/sentence-transformers main/master snapshot
+      repository: https://github.com/huggingface/sentence-transformers
+      commit: a89a0fb5394edc2e601c7972ca4e3ec7de6390e3
+      file: sentence_transformers/util/hard_negatives.py
+      symbol: mine_hard_negatives
+      entry_point: sentence_transformers.util.mine_hard_negatives
+      execution_path: corpus union positives; deduplicate; mask known positives; optional cross-encoder rescoring;
+        score filters; rank/select
+      verification_date: '2026-11-10'
+      accessed_at: '2026-11-10'
+      url: https://github.com/huggingface/sentence-transformers/blob/a89a0fb5394edc2e601c7972ca4e3ec7de6390e3/sentence_transformers/util/hard_negatives.py
