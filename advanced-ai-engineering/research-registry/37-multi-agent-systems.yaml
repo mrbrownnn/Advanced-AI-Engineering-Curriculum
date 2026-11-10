@@ -1,0 +1,615 @@
+module: "37-multi-agent-systems"
+registry_version: "1.0.0"
+research_cutoff: "2026-11-10"
+change_reason: "Initial registry for Module 37. Every VERIFIED_FACT comes from a source opened on 2026-11-09/10 and recorded in the module research dossier; abstract-only sources are marked and supply no figures beyond their abstracts. Pinned code was read statically, not executed. Worked-example arithmetic was recomputed in Python on 2026-11-10."
+
+out_of_scope_candidates:
+  - "Single-agent controller, tool contracts, budgets, and stops (Module 12)"
+  - "Durable orchestration, replay, idempotent effects, fan-out/join persistence (Module 14)"
+  - "Evaluation statistics, paired comparisons, grader validation, release gates (Module 15)"
+  - "Inter-agent prompt injection, confused deputies, and authority boundaries (Module 18)"
+  - "Multi-agent reinforcement learning and agent-population training (not covered)"
+
+claims:
+  - id: CLM-001
+    claim: "Anthropic describes its research system as orchestrator-worker: a lead agent coordinates the process while delegating to specialized subagents that operate in parallel. It reports that a system with Claude Opus 4 as lead and Claude Sonnet 4 subagents outperformed single-agent Claude Opus 4 by 90.2% on its internal research eval. The eval is unreleased, the queries favour breadth-first research, and the single-agent baseline is not token-matched."
+    provenance: VERIFIED_FACT
+    domain: multi_agent_architecture
+    concepts: [orchestrator_worker, multi_agent_benefit, equal_budget_baseline]
+    confidence: high
+    currentness_status: "CURRENT DEFAULT (one vendor's research agent) / WORKLOAD-DEPENDENT"
+    evidence:
+      - { source_type: official_blog, tier: 2, title: "How we built our multi-agent research system", authors: "Anthropic", year: "2025", url: "https://www.anthropic.com/engineering/multi-agent-research-system", section: "Full text read; published Jun 13, 2025 (a second date on the page, Nov 4, 2025, is unexplained and not used)", accessed_at: "2026-11-10" }
+    limitations: ["Vendor self-report on an internal, unreleased eval.", "No equal-budget single-agent baseline; the multi-agent system spends more tokens."]
+    applicability: "Breadth-first research queries in one vendor's product."
+    related_claims: ["CLM-002", "CLM-003", "CLM-036"]
+    curriculum_usage: { lessons: ["37.1", "37.2"], labs: ["LAB-A"], assessments: ["Mastery-37"] }
+
+  - id: CLM-002
+    claim: "Anthropic reports that on BrowseComp three factors explained 95% of performance variance, with token usage alone explaining 80% and the number of tool calls and model choice the rest, and states that multi-agent systems work mainly because they help spend enough tokens."
+    provenance: VERIFIED_FACT
+    domain: multi_agent_benefit
+    concepts: [token_spend_confound, equal_budget_baseline]
+    confidence: high
+    currentness_status: "WORKLOAD-DEPENDENT"
+    evidence:
+      - { source_type: official_blog, tier: 2, title: "How we built our multi-agent research system", authors: "Anthropic", year: "2025", url: "https://www.anthropic.com/engineering/multi-agent-research-system", section: "Full text read (BrowseComp variance paragraph)", accessed_at: "2026-11-10" }
+    limitations: ["Variance decomposition method and data are not published.", "One benchmark."]
+    applicability: "Argument that un-normalized multi-agent comparisons are confounded by spend."
+    related_claims: ["CLM-001", "CLM-036"]
+    curriculum_usage: { lessons: ["37.1", "37.5"], labs: ["LAB-A"], assessments: ["Mastery-37"] }
+
+  - id: CLM-003
+    claim: "Anthropic states that agents typically use about 4x more tokens than chat interactions and multi-agent systems about 15x more tokens than chats, that domains requiring all agents to share the same context or involving many dependencies between agents are a poor fit, and that most coding tasks involve fewer truly parallelizable tasks than research."
+    provenance: VERIFIED_FACT
+    domain: multi_agent_cost
+    concepts: [token_multiplier, decomposability]
+    confidence: high
+    currentness_status: "WORKLOAD-DEPENDENT"
+    evidence:
+      - { source_type: official_blog, tier: 2, title: "How we built our multi-agent research system", authors: "Anthropic", year: "2025", url: "https://www.anthropic.com/engineering/multi-agent-research-system", section: "Full text read (cost and fit paragraphs)", accessed_at: "2026-11-10" }
+    limitations: ["'Typically' figures with no stated workload mix or distribution."]
+    applicability: "Order-of-magnitude cost screening; not a pricing input."
+    related_claims: ["CLM-005"]
+    curriculum_usage: { lessons: ["37.1", "37.5"], assessments: ["Mastery-37"] }
+
+  - id: CLM-004
+    claim: "Anthropic reports operational lessons from its research system: early versions spawned 50 subagents for simple queries; effort-scaling rules were written into prompts (1 agent with 3-10 tool calls for simple fact-finding, 2-4 subagents with 10-15 calls each for comparisons, more than 10 subagents for complex research); parallel subagents (3-5) and parallel tool calls cut research time by up to 90%; subagents run synchronously, so the lead cannot steer them and they cannot coordinate; subagents write outputs to a filesystem to avoid a game of telephone; evaluation started with about 20 queries and a single LLM-judge call scoring a rubric (factual accuracy, citation accuracy, completeness, source quality, tool efficiency) 0.0-1.0 plus pass/fail; for agents that mutate state, end-state evaluation is preferred to turn-by-turn analysis."
+    provenance: VERIFIED_FACT
+    domain: multi_agent_operations
+    concepts: [effort_scaling, synchronous_fan_out, artifact_passing, end_state_evaluation]
+    confidence: high
+    currentness_status: "CURRENT DEFAULT (one vendor) / WORKLOAD-DEPENDENT"
+    evidence:
+      - { source_type: official_blog, tier: 2, title: "How we built our multi-agent research system", authors: "Anthropic", year: "2025", url: "https://www.anthropic.com/engineering/multi-agent-research-system", section: "Full text read (prompting, evaluation, and production-reliability sections)", accessed_at: "2026-11-10" }
+    limitations: ["Practices of one system; the 90% time reduction has no stated baseline distribution."]
+    applicability: "Design heuristics to test, not defaults to copy."
+    related_claims: ["CLM-001", "CLM-034"]
+    curriculum_usage: { lessons: ["37.2", "37.3", "37.6"], labs: ["LAB-B", "LAB-D"], assessments: ["Incident-37.1"] }
+
+  - id: CLM-005
+    claim: "If the 4x (agent) and 15x (multi-agent) chat multiples share the same chat baseline and workload mix, a multi-agent run costs about 15/4 = 3.75x the tokens of a single-agent run; Anthropic does not state this ratio."
+    provenance: DERIVED
+    domain: multi_agent_cost
+    concepts: [token_multiplier]
+    confidence: medium
+    currentness_status: "REFERENCE / BASELINE"
+    assumptions: ["Both 'typically' multiples are measured against the same chat baseline on comparable workloads."]
+    derivation: "(15 x chat) / (4 x chat) = 3.75. Recomputed 2026-11-10."
+    limitations: ["If the multiples come from different workloads the ratio is meaningless; measure tokens per task directly."]
+    applicability: "First-pass budget screening in Lesson 37.5."
+    related_claims: ["CLM-003"]
+    curriculum_usage: { lessons: ["37.5"], assessments: ["Mastery-37"] }
+
+  - id: CLM-006
+    claim: "Kim et al. evaluate 260 configurations over 6 benchmarks (BrowseComp-Plus, Finance-Agent, PlanCraft, Workbench, SWE-bench Verified, Terminal-Bench), 5 architectures (single-agent; multi-agent Independent, Centralized, Decentralized, Hybrid), and 3 LLM families, matching total reasoning-token budget (mean 4,800 tokens per trial), tool-call access, and maximum total iterations between multi- and single-agent systems. Relative multi-agent effects range from +80.8% on decomposable financial reasoning to -70.0% on sequential planning; every multi-agent variant loses on PlanCraft (-39% to -70%), Workbench changes -11% to -2%, and Decentralized gains +9.2% on BrowseComp-Plus."
+    provenance: VERIFIED_FACT
+    domain: multi_agent_benefit
+    concepts: [equal_budget_baseline, decomposability, topology]
+    confidence: high
+    currentness_status: "FRONTIER"
+    evidence:
+      - { source_type: paper, tier: 1, title: "Towards a Science of Scaling Agent Systems", authors: "Yubin Kim, Ken Gu, Chanwoo Park, et al.", year: "2025", url: "https://arxiv.org/abs/2512.08296", version: "v3 (2026-04-08)", section: "Abstract, Sections 1, 3, 4.1, 4.4", accessed_at: "2026-11-10" }
+    limitations: ["One research group, fixed prompts and tools.", "Architecture-level constants applied uniformly across benchmarks; one model was deprecated mid-study."]
+    applicability: "Best available equal-budget cross-benchmark evidence on when topology helps."
+    related_claims: ["CLM-007", "CLM-008", "CLM-009"]
+    curriculum_usage: { lessons: ["37.1", "37.2"], labs: ["LAB-A"], assessments: ["Mastery-37"] }
+
+  - id: CLM-007
+    claim: "Kim et al. report a capability-ceiling effect (beta = -0.236, p = 0.004): tasks where single-agent accuracy already exceeds about 45% see negative returns from adding agents; they also report a tool-coordination trade-off (beta = -0.096, p = 0.002). Their regression's cross-validated R^2 is 0.373 (0.413 with task-grounded capability)."
+    provenance: VERIFIED_FACT
+    domain: multi_agent_benefit
+    concepts: [capability_ceiling, decomposability]
+    confidence: high
+    currentness_status: "FRONTIER"
+    evidence:
+      - { source_type: paper, tier: 1, title: "Towards a Science of Scaling Agent Systems", authors: "Yubin Kim, Ken Gu, Chanwoo Park, et al.", year: "2025", url: "https://arxiv.org/abs/2512.08296", version: "v3 (2026-04-08)", section: "Abstract; Section 4.4", accessed_at: "2026-11-10" }
+    limitations: ["Descriptive regression on six benchmarks; cross-validated R^2 is low, so the 45% figure is a screening heuristic, not a law."]
+    applicability: "Decision heuristic for whether to try a multi-agent design at all."
+    related_claims: ["CLM-006"]
+    curriculum_usage: { lessons: ["37.1"], labs: ["LAB-A"], assessments: ["Mastery-37"] }
+
+  - id: CLM-008
+    claim: "Kim et al. Table 5 (architecture-level means over 260 configurations) reports success single-agent 0.466 / Independent 0.370 / Decentralized 0.477 / Centralized 0.463 / Hybrid 0.452; turns 7.2 / 11.4 / 26.1 / 27.7 / 44.3; overhead 0 / 58 / 263 / 285 / 515 %; trace-level error amplification A_e 1.0 / 17.2 / 7.8 / 4.4 / 5.1; and success per 1K tokens 67.7 / 42.4 / 23.9 / 21.5 / 13.6. After controlling for other metrics, the error-amplification main effect is not significant (beta = 0.014, p = 0.658)."
+    provenance: VERIFIED_FACT
+    domain: multi_agent_cost
+    concepts: [coordination_overhead, error_amplification, token_efficiency]
+    confidence: high
+    currentness_status: "FRONTIER"
+    evidence:
+      - { source_type: paper, tier: 1, title: "Towards a Science of Scaling Agent Systems", authors: "Yubin Kim, Ken Gu, Chanwoo Park, et al.", year: "2025", url: "https://arxiv.org/abs/2512.08296", version: "v3 (2026-04-08)", table: "Table 5", section: "Section 4.4", accessed_at: "2026-11-10" }
+    limitations: ["Means pooled across benchmarks and models; within-architecture variance is large.", "The task-level amplification range quoted in Section 3 was truncated in text extraction and is not used."]
+    applicability: "Lessons 37.4-37.5 overhead and amplification arithmetic."
+    related_claims: ["CLM-011", "CLM-010"]
+    curriculum_usage: { lessons: ["37.4", "37.5"], labs: ["LAB-C"], assessments: ["Mastery-37"] }
+
+  - id: CLM-009
+    claim: "Kim et al. fit turns versus agent count as T = 2.72*(n+0.5)^1.724 (R^2 = 0.974, fit on architecture-aggregated means), state that per-agent reasoning capacity becomes prohibitively thin beyond 3-4 agents, and report success versus message density S = 0.73 + 0.28 ln(c) (R^2 = 0.68) as a descriptive trend rather than a universal functional form."
+    provenance: VERIFIED_FACT
+    domain: multi_agent_cost
+    concepts: [coordination_overhead, agent_count_scaling]
+    confidence: high
+    currentness_status: "FRONTIER"
+    evidence:
+      - { source_type: paper, tier: 1, title: "Towards a Science of Scaling Agent Systems", authors: "Yubin Kim, Ken Gu, Chanwoo Park, et al.", year: "2025", url: "https://arxiv.org/abs/2512.08296", version: "v3 (2026-04-08)", section: "Section 4.4", accessed_at: "2026-11-10" }
+    limitations: ["Fit on aggregated means; not a per-task predictor."]
+    applicability: "Lesson 37.5 budget-thinning derivation."
+    related_claims: ["CLM-010"]
+    curriculum_usage: { lessons: ["37.5"], labs: ["LAB-A"] }
+
+  - id: CLM-010
+    claim: "Under Kim et al.'s fitted power law and a fixed 4,800-token budget, turns are about 5.5 (n=1), 23.6 (n=3), and 51.4 (n=5), so the budget per turn is about 877, 204, and 93 tokens: per-turn reasoning shrinks super-linearly as agents are added."
+    provenance: DERIVED
+    domain: multi_agent_cost
+    concepts: [agent_count_scaling, coordination_overhead]
+    confidence: medium
+    currentness_status: "REFERENCE / BASELINE"
+    assumptions: ["The aggregated fit applies to the configuration being sized.", "The budget is split evenly over turns."]
+    derivation: "T(n) = 2.72*(n+0.5)^1.724: n=1 -> 2.72*1.5^1.724 = 5.47; n=3 -> 2.72*3.5^1.724 = 23.58; n=5 -> 2.72*5.5^1.724 = 51.40. 4800/T = 877.2, 203.6, 93.4. Recomputed in Python 2026-11-10."
+    limitations: ["Illustrates the mechanism; real budgets are spent unevenly across agents and turns."]
+    applicability: "Lesson 37.5 Quantitative Model."
+    related_claims: ["CLM-009"]
+    curriculum_usage: { lessons: ["37.5"], labs: ["LAB-A"], assessments: ["Mastery-37"] }
+
+  - id: CLM-011
+    claim: "Converting Kim et al. Table 5 success means into a task-level amplification A_task = (1 - S_MAS)/(1 - S_SAS) gives Independent 1.18, Decentralized 0.98, Centralized 1.01, Hybrid 1.03, while the paper's trace-level A_e for the same architectures is 17.2, 7.8, 4.4, and 5.1: the chosen error metric changes the conclusion."
+    provenance: DERIVED
+    domain: error_propagation
+    concepts: [error_amplification, metric_definition]
+    confidence: high
+    currentness_status: "REFERENCE / BASELINE"
+    assumptions: ["Task failure rate = 1 - mean success from Table 5; S_SAS = 0.466."]
+    derivation: "E_SAS = 0.534. Independent 0.630/0.534 = 1.180; Decentralized 0.523/0.534 = 0.979; Centralized 0.537/0.534 = 1.006; Hybrid 0.548/0.534 = 1.026. Recomputed 2026-11-10."
+    limitations: ["Pooled means; per-benchmark ratios differ."]
+    applicability: "Lesson 37.4 metric discrimination."
+    related_claims: ["CLM-008"]
+    curriculum_usage: { lessons: ["37.4"], labs: ["LAB-C"], assessments: ["Mastery-37"] }
+
+  - id: CLM-012
+    claim: "Tran and Kiela argue from the data-processing inequality that for a Markov chain Y -> C -> M with inter-agent messages M = g(C), I(Y;C) >= I(Y;M) and Pe(C) <= Pe(M) under perfect context utilization. On FRAMES and 4-hop MuSiQue with Qwen3-30B-A3B, DeepSeek-R1-Distill-Llama-70B, and Gemini 2.5 Flash/Pro, splitting the same global thinking-token budget across Sequential, Subtask-parallel, Parallel-roles, Debate, and Ensemble systems, the single agent is best or statistically indistinguishable from the best at every budget except the lowest (100 tokens); for example at 1k on MuSiQue with DeepSeek-R1-70B, single 0.407 vs Sequential 0.320 and Debate 0.315."
+    provenance: VERIFIED_FACT
+    domain: multi_agent_benefit
+    concepts: [information_loss, equal_budget_baseline]
+    confidence: high
+    currentness_status: "FRONTIER"
+    evidence:
+      - { source_type: paper, tier: 1, title: "Single-Agent LLMs Outperform Multi-Agent Systems on Multi-Hop Reasoning Under Equal Thinking Token Budgets", authors: "Dat Tran, Douwe Kiela", year: "2026", url: "https://arxiv.org/abs/2604.02460", version: "v2 (preprint, under review)", table: "Table 1", section: "Sections 3-5", accessed_at: "2026-11-10" }
+    limitations: ["Multi-hop QA only; LLM-judge accuracy; preprint."]
+    applicability: "Information-loss argument and the strongest equal-budget negative result for reasoning-only multi-agent systems."
+    related_claims: ["CLM-013", "CLM-036"]
+    curriculum_usage: { lessons: ["37.1", "37.3"], labs: ["LAB-A", "LAB-B"], assessments: ["Mastery-37"] }
+
+  - id: CLM-013
+    claim: "Tran and Kiela report a crossover: under heavy masking or substitution noise (degradation 0.7) the Sequential system beats the single agent (Qwen3-30B, MuSiQue, 1k budget), while with distractor sentences the single agent stays ahead. They also report budget-control artifacts in API models, particularly Gemini 2.5: at a 10k requested budget the single agent's visible thinking plateaus near 1,462 tokens while Subtask-parallel spends about 5,785 through multiple calls."
+    provenance: VERIFIED_FACT
+    domain: multi_agent_benefit
+    concepts: [information_loss, budget_accounting]
+    confidence: high
+    currentness_status: "FRONTIER"
+    evidence:
+      - { source_type: paper, tier: 1, title: "Single-Agent LLMs Outperform Multi-Agent Systems on Multi-Hop Reasoning Under Equal Thinking Token Budgets", authors: "Dat Tran, Douwe Kiela", year: "2026", url: "https://arxiv.org/abs/2604.02460", version: "v2 (preprint, under review)", table: "Table 4", section: "Section 5", accessed_at: "2026-11-10" }
+    limitations: ["Single configuration for the crossover; preprint."]
+    applicability: "Why requested budgets must be checked against measured spend; when decomposition can recover from degraded context."
+    related_claims: ["CLM-012"]
+    curriculum_usage: { lessons: ["37.1", "37.5"], labs: ["LAB-A"], assessments: ["Mastery-37"] }
+
+  - id: CLM-014
+    claim: "(Abstract only) Xu et al. report over 7 benchmarks that a single agent can reach the performance of homogeneous multi-agent workflows with an efficiency advantage from KV-cache reuse, and that single-LLM methods cannot capture heterogeneous workflows because KV caches are not shared across different LLMs."
+    provenance: VERIFIED_FACT
+    domain: multi_agent_benefit
+    concepts: [single_agent_baseline, kv_cache_reuse]
+    confidence: medium
+    currentness_status: "FRONTIER"
+    evidence:
+      - { source_type: paper, tier: 1, title: "Rethinking the Value of Multi-Agent Workflow: A Strong Single Agent Baseline", authors: "Jiawei Xu, Arief Koesdwiady, Sisong Bei, Yan Han, et al.", year: "2026", url: "https://arxiv.org/abs/2601.12307", version: "v1", section: "Abstract only", accessed_at: "2026-11-10" }
+    limitations: ["Abstract-level inspection; no figures quoted."]
+    applicability: "Single-agent simulation of homogeneous workflows as a baseline."
+    curriculum_usage: { lessons: ["37.1"], labs: ["LAB-A"] }
+
+  - id: CLM-015
+    claim: "(Abstract only) Dylan, Brennan et al. fix total LLM calls with a frozen 7B backbone and a Planner-Executor-Critic team: on ALFWorld the team scores 0.769 vs the single agent 0.754 (p = 0.80) despite using 1.8 times more evaluation calls; planner and critic prompts evolve to empty or low-impact, and WebShop results are null or worse."
+    provenance: VERIFIED_FACT
+    domain: multi_agent_benefit
+    concepts: [equal_budget_baseline, role_collapse]
+    confidence: medium
+    currentness_status: "FRONTIER"
+    evidence:
+      - { source_type: paper, tier: 1, title: "At Equal Inference Cost, Multi-Agent Structure Does Not Beat a Single Frozen Agent", authors: "David Dylan, Aoife Brennan, Cian Murphy, Niamh O'Sullivan, et al.", year: "2026", url: "https://arxiv.org/abs/2609.04217", version: "v1", section: "Abstract only", accessed_at: "2026-11-10" }
+    limitations: ["Abstract-level; small-model scope."]
+    applicability: "Equal-call negative result."
+    curriculum_usage: { lessons: ["37.1"], labs: ["LAB-A"] }
+
+  - id: CLM-016
+    claim: "(Abstract only) Wunderlich et al. report on MMLU-Pro and BBH over 34 configurations that, with an equal computing budget, debate and mixture-of-agents outperform self-consistency by 1.3 and 2.7 percentage points, that self-consistency saturates earlier, and gains of up to 7.1 points over chain-of-thought at 20x chain-of-thought compute."
+    provenance: VERIFIED_FACT
+    domain: multi_agent_benefit
+    concepts: [equal_budget_baseline, debate, self_consistency]
+    confidence: medium
+    currentness_status: "FRONTIER"
+    evidence:
+      - { source_type: paper, tier: 1, title: "Multi-Agent Reasoning Improves Compute Efficiency: Pareto-Optimal Test-Time Scaling", authors: "Florian Valentin Wunderlich, Lars Benedikt Kaesberg, Jan Philip Wahle, Terry Ruas, et al.", year: "2026", url: "https://arxiv.org/abs/2605.01566", version: "v1", section: "Abstract only", accessed_at: "2026-11-10" }
+    limitations: ["Abstract-level; small margins; no variance reported in the abstract."]
+    applicability: "Positive equal-budget counterweight to CLM-012 and CLM-015."
+    curriculum_usage: { lessons: ["37.1", "37.5"], labs: ["LAB-A"] }
+
+  - id: CLM-017
+    claim: "(Abstract only) Anchan and Sen propose a stylised model with two crossovers: decomposition wins once the attention cost avoided by resetting context exceeds the handoff cost, and parallel sampling wins when its shared-failure floor lies below the error floor of one agent thinking longer; on a ledger task the predicted crossover is at depth 10 and decomposition wins at depths 20/50/100, within 9 percentage points of prediction."
+    provenance: VERIFIED_FACT
+    domain: multi_agent_benefit
+    concepts: [handoff_cost, shared_failure_floor, decomposability]
+    confidence: low
+    currentness_status: "FRONTIER"
+    evidence:
+      - { source_type: paper, tier: 1, title: "Attention Tax, Handoff Tax: A Stylised Model of When Multi-Agent LLM Systems Help", authors: "Akshit Anchan, Nayonika Sen", year: "2026", url: "https://arxiv.org/abs/2610.06069", version: "v1", section: "Abstract only", accessed_at: "2026-11-10" }
+    limitations: ["Very recent, unreplicated, abstract-level."]
+    applicability: "Model scaffold for Lesson 37.1 and the correlation argument in Lesson 37.4."
+    curriculum_usage: { lessons: ["37.1", "37.4"], labs: ["LAB-C"] }
+
+  - id: CLM-018
+    claim: "(Abstract only) Li reports that a multi-agent system can be compiled into an equivalent single agent that trades inter-agent communication for skill selection, reducing tokens and latency at competitive accuracy (preliminary), and that skill-selection accuracy is stable and then drops sharply past a critical library size, driven by skill confusability."
+    provenance: VERIFIED_FACT
+    domain: multi_agent_topology
+    concepts: [agent_as_tool, skill_selection]
+    confidence: low
+    currentness_status: "FRONTIER"
+    evidence:
+      - { source_type: paper, tier: 1, title: "When Single-Agent with Skills Replace Multi-Agent Systems and When They Fail", authors: "Xiaoxiao Li", year: "2026", url: "https://arxiv.org/abs/2601.04748", version: "v2", section: "Abstract only", accessed_at: "2026-11-10" }
+    limitations: ["Abstract-level; preliminary."]
+    applicability: "Alternative to agent-as-tool topologies."
+    curriculum_usage: { lessons: ["37.2"] }
+
+  - id: CLM-019
+    claim: "Cognition argues two principles: share context, and share full agent traces, not just individual messages; and actions carry implicit decisions, so conflicting decisions carry bad results. Its example: parallel subagents given subtasks produce inconsistent results because they cannot see what each other was doing. It recommends a single-threaded linear agent and, for very long tasks, a model that compresses history into key details, events, and decisions."
+    provenance: VERIFIED_FACT
+    domain: multi_agent_topology
+    concepts: [context_sharing, implicit_decision_conflict]
+    confidence: high
+    currentness_status: "WORKLOAD-DEPENDENT"
+    evidence:
+      - { source_type: official_blog, tier: 2, title: "Don't Build Multi-Agents", authors: "Walden Yan (Cognition)", year: "2025", url: "https://cognition.ai/blog/dont-build-multi-agents", section: "Full text read", accessed_at: "2026-11-10" }
+    limitations: ["Argument by example; no measurements; write-heavy coding focus."]
+    applicability: "The write-coupled pole opposite CLM-001's read-parallel pole."
+    related_claims: ["CLM-037"]
+    curriculum_usage: { lessons: ["37.2", "37.3"], labs: ["LAB-B"], assessments: ["Mastery-37"] }
+
+  - id: CLM-020
+    claim: "Du et al. run multiagent debate with a chatGPT-based model, 3 agents and two rounds, zero-shot, with an identical starting prompt and model across evaluations; Table 1 reports Arithmetic single 67.0 / reflection 72.1 / majority 69.0 / debate 81.8 and GSM8K 77.0 / 75.0 / 81.0 / 85.0. They report further gains with more agents and rounds and replace concatenation with summarization for many agents. The single and majority baselines use fewer model calls than debate."
+    provenance: VERIFIED_FACT
+    domain: debate
+    concepts: [debate, equal_budget_baseline]
+    confidence: high
+    currentness_status: "REFERENCE / BASELINE"
+    evidence:
+      - { source_type: paper, tier: 1, title: "Improving Factuality and Reasoning in Language Models through Multiagent Debate", authors: "Yilun Du, Shuang Li, Antonio Torralba, Joshua B. Tenenbaum, et al.", year: "2023", url: "https://arxiv.org/abs/2305.14325", version: "v1", table: "Table 1", section: "Section 3", accessed_at: "2026-11-10" }
+    limitations: ["Not compute-matched; whether 'two rounds' includes the initial generation is unverified."]
+    applicability: "Origin of the debate pattern."
+    related_claims: ["CLM-024"]
+    curriculum_usage: { lessons: ["37.2", "37.5"], labs: ["LAB-A"] }
+
+  - id: CLM-021
+    claim: "Wang et al. (gpt-35-turbo 0613; 100-instance subsets of ECQA and GSM8K plus FOLIO-wiki) report Table 2 averages single agent 67.41 without and 75.63 with demonstrations, versus Debate(3) 71.67 / 73.88, CMD(6) 70.75 / 74.46, MAD(3) 63.42 / 70.04, and conclude that multi-agent discussion beats a single agent only when the prompt has no demonstration."
+    provenance: VERIFIED_FACT
+    domain: debate
+    concepts: [debate, single_agent_baseline]
+    confidence: high
+    currentness_status: "REFERENCE / BASELINE"
+    evidence:
+      - { source_type: paper, tier: 1, title: "Rethinking the Bounds of LLM Reasoning: Are Multi-Agent Discussions the Key?", authors: "Qineng Wang, Zihao Wang, Ying Su, Hanghang Tong, et al.", year: "2024", url: "https://arxiv.org/abs/2402.18272", version: "v1", table: "Table 2", section: "Section 5", accessed_at: "2026-11-10" }
+    limitations: ["Small subsets, one model generation, no token accounting; venue not verified."]
+    applicability: "A stronger single-agent prompt can erase a discussion gain."
+    curriculum_usage: { lessons: ["37.1", "37.2"], labs: ["LAB-A"] }
+
+  - id: CLM-022
+    claim: "Smit et al. (GPT-3.5-turbo, medical and reasoning QA datasets) report that multi-agent debating systems in their current form do not reliably outperform other prompting strategies such as self-consistency and ensembling, that no protocol dominates on all datasets, and that MAD is more sensitive to hyperparameter settings; Multi-Persona improves when the agreement level is tuned."
+    provenance: VERIFIED_FACT
+    domain: debate
+    concepts: [debate, self_consistency]
+    confidence: high
+    currentness_status: "REFERENCE / BASELINE"
+    evidence:
+      - { source_type: paper, tier: 1, title: "Should we be going MAD? A Look at Multi-Agent Debate Strategies for LLMs", authors: "Andries Smit, Paul Duckworth, Nathan Grinsztajn, Thomas D. Barrett, et al.", year: "2023", url: "https://arxiv.org/abs/2311.17371", version: "v3 (2024-07-18)", section: "Abstract; Sections 3-4 skimmed", accessed_at: "2026-11-10" }
+    limitations: ["Exact numbers not extracted; venue not verified."]
+    applicability: "Debate needs a self-consistency baseline at matched calls."
+    curriculum_usage: { lessons: ["37.2"], labs: ["LAB-A"] }
+
+  - id: CLM-023
+    claim: "Li et al. study sampling-and-voting (Agent Forest) with ensembles up to 40 agents (10 when combined with debate); on GSM8K Llama2-13B at ensemble size 15 roughly matches single Llama2-70B; gains are larger for harder tasks and weaker models, and token usage increases proportionally with ensemble size."
+    provenance: VERIFIED_FACT
+    domain: debate
+    concepts: [self_consistency, majority_vote]
+    confidence: high
+    currentness_status: "REFERENCE / BASELINE"
+    evidence:
+      - { source_type: paper, tier: 1, title: "More Agents Is All You Need", authors: "Junyou Li, Qin Zhang, Yangbin Yu, Qiang Fu, et al.", year: "2024", url: "https://arxiv.org/abs/2402.05120", version: "v2 (TMLR 10/2024)", section: "Sections 1 and 4 skimmed", accessed_at: "2026-11-10" }
+    limitations: ["No communication between agents; this is the equal-compute baseline, not a coordination result."]
+    applicability: "Baseline for any debate or discussion claim."
+    related_claims: ["CLM-025"]
+    curriculum_usage: { lessons: ["37.2", "37.5"], labs: ["LAB-A"] }
+
+  - id: CLM-024
+    claim: "For n debating agents, R rounds after the initial answers, question length q, and answer length a, with each agent reading the question plus all n prior-round answers, debate makes n(R+1) calls and reads about n(R+1)q + n^2 R a input tokens, quadratic in n; with q=300, a=200, R=2 this is 9 calls and 6,300 input tokens at n=3 and 15 calls and 14,500 tokens at n=5, versus 1 call and 300 tokens for a single agent and 3 calls and 900 tokens for majority-of-3."
+    provenance: DERIVED
+    domain: multi_agent_cost
+    concepts: [debate, token_multiplier]
+    confidence: high
+    currentness_status: "REFERENCE / BASELINE"
+    assumptions: ["Full concatenation of prior-round answers (Du et al. switch to summarization at larger n).", "Output tokens and system prompts excluded; q and a are synthetic exercise values."]
+    derivation: "Round 0: n calls reading q. Rounds 1..R: n calls reading q + n a. Total input n q + n R (q + n a) = n(R+1)q + n^2 R a. n=3: 9*300 + 9*2*200 = 2700 + 3600 = 6300. n=5: 15*300 + 25*2*200 = 4500 + 10000 = 14500. Recomputed 2026-11-10."
+    limitations: ["If 'two rounds' in Du et al. includes the initial generation, the call count for their configuration is 6, not 9 (TODO_VERIFY)."]
+    applicability: "Lesson 37.5 cost derivation."
+    related_claims: ["CLM-020"]
+    curriculum_usage: { lessons: ["37.5"], labs: ["LAB-A"], assessments: ["Mastery-37"] }
+
+  - id: CLM-025
+    claim: "If n (odd) agents answer independently and each is correct with probability p > 0.5, majority-vote accuracy is sum over k > n/2 of C(n,k) p^k (1-p)^(n-k): 0.600, 0.648, 0.683 for n = 1, 3, 5 at p = 0.6. If with probability 0.5 the five agents fail or succeed together (a shared-failure mode) and otherwise vote independently, accuracy falls to 0.641."
+    provenance: DERIVED
+    domain: multi_agent_benefit
+    concepts: [majority_vote, correlated_errors]
+    confidence: high
+    currentness_status: "REFERENCE / BASELINE"
+    assumptions: ["Binary correct/incorrect outcomes; a strict majority decides.", "The mixture model is a synthetic illustration of correlation."]
+    derivation: "n=3: 3*0.36*0.4 + 0.216 = 0.648. n=5: 10*0.216*0.16 + 5*0.1296*0.4 + 0.07776 = 0.34560 + 0.25920 + 0.07776 = 0.68256. Mixture: 0.5*0.6 + 0.5*0.68256 = 0.64128. Recomputed 2026-11-10."
+    limitations: ["Agents sharing a model and prompt are correlated by default; measure agreement before assuming independence."]
+    applicability: "Lessons 37.4-37.5; consistent with CLM-023 gains being larger for weaker models and with CLM-017's shared-failure floor."
+    related_claims: ["CLM-023", "CLM-017"]
+    curriculum_usage: { lessons: ["37.5"], labs: ["LAB-C"] }
+
+  - id: CLM-026
+    claim: "Cemri et al. (MAST) annotate 1,642 traces from 7 multi-agent frameworks with a taxonomy of 14 failure modes in 3 categories, derived by grounded theory over 150+ traces (human inter-annotator kappa 0.88; an o1 LLM annotator reaches kappa 0.77 against humans and 0.79 on two unseen systems). Prevalence: FC1 system design 41.8% (FM-1.1 disobey task specification 11.8%, 1.2 disobey role 1.5%, 1.3 step repetition 15.7%, 1.4 loss of conversation history 2.8%, 1.5 unaware of termination 12.4%); FC2 inter-agent misalignment 36.9% (2.1 conversation reset 2.2%, 2.2 fail to ask clarification 6.8%, 2.3 task derailment 7.4%, 2.4 information withholding 0.85%, 2.5 ignored other agent's input 1.9%, 2.6 reasoning-action mismatch 13.2%); FC3 task verification 21.3% (3.1 premature termination 6.2%, 3.2 no or incomplete verification 8.2%, 3.3 incorrect verification 9.1%)."
+    provenance: VERIFIED_FACT
+    domain: error_propagation
+    concepts: [mast_taxonomy, failure_attribution]
+    confidence: high
+    currentness_status: "REFERENCE / BASELINE"
+    evidence:
+      - { source_type: paper, tier: 1, title: "Why Do Multi-Agent LLM Systems Fail?", authors: "Mert Cemri, Melissa Z. Pan, Shuyi Yang, et al.", year: "2025", url: "https://arxiv.org/abs/2503.13657", version: "v3 (2025-10-26)", section: "Sections 1, 3-5; Appendices A, B, H", accessed_at: "2026-11-10" }
+    limitations: ["Prevalence depends on the 2023-24 frameworks, models, and benchmarks chosen; no single-agent comparison."]
+    applicability: "Failure coding for traces in Lessons 37.4 and 37.6."
+    curriculum_usage: { lessons: ["37.4", "37.6"], labs: ["LAB-C", "LAB-D"], assessments: ["Incident-37.1", "Mastery-37"] }
+
+  - id: CLM-027
+    claim: "Cemri et al. report 41% to 86.7% failure rates on 7 open-source multi-agent systems (for example ChatDev ProgramDev 33.3% success, HyperAgent SWE-Bench Lite 25.3%, AppWorld Test-C 13.3%, Magentic-One GAIA 38.0%, AG2 OlympiadBench 59.0%); targeted interventions gave modest gains (ChatDev ProgramDev-v0 25.0 -> 34.4 with prompt changes -> 40.6 with a new topology; AG2 GSM-Plus GPT-4 84.75 -> 89.75 prompt / 85.50 topology), which the authors say do not constitute substantial improvements; existing verifiers perform only superficial checks such as compilation or leftover TODOs."
+    provenance: VERIFIED_FACT
+    domain: error_propagation
+    concepts: [verifier_quality, mast_taxonomy]
+    confidence: high
+    currentness_status: "REFERENCE / BASELINE"
+    evidence:
+      - { source_type: paper, tier: 1, title: "Why Do Multi-Agent LLM Systems Fail?", authors: "Mert Cemri, Melissa Z. Pan, Shuyi Yang, et al.", year: "2025", url: "https://arxiv.org/abs/2503.13657", version: "v3 (2025-10-26)", table: "Table 5", section: "Section 5; Appendix B", accessed_at: "2026-11-10" }
+    limitations: ["Failure means task not achieved on each system's own benchmark."]
+    applicability: "Lesson 37.4 verifier discussion."
+    related_claims: ["CLM-028", "CLM-038"]
+    curriculum_usage: { lessons: ["37.4"], labs: ["LAB-C"], assessments: ["Incident-37.1"] }
+
+  - id: CLM-028
+    claim: "If a pipeline has k sequential stages that each succeed independently with probability p, end-to-end success is p^k (p=0.95: 0.599 at k=10, 0.358 at k=20). A verifier that catches a fraction v of stage errors, with a successful retry, gives p_eff = 1 - (1-p)(1-v): v=0.5 gives 0.975 and 0.603 at k=20. If errors correlated with the producer's lower the effective catch rate to v(1-rho) with rho=0.6, p_eff = 0.96 and k=20 success is 0.442."
+    provenance: DERIVED
+    domain: error_propagation
+    concepts: [error_compounding, verifier_quality, correlated_errors]
+    confidence: high
+    currentness_status: "REFERENCE / BASELINE"
+    assumptions: ["Independent stage failures; perfect retry after a caught error; rho is a synthetic correlation parameter."]
+    derivation: "0.95^10 = 0.5987; 0.95^20 = 0.3585; 1 - 0.05*0.5 = 0.975, 0.975^20 = 0.6027; 1 - 0.05*(1 - 0.5*0.4) = 0.96, 0.96^20 = 0.4420. Recomputed 2026-11-10."
+    limitations: ["Real stage errors are correlated and some are recoverable downstream; use as intuition, not a forecast."]
+    applicability: "Lesson 37.4 Quantitative Model and LAB C predictions."
+    related_claims: ["CLM-027", "CLM-038"]
+    curriculum_usage: { lessons: ["37.4"], labs: ["LAB-C"], assessments: ["Mastery-37"] }
+
+  - id: CLM-029
+    claim: "Zhang et al. (Who&When) build failure logs from 127 multi-agent systems (algorithm-generated via CaptainAgent and hand-crafted Magentic-One-style) annotated with the failure-responsible agent and the decisive error step; the best method reaches 53.5% accuracy for agents but only 14.2% for steps, some methods perform below random, and o1 and R1 fail to achieve practical usability. Three methods (All-at-Once, Step-by-Step, Binary Search) trade agent-level accuracy, step-level accuracy, and token cost."
+    provenance: VERIFIED_FACT
+    domain: trajectory_evaluation
+    concepts: [failure_attribution, llm_judge]
+    confidence: high
+    currentness_status: "REFERENCE / BASELINE (benchmark); FRONTIER (research area)"
+    evidence:
+      - { source_type: paper, tier: 1, title: "Which Agent Causes Task Failures and When? On Automated Failure Attribution of LLM Multi-Agent Systems", authors: "Shaokun Zhang, Ming Yin, Jieyu Zhang, Jiale Liu, et al.", year: "2025", url: "https://arxiv.org/abs/2505.00212", version: "v3", section: "Abstract; Sections 3-4 skimmed", accessed_at: "2026-11-10" }
+    limitations: ["Single decisive-step label per log; GPT-4o-based systems."]
+    applicability: "Lesson 37.6: automated blame is a noisy instrument."
+    related_claims: ["CLM-039"]
+    curriculum_usage: { lessons: ["37.6"], labs: ["LAB-D"], assessments: ["Incident-37.1", "Mastery-37"] }
+
+  - id: CLM-030
+    claim: "At openai/openai-agents-python commit d68961657843c7d81dfc25834484f8aac2957eb3, a Handoff is exposed to the model as a tool named transfer_to_<agent name>; by default the new agent sees the entire conversation history; execute_handoffs answers any extra handoff call in the same turn with 'Multiple handoffs detected, ignoring this one.' and executes only run_handoffs[0]; handoff.input_filter takes precedence over run_config.handoff_input_filter; RunConfig.nest_handoff_history defaults to False and is documented as an opt-in beta that compacts prior history into assistant summary segments and does not redact sensitive data; history.py builds that summary by string formatting into a <CONVERSATION HISTORY> block, not by an LLM; remove_all_tools in handoff_filters.py drops handoff and tool call/output items from forwarded history; with failure_error_function=None a handoff exception propagates, and error recovery does not roll back callback side effects; server-managed conversations disable filters and nesting with a warning."
+    provenance: VERIFIED_FACT
+    domain: runtime_implementation
+    concepts: [handoff, context_passing, full_history_forwarding]
+    confidence: high
+    currentness_status: "CURRENT SNAPSHOT (one SDK)"
+    evidence:
+      - source_type: source_code
+        tier: 1
+        title: "OpenAI Agents SDK handoffs"
+        repository: "https://github.com/openai/openai-agents-python"
+        commit: "d68961657843c7d81dfc25834484f8aac2957eb3"
+        verification_date: "2026-11-10"
+        file: "src/agents/handoffs/__init__.py; src/agents/run_internal/turn_resolution.py; src/agents/run_config.py; src/agents/handoffs/history.py; src/agents/extensions/handoff_filters.py"
+        symbol: "Handoff; Handoff.default_tool_name; HandoffInputData; execute_handoffs; RunConfig.nest_handoff_history; default_handoff_history_mapper; remove_all_tools"
+        entry_point: "Runner.run with an Agent whose handoffs list is non-empty"
+        execution_path: "model emits transfer_to_<agent> tool call -> execute_handoffs -> multiple_handoffs check, run_handoffs[0] -> input_filter or nest_handoff_history -> NextStepHandoff(new_agent)"
+        url: "https://github.com/openai/openai-agents-python/tree/d68961657843c7d81dfc25834484f8aac2957eb3/src/agents"
+    limitations: ["Static read, not executed.", "Field names are SDK-specific; the tool-call-as-transfer pattern is common (generalizable: PARTIAL)."]
+    applicability: "Lessons 37.2-37.3 and the Section 09 source trace."
+    related_claims: ["CLM-031", "CLM-033"]
+    curriculum_usage: { lessons: ["37.2", "37.3"], labs: ["LAB-B"], assessments: ["Production-Source-Trace"] }
+
+  - id: CLM-031
+    claim: "At the same openai-agents-python commit, Agent.as_tool's docstring states that in handoffs the new agent receives the conversation history while in this tool the new agent receives generated input and the conversation is continued by the original agent; the implementation runs a nested Runner.run and returns run_result.final_output, a custom_output_extractor result, or a fallback to the last non-empty message or tool output; its default failure_error_function returns error text to the parent instead of raising."
+    provenance: VERIFIED_FACT
+    domain: runtime_implementation
+    concepts: [agent_as_tool, isolated_context]
+    confidence: high
+    currentness_status: "CURRENT SNAPSHOT (one SDK)"
+    evidence:
+      - source_type: source_code
+        tier: 1
+        title: "OpenAI Agents SDK Agent.as_tool"
+        repository: "https://github.com/openai/openai-agents-python"
+        commit: "d68961657843c7d81dfc25834484f8aac2957eb3"
+        verification_date: "2026-11-10"
+        file: "src/agents/agent.py"
+        symbol: "Agent.as_tool"
+        entry_point: "parent agent calls the tool produced by Agent.as_tool"
+        execution_path: "tool call arguments -> nested Runner.run(worker, input) -> final_output or custom_output_extractor -> string tool output to parent"
+        url: "https://github.com/openai/openai-agents-python/blob/d68961657843c7d81dfc25834484f8aac2957eb3/src/agents/agent.py"
+    limitations: ["Static read, not executed. Agent-as-tool as a pattern (isolated context, string return) generalizes; the API does not."]
+    applicability: "Lessons 37.2-37.3 orchestrator-worker context regime."
+    related_claims: ["CLM-030", "CLM-033"]
+    curriculum_usage: { lessons: ["37.2", "37.3"], labs: ["LAB-B"], assessments: ["Production-Source-Trace"] }
+
+  - id: CLM-032
+    claim: "langchain-ai/langgraph-supervisor-py is archived; at commit 88859b34017ac3569bbd4a3092c7e77593a0a960 its README recommends using the supervisor pattern directly via tools rather than the library for most use cases. create_supervisor defaults to parallel_tool_calls=False, output_mode='last_message', and add_handoff_messages=True; the graph adds START -> supervisor and an edge from every worker back to the supervisor (star topology); full_history appends a worker's whole message list to shared state, last_message keeps only the last message (or last two when the last is a ToolMessage) plus synthetic transfer_back messages; workers are invoked with the full shared state. create_handoff_tool returns Command(goto=agent, graph=Command.PARENT) and, for multiple handoff calls in one message, a Send per worker after stripping sibling tool calls; MODELS_NO_PARALLEL_TOOL_CALLS lists o3-mini, o3, and o4-mini."
+    provenance: VERIFIED_FACT
+    domain: runtime_implementation
+    concepts: [supervisor, shared_message_state, context_passing]
+    confidence: high
+    currentness_status: "LEGACY (archived library; reference implementation)"
+    evidence:
+      - source_type: source_code
+        tier: 1
+        title: "LangGraph Supervisor"
+        repository: "https://github.com/langchain-ai/langgraph-supervisor-py"
+        commit: "88859b34017ac3569bbd4a3092c7e77593a0a960"
+        verification_date: "2026-11-10"
+        file: "langgraph_supervisor/supervisor.py; langgraph_supervisor/handoff.py; README.md"
+        symbol: "create_supervisor; _make_call_agent; OutputMode; create_handoff_tool; _remove_non_handoff_tool_calls"
+        entry_point: "create_supervisor(...).compile().invoke"
+        execution_path: "START -> supervisor model -> transfer_to_<agent> tool -> Command(goto, graph=PARENT) or Send fan-out -> worker node with full shared state -> output_mode trim -> edge back to supervisor"
+        url: "https://github.com/langchain-ai/langgraph-supervisor-py/tree/88859b34017ac3569bbd4a3092c7e77593a0a960"
+    limitations: ["Static read; langgraph core Command/Send semantics were not traced at a pinned SHA."]
+    applicability: "Reference shared-message-state supervisor for Lessons 37.2-37.3."
+    related_claims: ["CLM-033"]
+    curriculum_usage: { lessons: ["37.2", "37.3"], labs: ["LAB-B"], assessments: ["Production-Source-Trace", "Incident-37.1"] }
+
+  - id: CLM-033
+    claim: "Three context-passing regimes follow from the traced code: forward-all (handoff: the receiver gets the transcript, duplicating it without loss), shared message state (supervisor: every participant re-reads a growing state whose growth per round is the sum of worker traces under full_history or of final messages under last_message), and isolated return (agent-as-tool: the worker sees only the tool argument and the parent sees only the final string). For a supervisor starting at 2,000 tokens with one worker per round over 3 rounds, appending 6,000 tokens per round under full_history versus 450 under last_message, the 4 supervisor calls read 44,000 vs 10,700 input tokens and the 3 worker calls 24,000 vs 7,350, totals 68,000 vs 18,050; an as-tool design whose workers read a 300-token argument and return 400 tokens gives 10,400 + 900 = 11,300."
+    provenance: DERIVED
+    domain: context_passing
+    concepts: [context_passing, full_history_forwarding, isolated_context, shared_message_state]
+    confidence: high
+    currentness_status: "REFERENCE / BASELINE"
+    assumptions: ["Supervisor output tokens, system prompts, and tool schemas excluded.", "Workers run one per round, in sequence, and read the shared state as it stood before their round's append.", "All token counts are synthetic exercise values."]
+    derivation: "Supervisor reads S0 + j*d for j = 0..3: full 2000+8000+14000+20000 = 44000; last 2000+2450+2900+3350 = 10700. Workers read S0 + (j-1)*d for j = 1..3: full 2000+8000+14000 = 24000; last 2000+2450+2900 = 7350. As-tool: supervisor 2000+2400+2800+3200 = 10400; workers 3*300 = 900. Re-read cost over m rounds grows as the sum of j*d, quadratic in rounds. Recomputed 2026-11-10."
+    limitations: ["Token volume says nothing by itself about information loss; measure task-relevant recall."]
+    applicability: "Lesson 37.3 and LAB B."
+    related_claims: ["CLM-030", "CLM-031", "CLM-032", "CLM-012"]
+    curriculum_usage: { lessons: ["37.3"], labs: ["LAB-B"], assessments: ["Mastery-37", "Incident-37.1"] }
+
+  - id: CLM-034
+    claim: "For w workers dispatched in parallel behind a synchronous barrier, wall time is the orchestrator's own time plus max_i t_i, while sequential dispatch takes the sum; total work and tokens are unchanged by parallelism. With a 20 s plan, workers of 40, 55, and 30 s, and a 15 s synthesis, parallel takes 90 s and sequential 160 s; the slowest worker sets the critical path."
+    provenance: DERIVED
+    domain: multi_agent_latency
+    concepts: [synchronous_fan_out, critical_path]
+    confidence: high
+    currentness_status: "REFERENCE / BASELINE"
+    assumptions: ["No queueing or rate limits; workers independent; synthetic durations."]
+    derivation: "Parallel 20 + max(40,55,30) + 15 = 90 s; sequential 20 + 40 + 55 + 30 + 15 = 160 s. Recomputed 2026-11-10."
+    limitations: ["Provider rate limits and shared queues can serialize nominally parallel calls (Module 04)."]
+    applicability: "Lesson 37.2 worked example."
+    related_claims: ["CLM-004"]
+    curriculum_usage: { lessons: ["37.2"], labs: ["LAB-A"], assessments: ["Mastery-37"] }
+
+  - id: CLM-035
+    claim: "Comparing designs by cost per verified success, not by success alone, changes rankings: with synthetic prices of 3 USD per million input and 15 USD per million output tokens, a single agent using 10,000 input and 1,500 output tokens at 0.44 success costs 0.0525 USD per run and 0.119 per success, while a multi-agent design using 32,000 and 5,500 tokens at 0.55 success costs 0.1785 per run and 0.325 per success: 3.4x per run and 2.72x per success."
+    provenance: DERIVED
+    domain: multi_agent_cost
+    concepts: [cost_per_success, token_multiplier]
+    confidence: high
+    currentness_status: "REFERENCE / BASELINE"
+    assumptions: ["Synthetic prices and token counts; every offered task counted in the denominator; no retries outside the counted tokens."]
+    derivation: "SAS 10000*3e-6 + 1500*15e-6 = 0.030 + 0.0225 = 0.0525; /0.44 = 0.1193. MAS 32000*3e-6 + 5500*15e-6 = 0.096 + 0.0825 = 0.1785; /0.55 = 0.3245. 0.1785/0.0525 = 3.40; 0.3245/0.1193 = 2.72. Recomputed 2026-11-10."
+    limitations: ["Value per success is not modeled; a higher price can be justified by task value."]
+    applicability: "Lesson 37.5 worked example and Mastery deliverables."
+    related_claims: ["CLM-005"]
+    curriculum_usage: { lessons: ["37.5"], labs: ["LAB-A"], assessments: ["Mastery-37"] }
+
+  - id: CLM-036
+    claim: "A reported multi-agent gain is partly or wholly explained by extra token spend when the single-agent baseline is not budget-matched."
+    provenance: HYPOTHESIS
+    domain: multi_agent_benefit
+    concepts: [token_spend_confound, equal_budget_baseline]
+    confidence: medium
+    currentness_status: "WORKLOAD-DEPENDENT"
+    hypothesis:
+      prediction: "Re-running the single agent with the multi-agent system's measured token budget (more thinking, samples, or tool calls) shrinks the gap on sequential tasks to within noise while a gap remains on decomposable breadth tasks."
+      measurement_target: "Success and measured tokens per task for single agent at native budget, single agent at matched budget, and the multi-agent system, on decomposable and sequential slices."
+      falsifying_observation: "The gap is unchanged after budget matching on sequential tasks, or disappears on decomposable tasks as well."
+    limitations: ["Matching on requested budgets can fail when APIs do not spend what is requested (CLM-013)."]
+    applicability: "Every multi-agent adoption decision."
+    related_claims: ["CLM-002", "CLM-012", "CLM-001"]
+    curriculum_usage: { lessons: ["37.1"], labs: ["LAB-A"], assessments: ["Mastery-37"] }
+
+  - id: CLM-037
+    claim: "Parallel workers that each make write decisions without seeing each other's actions produce more conflicting outputs than the same work done by one agent or by workers that receive each other's decisions."
+    provenance: HYPOTHESIS
+    domain: context_passing
+    concepts: [implicit_decision_conflict, context_sharing]
+    confidence: medium
+    currentness_status: "WORKLOAD-DEPENDENT"
+    hypothesis:
+      prediction: "On a task with shared write conventions (for example a schema each part must follow), isolated parallel workers show a higher inconsistency rate than a single agent or workers given a shared decision log."
+      measurement_target: "Inconsistency rate across merged outputs, measured by a deterministic checker, by context regime."
+      falsifying_observation: "Inconsistency rates do not differ between isolated and shared regimes when the task has coupled decisions."
+    limitations: ["Cognition's claim is qualitative; effect size is unknown."]
+    applicability: "Lesson 37.3 and LAB B."
+    related_claims: ["CLM-019"]
+    curriculum_usage: { lessons: ["37.3"], labs: ["LAB-B"], assessments: ["Mastery-37"] }
+
+  - id: CLM-038
+    claim: "A verifier that shares the producer's model and context catches fewer of the producer's errors than an independent check, so the end-to-end gain from adding it is smaller than an independence model predicts."
+    provenance: HYPOTHESIS
+    domain: error_propagation
+    concepts: [verifier_quality, correlated_errors]
+    confidence: medium
+    currentness_status: "WORKLOAD-DEPENDENT"
+    hypothesis:
+      prediction: "With seeded stage errors, an LLM verifier using the producer's model and prompt context has a lower catch rate on producer errors than a deterministic or differently-informed verifier, and end-to-end success falls below the p_eff^k independence prediction."
+      measurement_target: "Per-stage catch rate by verifier type, producer-verifier error correlation, and end-to-end success vs the CLM-028 prediction."
+      falsifying_observation: "Catch rates and end-to-end success match the independence prediction for the shared-context verifier."
+    limitations: ["Catch rate depends on error type; MAST reports superficial verifiers but does not measure correlation."]
+    applicability: "Lesson 37.4 and LAB C."
+    related_claims: ["CLM-027", "CLM-028"]
+    curriculum_usage: { lessons: ["37.4"], labs: ["LAB-C"], assessments: ["Incident-37.1"] }
+
+  - id: CLM-039
+    claim: "Counterfactual replay from a candidate step (re-running the trajectory from that step with a corrected message) localizes the decisive error more reliably than an LLM judge reading the full log, at higher cost."
+    provenance: HYPOTHESIS
+    domain: trajectory_evaluation
+    concepts: [failure_attribution, counterfactual_replay]
+    confidence: low
+    currentness_status: "WORKLOAD-DEPENDENT"
+    hypothesis:
+      prediction: "On synthetic traces with a known seeded decisive step and a deterministic environment, replay-based attribution identifies the step more often than all-at-once or binary-search judging."
+      measurement_target: "Step-level attribution accuracy with intervals, and model calls per attributed trace, by method."
+      falsifying_observation: "Replay accuracy is no higher than judge-based methods, or replay cannot be made deterministic enough to compare."
+    limitations: ["Requires replayable environments (Module 14); non-deterministic tools blur the counterfactual."]
+    applicability: "Lesson 37.6 and LAB D."
+    related_claims: ["CLM-029"]
+    curriculum_usage: { lessons: ["37.6"], labs: ["LAB-D"], assessments: ["Mastery-37"] }
+
+  - id: CLM-040
+    claim: "(Abstract only) AutoGen frames applications as multiple agents that can converse with each other, programmed through natural language and code; MetaGPT encodes standard operating procedures into prompts and motivates its assembly-line roles by cascading hallucinations caused by naively chaining LLMs."
+    provenance: VERIFIED_FACT
+    domain: multi_agent_topology
+    concepts: [conversational_topology, sop_pipeline]
+    confidence: medium
+    currentness_status: "LEGACY (framework designs; historical reference)"
+    evidence:
+      - { source_type: paper, tier: 1, title: "AutoGen: Enabling Next-Gen LLM Applications via Multi-Agent Conversation", authors: "Qingyun Wu, Gagan Bansal, Jieyu Zhang, et al.", year: "2023", url: "https://arxiv.org/abs/2308.08155", version: "v2", section: "Abstract only", accessed_at: "2026-11-10" }
+      - { source_type: paper, tier: 1, title: "MetaGPT: Meta Programming for A Multi-Agent Collaborative Framework", authors: "Sirui Hong, Mingchen Zhuge, Jiaqi Chen, et al.", year: "2023", url: "https://arxiv.org/abs/2308.00352", version: "v7", section: "Abstract only", accessed_at: "2026-11-10" }
+    limitations: ["Abstract-level; both appear as subject systems in MAST (CLM-026)."]
+    applicability: "Historical topologies in Lesson 37.2."
+    curriculum_usage: { lessons: ["37.2"] }
+
+  - id: CLM-041
+    claim: "SYNTHETIC FIXTURES (exercise assumptions, not measurements): Mastery workload with 55% breadth research and 45% sequential troubleshooting tasks, a blended price of 5 USD per million tokens, and per-slice tokens and success - breadth: single agent 18,000 tokens at 0.38, budget-matched single agent 70,000 at 0.45, orchestrator-worker 70,000 at 0.57; sequential: single agent 14,000 at 0.62, orchestrator-worker 61,000 at 0.58; 400 tasks per slice and arm. Lesson 37.1 example: 200 tasks per arm, single agent 0.44 at 10,000 tokens, matched single agent 0.52 and multi-agent 0.55 at 37,500 tokens."
+    provenance: EXERCISE_ASSUMPTION
+    domain: multi_agent_cost
+    concepts: [cost_per_success, equal_budget_baseline]
+    confidence: high
+    currentness_status: "WORKLOAD-DEPENDENT"
+    assumptions: ["Values chosen for arithmetic; they describe no real model, product, or price list."]
+    limitations: ["Answers computed from the fixture are conditional on it."]
+    applicability: "Lesson 37.1 worked example and the Mastery transfer problem."
+    related_claims: ["CLM-035", "CLM-036"]
+    curriculum_usage: { lessons: ["37.1", "37.5"], assessments: ["Mastery-37"] }
