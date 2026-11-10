@@ -1,0 +1,239 @@
+module: "38-tool-ecosystem-protocols"
+registry_version: "1.0.0"
+
+required_concepts:
+  - "tool_description_quality"
+  - "tool_context_cost"
+  - "per_tool_token_budget"
+  - "mcp_architecture"
+  - "stateless_requests"
+  - "version_negotiation"
+  - "list_changed_subscription"
+  - "cache_hints"
+  - "deterministic_ordering"
+  - "tool_retrieval"
+  - "shortlist_depth"
+  - "bits_over_random"
+  - "manifest_pinning"
+  - "schema_evolution"
+  - "name_collision"
+  - "audience_binding"
+  - "token_passthrough"
+  - "step_up_authorization"
+  - "scope_minimization"
+  - "spec_conformance"
+
+prerequisite_concepts:
+  - "tool_contract"
+  - "effect_class"
+  - "effect_unknown"
+  - "capability_negotiation"
+  - "validation_ladder"
+  - "json_schema_dialect"
+  - "prompt_cache_prefix"
+  - "retrieval_recall"
+  - "confused_deputy"
+  - "tool_description_poisoning"
+
+first_occurrence_concepts:
+  - "mcp_architecture"
+  - "stateless_requests"
+  - "list_changed_subscription"
+  - "cache_hints"
+  - "bits_over_random"
+  - "manifest_pinning"
+  - "audience_binding"
+  - "token_passthrough"
+  - "step_up_authorization"
+  - "spec_conformance"
+
+concept_dependencies:
+  - concept: "tool_description_quality"
+    depends_on: ["tool_contract", "effect_class"]
+  - concept: "tool_context_cost"
+    depends_on: ["tool_description_quality", "prompt_cache_prefix"]
+  - concept: "per_tool_token_budget"
+    depends_on: ["tool_context_cost"]
+  - concept: "stateless_requests"
+    depends_on: ["mcp_architecture", "effect_unknown"]
+  - concept: "version_negotiation"
+    depends_on: ["mcp_architecture", "capability_negotiation"]
+  - concept: "deterministic_ordering"
+    depends_on: ["prompt_cache_prefix", "mcp_architecture"]
+  - concept: "shortlist_depth"
+    depends_on: ["tool_retrieval", "retrieval_recall", "per_tool_token_budget"]
+  - concept: "bits_over_random"
+    depends_on: ["shortlist_depth"]
+  - concept: "manifest_pinning"
+    depends_on: ["cache_hints", "list_changed_subscription", "tool_description_poisoning"]
+  - concept: "schema_evolution"
+    depends_on: ["json_schema_dialect", "validation_ladder"]
+  - concept: "name_collision"
+    depends_on: ["mcp_architecture"]
+  - concept: "audience_binding"
+    depends_on: ["confused_deputy"]
+  - concept: "step_up_authorization"
+    depends_on: ["scope_minimization", "audience_binding"]
+  - concept: "spec_conformance"
+    depends_on: ["audience_binding", "version_negotiation", "validation_ladder"]
+
+mechanisms:
+  - id: "MECH-01"
+    description: "A tool description and schema are the interface the model selects on. Vendors state that descriptions drive selection and recommend detailed ones, but measured effects of rewriting are mixed: augmentation raised task success while raising steps and causing regressions in some cases, and edited descriptions can capture usage against competitors. Description quality is an empirical, workload-specific property, and the effect class used for authorization must come from a trusted contract, not from server-declared annotations."
+    evidence_ids: ["CLM-024", "CLM-034", "CLM-035", "CLM-036", "CLM-037", "CLM-008", "CLM-063", "CLM-069"]
+    derived_from: []
+
+  - id: "MECH-02"
+    description: "MCP 2026-07-28 is a stateless JSON-RPC protocol between host-owned clients and servers: no initialize handshake or session id, per-request protocol version and client capabilities in _meta, a mandatory server/discover, and an explicit UnsupportedProtocolVersionError (-32022). Modern and legacy eras are mutually incompatible unless an implementation is dual-era. Broken streams are re-issued with a new request id, so non-idempotent calls need postcondition checks."
+    evidence_ids: ["CLM-001", "CLM-002", "CLM-003", "CLM-004", "CLM-011", "CLM-062"]
+    derived_from: []
+
+  - id: "MECH-03"
+    description: "Tool-list freshness and reuse: tools/list MUST NOT vary per connection but MAY vary by authorization, SHOULD be deterministically ordered for client caching and prompt-cache hit rates, carries ttlMs/cacheScope hints (private caches not shared across authorization contexts), and list_changed is delivered only to clients subscribed through subscriptions/listen."
+    evidence_ids: ["CLM-005", "CLM-006", "CLM-048", "CLM-059", "CLM-068"]
+    derived_from: []
+
+  - id: "MECH-04"
+    description: "Tool retrieval before selection: retrieving a shortlist reduces definition tokens and improved accuracy on one testbed, and an adaptive shortlist depth matched near-full coverage with far fewer tools on BFCL, but fixed small K can miss hard queries and retrieval recall degrades as the catalog grows. A retriever moves the scaling problem rather than removing it."
+    evidence_ids: ["CLM-025", "CLM-031", "CLM-033", "CLM-038", "CLM-039", "CLM-070"]
+    derived_from: []
+
+  - id: "MECH-05"
+    description: "Registry and versioning: the MCP Registry (preview) stores immutable, uniquely versioned server metadata for public servers and expects aggregators to pull infrequently. It does not version the tool descriptions and schemas a live server returns, so clients pin what the model sees by hashing the reviewed tools/list result, prefix names to avoid collisions, and classify schema changes by compatibility direction."
+    evidence_ids: ["CLM-022", "CLM-023", "CLM-064", "CLM-060", "CLM-076", "CLM-007", "CLM-010"]
+    derived_from: []
+
+  - id: "MECH-06"
+    description: "MCP authorization for HTTP transports: the server is an OAuth resource server that publishes RFC 9728 metadata; clients send the RFC 8707 resource parameter; servers MUST validate the token audience and MUST NOT accept or pass through other tokens; insufficient_scope triggers step-up to the union of scopes; iss is validated when present; OAuth proxies MUST implement per-client consent."
+    evidence_ids: ["CLM-013", "CLM-014", "CLM-015", "CLM-016", "CLM-017", "CLM-018", "CLM-019", "CLM-020", "CLM-021", "CLM-012"]
+    derived_from: []
+
+  - id: "MECH-07"
+    description: "Protocol alternatives at different boundaries: provider function calling defines a per-request tool dialect (strict subsets, deferred loading, namespaces); OpenAPI 3.2.1 describes HTTP operations with unique operationIds and a 2020-12 schema default; A2A 1.0 connects opaque agents through Agent Cards and its own version header. Choosing one is a boundary decision, not a ranking."
+    evidence_ids: ["CLM-027", "CLM-028", "CLM-029", "CLM-030", "CLM-075"]
+    derived_from: []
+
+mathematical_models:
+  - id: "MATH-01"
+    description: "Context cost of a tool surface: C_tools = c0 + sum(t_name + t_desc + t_schema). With the reported 58 tools at ~55K tokens, the mean is 948.3 tokens per tool, varying from 600 to 1,909 by server; f = C_tools/W; uncached session cost is about n_turns * C_tools."
+    evidence_ids: ["CLM-051", "CLM-026", "CLM-024"]
+    derived_from: []
+
+  - id: "MATH-02"
+    description: "Tokens-per-tool budget: n_max = floor((f*W - c0)/t_bar). At f = 0.10, W = 200K, c0 = 286, n_max is 20 at 948 tokens per tool, 10 at 1,909, 26 at 743, and 98 for a 200-token description-only figure (not comparable)."
+    evidence_ids: ["CLM-052", "CLM-033", "CLM-072"]
+    derived_from: ["MATH-01"]
+
+  - id: "MATH-03"
+    description: "Retrieval-selection decomposition and chance-corrected depth: P(correct) = P(gold in shortlist | K) * P(choose gold | shown, K) * P(args valid | chosen); BoR = log2(P_obs/P_rand) with P_rand = K/N for one gold tool and BoR_max = log2(N/K). BFCL N = 370: K = 7 gives 5.58 bits, K = 50 gives 2.75 bits at nearly equal coverage."
+    evidence_ids: ["CLM-032", "CLM-053", "CLM-054", "CLM-055"]
+    derived_from: []
+
+  - id: "MATH-04"
+    description: "Cost-adjusted description rewrite rule: adopt only if delta_success * V > delta_steps * c_step + delta_C_tools * c_tok * turns, per episode."
+    evidence_ids: ["CLM-056", "CLM-057"]
+    derived_from: ["MATH-01"]
+
+  - id: "MATH-05"
+    description: "Tool-list staleness under a TTL: p_stale = 1 - (1 - exp(-lambda*T))/(lambda*T) for Poisson changes and uniform reads; at T = 300 s it is 0.17%, 4.05%, and 21.3% for one change per day, hour, and 10 minutes. Prefix reuse under reordering: the cached prefix ends at the first differing tool (2,286 of 20,286 tokens when tools 3 and 4 swap)."
+    evidence_ids: ["CLM-058", "CLM-059"]
+    derived_from: []
+
+  - id: "MATH-06"
+    description: "Scope exposure: E = sum |granted scopes| * interval length; all four scopes for 3,600 s gives 14,400 scope-seconds against 5,400 with one scope stepped up to two at 1,800 s. Name collisions: s identically named tools merged first-wins leave s - 1 unreachable."
+    evidence_ids: ["CLM-061", "CLM-060"]
+    derived_from: []
+
+implementation_mechanisms:
+  - id: "IMPL-01"
+    description: "python-sdk 77001c96 registration and listing: ToolManager.add_tool returns the existing tool on a duplicate name (first wins, warning only); names are validated with a warning; descriptions default to the docstring and can be empty; _handle_list_tools ignores pagination and returns tools in registration order."
+    evidence_ids: ["CLM-043", "CLM-044"]
+    derived_from: []
+
+  - id: "IMPL-02"
+    description: "python-sdk 77001c96 call path and error mapping: argument ValidationError and unknown tool both become ToolError and are returned as CallToolResult(is_error=True); only MCPError is re-raised as a JSON-RPC error; logs record rejected field names only."
+    evidence_ids: ["CLM-045", "CLM-009"]
+    derived_from: []
+
+  - id: "IMPL-03"
+    description: "python-sdk 77001c96 versions, discover, capabilities, and cache hints: enumerated version tuples with conservative comparison; server/discover returns modern versions and call-time capabilities; listChanged reflects whether subscriptions/listen is served; CacheHint defaults ttl_ms = 0, scope private, handler values win."
+    evidence_ids: ["CLM-042", "CLM-046", "CLM-048"]
+    derived_from: []
+
+  - id: "IMPL-04"
+    description: "python-sdk 77001c96 auth: BearerAuthBackend checks expiry and, only when given resource_server_url, the token's resource; MCPServer passes that URL only when validate_token_resource is truthy (default None warns and behaves as False); RequireAuthMiddleware returns 401 invalid_token or 403 insufficient_scope per app, with no per-tool gate in the files read; get_tool_input_schema fails open on lookup errors."
+    evidence_ids: ["CLM-049", "CLM-050", "CLM-047"]
+    derived_from: []
+
+failure_modes:
+  - id: "FAIL-01"
+    description: "Tool-surface bloat: adding servers grows C_tools on every turn, can push past a workload-specific selection knee, and nondeterministic ordering destroys the cached prefix, so cost and selection errors rise together. Whether the knee or the cache loss dominates must be measured."
+    evidence_ids: ["CLM-051", "CLM-059", "CLM-067", "CLM-073"]
+    derived_from: ["MATH-01", "MATH-05"]
+
+  - id: "FAIL-02"
+    description: "Silent shadowing: identically named tools from different servers merged without prefixes leave all but one unreachable while the list looks valid; selection then routes calls to the wrong implementation."
+    evidence_ids: ["CLM-060", "CLM-043", "CLM-007"]
+    derived_from: ["MATH-06"]
+
+  - id: "FAIL-03"
+    description: "Pinned-but-drifting manifest: a registry version is pinned, but the live server changes descriptions or schemas; without hashing the reviewed tools/list result the client loads unreviewed text, and an incompatible schema change breaks callers."
+    evidence_ids: ["CLM-064", "CLM-023", "CLM-076"]
+    derived_from: []
+
+  - id: "FAIL-04"
+    description: "Audience check off by default: a deployment meets the specification's audience MUST only when the SDK option or the verifier enforces it; a token issued for another resource is otherwise accepted, enabling passthrough-style misuse."
+    evidence_ids: ["CLM-050", "CLM-015", "CLM-019", "CLM-071"]
+    derived_from: []
+
+  - id: "FAIL-05"
+    description: "Omnibus first grant: a server that publishes every scope in scopes_supported turns the specification's no-challenge fallback into an all-scopes token, maximizing exposure until revocation."
+    evidence_ids: ["CLM-065", "CLM-016", "CLM-020", "CLM-061"]
+    derived_from: ["MATH-06"]
+
+  - id: "FAIL-06"
+    description: "Re-issued write after a broken stream: without SSE resumability a dropped tools/call is re-issued as a new request; a non-idempotent tool can execute twice unless the client verifies the postcondition or passes an idempotency key."
+    evidence_ids: ["CLM-062", "CLM-003"]
+    derived_from: []
+
+production_connections:
+  - id: "PROD-01"
+    description: "Vendor tool-count guidance (fewer than 20 functions; degradation past 30-50 tools; tool search cutting definition tokens by over 85%) is guidance without published methods and must be labeled as such and replaced by workload measurements."
+    evidence_ids: ["CLM-025", "CLM-026", "CLM-027", "CLM-067"]
+    derived_from: []
+
+  - id: "PROD-02"
+    description: "A pinned SDK can diverge from the specification in configuration-dependent ways; a conformance suite asserts wire behavior of the deployed configuration."
+    evidence_ids: ["CLM-066", "CLM-045", "CLM-047", "CLM-050"]
+    derived_from: []
+
+research_connections:
+  - id: "RES-01"
+    description: "Benchmarks for tool selection are instruments with known validity problems: inflated pass rates under older protocols, scorers that ignore should-ask turns, LLM judges, and unevaluated categories counted as zero."
+    evidence_ids: ["CLM-039", "CLM-040", "CLM-041", "CLM-031"]
+    derived_from: []
+
+todo_verify:
+  - id: "TODO-01"
+    description: "Per-tool scope enforcement elsewhere in python-sdk, its client-side list caching and list_changed handling, and TypeScript SDK conformance remain uninspected."
+    evidence_ids: ["CLM-074"]
+    derived_from: []
+
+candidate_capabilities:
+  - capability: "Write and evaluate tool descriptions and schemas as contracts, using a cost-adjusted rule and paired measurement, and keep authorization effect classes out of server-declared annotations."
+    mapped_mechanisms: ["MECH-01", "MATH-04"]
+
+  - capability: "Explain and test MCP 2026-07-28 lifecycle, versioning errors, era compatibility, caching hints, subscriptions, and deterministic ordering, and contrast MCP with provider function calling, OpenAPI, and A2A."
+    mapped_mechanisms: ["MECH-02", "MECH-03", "MECH-07", "IMPL-03"]
+
+  - capability: "Derive a tokens-per-tool budget and a shortlist depth for a catalog, and measure the selection knee and retrieval recall instead of trusting vendor thresholds."
+    mapped_mechanisms: ["MECH-04", "MATH-01", "MATH-02", "MATH-03", "FAIL-01", "PROD-01"]
+
+  - capability: "Design discovery, pinning, collision handling, and schema-evolution policy for an aggregated tool catalog."
+    mapped_mechanisms: ["MECH-05", "MATH-05", "FAIL-02", "FAIL-03", "IMPL-01"]
+
+  - capability: "Configure and test MCP authorization with audience binding, no token passthrough, minimal initial scopes, and step-up."
+    mapped_mechanisms: ["MECH-06", "MATH-06", "FAIL-04", "FAIL-05", "IMPL-04"]
+
+  - capability: "Build a specification-derived conformance suite, trace a pinned SDK, and report where defaults diverge from MUST-level requirements."
+    mapped_mechanisms: ["IMPL-01", "IMPL-02", "IMPL-04", "PROD-02", "RES-01", "TODO-01", "FAIL-06"]
