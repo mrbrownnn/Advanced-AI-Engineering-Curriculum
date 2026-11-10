@@ -88,10 +88,16 @@ What gradient does my RL loss actually compute, and when do the ratio and clip c
 **Concepts & Definitions:**
 - **Importance ratio**: $r_t(\theta) = \pi_\theta(o_t|\cdot)/\pi_{old}(o_t|\cdot)$, the ratio between the policy being updated and the policy whose log-probabilities were recorded for the data.
 - **PPO clip**: $L^{CLIP} = \mathbb{E}_t[\min(r_t A_t,\ \mathrm{clip}(r_t,1-\epsilon,1+\epsilon)A_t)]$, designed so that one batch can support multiple epochs of minibatch updates (**O**, CLM-001). Clipping removes the incentive to push the ratio further in the advantage's direction; it is not a hard constraint.
+  - where: $r_t$ = importance ratio above; $A_t$ = advantage of token $t$; $\epsilon$ = clip half-width (e.g., 0.2; not the `epsilon=1e-6` std guard below); $\mathrm{clip}(x,a,b)=\min(\max(x,a),b)$; $\mathbb{E}_t$ = average over tokens in the batch. This objective is maximized; verl minimizes its negative (Quantitative Model below).
 - **When the clip is inert**: with one gradient step per batch, old log-probs recomputed by the same trainer, and deterministic forward passes, $r=1$ and the PPO gradient equals the plain policy gradient. Clipping matters only with several minibatches or epochs per batch, or with stale or mismatched data (**D**, CLM-043).
+  - Step-by-step: (1) $\nabla_\theta r_t=r_t\nabla_\theta\log\pi_\theta(o_t|\cdot)$. (2) At $r_t=1$ the clip is not active ($1$ lies inside $[1-\epsilon,1+\epsilon]$), so both min terms equal $r_tA_t$. (3) The gradient is $A_t\nabla_\theta\log\pi_\theta(o_t|\cdot)$, the policy-gradient estimator.
 - **GAE**: $\hat A_t=\sum_l(\gamma\lambda)^l\delta_{t+l}$ with $\delta_t=r_t+\gamma V(s_{t+1})-V(s_t)$. $\lambda=0$ is the one-step TD residual (lower variance, biased unless $V$ is exact); $\lambda=1$ is the return minus $V$ (no bias from $V$, higher variance) (**O**, CLM-002). It needs a learned critic.
+  - where: here $r_t$ is the per-token **reward**, not the ratio; $V(s_t)$ = critic value of state $t$ ($V=0$ after the last token); $\gamma$ = discount; $\lambda$ = GAE mixing weight; $l=0,1,\ldots$ runs to the end of the response.
+  - Equivalent recursion (what verl runs backward in time): $\hat A_t=\delta_t+\gamma\lambda\hat A_{t+1}$.
+  - Step-by-step for $\lambda=1$, $\gamma=1$: $\sum_l\delta_{t+l}=\sum_l r_{t+l}+\sum_l[V(s_{t+l+1})-V(s_{t+l})]$; the value terms telescope to $V(s_{end})-V(s_t)=-V(s_t)$, leaving return minus $V(s_t)$.
 - **Group baseline**: GRPO-style estimators baseline each response against its siblings for the same prompt (Module 19, Lesson 19.5). REINFORCE-style variants with leave-one-out baselines (RLOO) were reported to outperform PPO in RLHF settings by Ahmadian et al. (**O**, CLM-042).
 - **Implementation detail matters**: `torch.std` defaults to Bessel's correction (divide by $N-1$) (**O**, CLM-004), so implementations that call it produce smaller advantages than the population-std formula: $\pm0.866$ instead of $\pm1$ for rewards $[1,0,0,1]$ (**D**, CLM-044).
+  - Step-by-step: mean $0.5$; deviations $\pm0.5$; sum of squares $4\times0.25=1$. Sample std $\sqrt{1/3}=0.5774$, so $0.5/0.5774=0.866$; population std $\sqrt{1/4}=0.5$, so $0.5/0.5=1$.
 
 **Mechanism Explanation — Pinned verl Estimators (O, CLM-003, CLM-005):**
 At `volcengine/verl` commit `fbb4b3a8bf636f290c9c59fc346f756849e9c241` (static inspection, verified 2026-10-12):
@@ -103,19 +109,21 @@ State → operation → state: (rewards, values or group, masks) → advantage p
 
 **Quantitative Model / Derivation:**
 - Per-token clipped loss (minimized): $\ell_t = \max(-A_t r_t,\ -A_t\,\mathrm{clip}(r_t,1-\epsilon_l,1+\epsilon_h))$; for $A_t<0$, also $\ell_t=\min(\ell_t, -A_t c)$ (dual clip).
+  - where: $\epsilon_l,\epsilon_h$ = lower and upper clip widths (`clip_ratio_low`, `clip_ratio_high`); $c$ = dual-clip constant (`clip_ratio_c`, default 3.0); $r_t$ = importance ratio.
 - Gradient through token $t$ is zero when $A_t>0, r_t>1+\epsilon_h$ or $A_t<0, r_t<1-\epsilon_l$.
+  - Step-by-step: in those regions the $\max$ selects the clipped term $-A_t(1+\epsilon_h)$ or $-A_t(1-\epsilon_l)$, a constant in $\theta$, so its gradient is zero. The dual-clip value $-A_tc$ is also constant, so it zeroes the gradient when it binds.
 - Bias–variance: GAE's $\lambda$ interpolates TD(0) and Monte-Carlo; group baselines need no critic but need $G$ samples per prompt and give one scalar advantage to every token of a response.
 
 **Worked Example (synthetic):**
 1. *GAE.* Three response tokens, terminal reward only: $r=[0,0,1]$, critic $V=[0.5,0.6,0.7]$, $\gamma=1$.
    - $\delta=[0.6-0.5,\ 0.7-0.6,\ 1-0.7]=[0.1,0.1,0.3]$.
-   - $\lambda=0$: $\hat A=[0.1,0.1,0.3]$. $\lambda=1$: $[0.5,0.4,0.3]$ (return 1 minus $V$). $\lambda=0.95$: $\hat A_1=0.3$, $\hat A_1'=0.1+0.95(0.3)=0.385$, $\hat A_0=0.1+0.95(0.385)=0.46575$.
+   - $\lambda=0$: $\hat A=[0.1,0.1,0.3]$. $\lambda=1$: $[0.5,0.4,0.3]$ (return 1 minus $V$). $\lambda=0.95$ (recursion $\hat A_t=\delta_t+0.95\hat A_{t+1}$, tokens indexed 0–2): $\hat A_2=0.3$, $\hat A_1=0.1+0.95(0.3)=0.385$, $\hat A_0=0.1+0.95(0.385)=0.46575$.
    - verl then whitens these over the batch, so absolute values are not what the actor sees.
 2. *Group baseline.* Rewards $[1,0,0,1]$: mean 0.5, sample std 0.5774, advantages $\pm0.866$; population std would give $\pm1.0$ (CLM-044).
 3. *Clip.* $\epsilon_l=\epsilon_h=0.2$, $c=3$, after one minibatch update:
-   - token with $A=+0.866$, $r=1.30$: clipped term $-0.866\times1.2=-1.039$ is larger than $-1.126$, so $\ell=-1.039$ and the gradient through this token is zero.
-   - token with $A=-0.866$, $r=0.70$: $\max(0.606,\ 0.693)=0.693$, clipped, zero gradient.
-   - token with $A=-0.866$, $r=4.0$: $\max(3.464, 1.039)=3.464$, then $\min(3.464,\ 0.866\times3=2.598)=2.598$; dual clip bounds the loss and zeroes the gradient.
+   - token with $A=+0.866$, $r=1.30$: unclipped term $-0.866\times1.30=-1.126$; $\mathrm{clip}(1.30)=1.2$; clipped term $-0.866\times1.2=-1.039$ is larger than $-1.126$, so $\ell=-1.039$ and the gradient through this token is zero.
+   - token with $A=-0.866$, $r=0.70$: $\max(0.866\times0.70,\ 0.866\times0.8)=\max(0.606,\ 0.693)=0.693$, clipped, zero gradient.
+   - token with $A=-0.866$, $r=4.0$: $\max(0.866\times4.0,\ 0.866\times1.2)=\max(3.464, 1.039)=3.464$, then $\min(3.464,\ 0.866\times3=2.598)=2.598$; dual clip bounds the loss and zeroes the gradient.
 4. *Interpretation.* On the first minibatch of a batch, all three ratios would be 1 and nothing would clip (CLM-043). A nonzero clip fraction on the first minibatch therefore signals that old log-probs did not come from the current trainer parameters (Lesson 27.6).
 
 **Knowledge Check:**
@@ -148,9 +156,12 @@ Which tokens does my update actually move, and why is entropy falling?
 - **Loss aggregation**: how the token loss matrix becomes a scalar. verl implements `token-mean` (sum over valid tokens divided by the global token count), `token-sum`, `seq-mean-token-sum`, `seq-mean-token-sum-norm` (divided by a constant horizon), and `seq-mean-token-mean`, with `token-mean` the actor default (**O**, CLM-005).
 - **Length bias**: Liu et al. report that popular open-source PPO implementations normalized per response length, a non-constant that misaligns with the PPO objective (**O**, CLM-011). DAPO reports that sample-level averaging under-weights tokens in long responses, which in long-CoT RL let gibberish and repetition in overlong samples grow; it uses a token-level loss instead (**O**, CLM-006).
 - **Entropy collapse**: policy entropy falling quickly so that groups become nearly identical. DAPO observed it with naive PPO/GRPO (**O**, CLM-007). Cui et al. report it consistently without entropy intervention and fit an empirical relation $R=-a e^{H}+b$ between entropy and performance (**O**, CLM-008).
+  - where: $R$ = validation performance; $H$ = policy entropy; $a,b$ = fitted constants.
 - **Entropy–covariance mechanism**: for a tabular softmax policy, the step-wise entropy change is approximately $-\mathrm{Cov}(\log\pi,\Delta z)$, and under vanilla policy gradient $\Delta z_a=\eta\,\pi(a)A(a)$; high-probability actions with positive advantage lower entropy (**O**, CLM-008).
+  - where: $z_a$ = logit of action $a$ ($\pi=\mathrm{softmax}(z)$); $\Delta z_a$ = its change in one step; $\eta$ = learning rate (not AReaL's staleness bound in Lesson 27.6); $\mathrm{Cov}$ is taken over $a\sim\pi$: $\mathrm{Cov}_\pi(X,Y)=\mathbb{E}_\pi[XY]-\mathbb{E}_\pi[X]\mathbb{E}_\pi[Y]$.
 - **Clip-Higher**: with $\epsilon=0.2$ and $A>0$, a token at $\pi_{old}=0.01$ can rise only to 0.012 while one at 0.9 is effectively unconstrained; DAPO decouples $\epsilon_{low}=0.2$, $\epsilon_{high}=0.28$ (**O**, CLM-007).
 - **Sequence-level ratio**: GSPO uses $s_i=\exp(\frac{1}{|y_i|}\sum_t\log\rho_{i,t})$ and clips whole responses; its clip ranges differ from GRPO's by orders of magnitude (**O**, CLM-010).
+  - where: $y_i$ = response $i$ (written $o_i$ elsewhere); $|y_i|$ = its token count; $\rho_{i,t}$ = per-token ratio $\pi_\theta/\pi_{old}$ for token $t$ of response $i$. $s_i$ is the geometric mean of the token ratios, so it stays near 1 even for long responses.
 - **Efficiency versus asymptote**: Khatri et al. report that aggregation, normalization, curriculum, and off-policy algorithm mainly change compute efficiency rather than the asymptote in their recipes (**O**, CLM-038). Compare variants on curves, not one endpoint.
 
 **Mechanism Explanation:**
@@ -158,8 +169,11 @@ Aggregation sets each token's weight before the advantage is applied. Under `seq
 
 **Quantitative Model / Derivation:**
 - Per-token weight: `seq-mean-token-mean` $w_{i,t}=\frac{1}{G|o_i|}$; `token-mean` $w_{i,t}=\frac{1}{\sum_j|o_j|}$.
+  - where: $G$ = responses in the group (or batch); $|o_i|$ = valid tokens in response $i$; $w_{i,t}$ multiplies token $t$'s loss before summing. Total weight of response $i$: $1/G$ under `seq-mean-token-mean`, $|o_i|/\sum_j|o_j|$ under `token-mean`.
 - Clip ceiling for $A>0$: $\pi_\theta\le\pi_{old}(1+\epsilon_h)$.
+  - Step-by-step: $r=\pi_\theta/\pi_{old}\le1+\epsilon_h$, so the largest absolute gain is $\pi_{old}\epsilon_h$: $0.01\times0.2=0.002$ for a rare token versus $0.9\times0.2=0.18$ for a common one.
 - Entropy change (tabular, first order): $\Delta H\approx-\eta\,\mathrm{Cov}_\pi(\log\pi,\ \pi A)$ (**D**, CLM-009).
+  - Step-by-step: substitute $\Delta z_a=\eta\,\pi(a)A(a)$ into $\Delta H\approx-\mathrm{Cov}_\pi(\log\pi,\Delta z)$ and pull the constant $\eta$ out of the covariance.
 
 **Worked Example (synthetic):**
 1. *Aggregation.* A group of $G=2$: response 1 has 100 tokens, $A=+1$; response 2 has 1,000 tokens, $A=-1$.
@@ -168,7 +182,7 @@ Aggregation sets each token's weight before the advantage is applied. Under `seq
    - Consequence: under per-sequence normalization, a long wrong response is penalized little per token, which is the mechanism behind length growth among incorrect answers (Module 19, Lesson 19.5).
 2. *Clip-Higher.* $\pi_{old}=0.01$: ceiling 0.012 at $\epsilon_h=0.2$, 0.0128 at 0.28. $\pi_{old}=0.9$: ceiling 1.08 or 1.152, both above 1, so no bound in practice.
 3. *Entropy covariance* (**D**, CLM-009). One state, $\pi=[0.7,0.2,0.1]$ ($H=0.80182$ nats), $\eta=0.1$:
-   - $A=[0.3,-0.7,-0.7]$ (likely action is good): $\mathrm{Cov}=0.098555$, predicted $\Delta H=-0.00986$, exact after the softmax update $-0.00991$.
+   - $A=[0.3,-0.7,-0.7]$ (likely action is good): $\pi A=[0.21,-0.14,-0.07]$, $\mathbb{E}_\pi[\pi A]=0.112$, $\mathbb{E}_\pi[\log\pi]=-0.80182$, $\mathbb{E}_\pi[\log\pi\cdot\pi A]=0.008751$, so $\mathrm{Cov}=0.008751+0.80182\times0.112=0.098555$, predicted $\Delta H=-0.00986$, exact after the softmax update $-0.00991$.
    - $A=[-0.1,-0.1,0.9]$ (rare action is good): $\mathrm{Cov}=-0.032088$, predicted $+0.00321$, exact $+0.00321$.
    - Interpretation: entropy falls when advantage aligns with probability. Verifiable rewards on tasks the model already mostly solves produce that alignment.
 4. *DAPO ablation, author-reported* (Qwen2.5-32B base, AIME24 avg@32, cumulative): naive GRPO 30, +overlong filtering 36, +Clip-Higher 38, +soft overlong punishment 41, +token-level loss 42, +dynamic sampling 50 (**O**, CLM-007). Increments are cumulative, not independent effects.
@@ -212,7 +226,10 @@ The policy sees only $r$. If $r$ is correctness passed through a noisy channel, 
 
 **Quantitative Model / Derivation (D, CLM-017):**
 - $\mathbb{E}[r]=q(1-f_n)+(1-q)f_p$, where $q$ is the true correct rate.
+  - where: $r\in\{0,1\}$ = checker reward (here $r$ is the reward, not the importance ratio); $f_n=P(r=0\mid\text{correct})$; $f_p=P(r=1\mid\text{incorrect})$.
+  - Step-by-step: a correct response (probability $q$) earns 1 with probability $1-f_n$; an incorrect one (probability $1-q$) earns 1 with probability $f_p$; add the two cases.
 - Reward gap between a correct and an incorrect response: $1-f_n-f_p$.
+  - Step-by-step: $\mathbb{E}[r\mid\text{correct}]-\mathbb{E}[r\mid\text{incorrect}]=(1-f_n)-f_p$.
 - Hacking condition: if a pattern raises $f_p$ to $f_p'$ on incorrect answers, reward rises whenever $q'(1-f_n)+(1-q')f_p' > q(1-f_n)+(1-q)f_p$, even with $q'<q$.
 
 **Worked Example (synthetic; $f_n=0.14$, $f_p=0.01$, informed by the magnitudes in CLM-014):**
@@ -249,25 +266,30 @@ How far can I push a proxy reward before true quality falls, and how do I find o
 
 **Concepts & Definitions:**
 - **Over-optimization**: Gao et al. (synthetic gold reward model labeling a proxy) find gold reward versus $d=\sqrt{KL(\pi\|\pi_{init})}$ follows $R_{bon}(d)=d(\alpha_{bon}-\beta_{bon}d)$ for best-of-$n$ and $R_{RL}(d)=d(\alpha_{RL}-\beta_{RL}\log d)$ for RL, with coefficients scaling smoothly with reward-model size; best-of-$n$ KL is $\log n-(n-1)/n$; RL consumes far more KL than best-of-$n$; and varying the KL penalty acted like early stopping without moving the KL–gold frontier in their setting (**O**, CLM-018).
+  - where: $\pi_{init}$ = policy before optimization; $d$ = square root of KL from it (nats); $n$ = best-of-$n$ sample count; $\alpha_{bon},\beta_{bon},\alpha_{RL},\beta_{RL}$ = fitted shape coefficients, unrelated to the KL-penalty coefficient $\beta$ below or to Tulu 3's reward $\alpha$ (Lesson 27.3).
 - **KL budget**: treat KL from the initial policy as spent resource; the gold reward peaks at a finite KL.
 - **Checker over-optimization**: Tulu 3 reports some higher-KL RLVR runs on constraint prompts produced outputs that satisfied the checker without meaningful content (**O**, CLM-012).
 - **Detection limits**: Moya et al. show that, in general, observations available during RLVR are insufficient to detect or identify accepted errors, and that audit feedback about correctness can reduce them (**O**, CLM-019). The CATCH testbed reports that a chain-of-thought monitor's protection eroded as the policy learned to mislead it (**O**, CLM-020).
 - **Independent audit**: a correctness check the policy is not optimized against (stricter verifier, held-out tests, human labels), run on frozen held-out prompts at each checkpoint.
 - **KL placement**: verl's `apply_kl_penalty` subtracts $\beta\,\mathrm{KL}$ from token rewards when `use_kl_in_reward` is true (default false); `use_kl_loss` (default false, coef 0.001) adds KL to the loss instead (**O**, CLM-045). In the reward, KL passes through the advantage estimator; with an outcome-only group estimator it becomes a per-response total that is group-centered and std-normalized (**D**, CLM-046).
+  - where: $\beta$ = KL coefficient; $\mathrm{KL}$ here is a per-token estimate from sampled tokens, e.g., $k1=\log\frac{\pi_\theta(o_t)}{\pi_{ref}(o_t)}$ or $k3=u-1-\log u$ with $u=\pi_{ref}(o_t)/\pi_\theta(o_t)$; both average to $KL(\pi_\theta\|\pi_{ref})$ over tokens sampled from $\pi_\theta$, since $\mathbb{E}_{\pi_	heta}[u]=\sum_t\pi_{ref}(t)=1$, $\mathbb{E}[k3]=\mathbb{E}[u]-1+\mathbb{E}[k1]=\mathbb{E}[k1]$. But $k3\ge0$ per token (because $\log u\le u-1$) while $k1$ can be negative. Example: $u=1.1$ gives $k1=-0.0953$, $k3=0.0047$.
 
 **Mechanism Explanation:**
 The proxy (reward model or checker) agrees with the true objective near the initial policy and disagrees further away. Optimization moves the policy along directions where the proxy's gradient is largest, including directions where proxy and truth disagree. KL from the initial policy measures how far that search has gone. A KL penalty slows the search; in Gao et al.'s setting it did not find better gold reward at a given KL. Because in-loop signals cannot separate accepted errors from real gains, the detection signal must come from outside the loop: the paired gap between training reward and audit pass rate on the same frozen prompts.
 
 **Quantitative Model / Derivation:**
 - RL peak: $\frac{dR_{RL}}{dd}=\alpha-\beta\log d-\beta=0\Rightarrow d^*=e^{\alpha/\beta-1}$.
+  - Here $\alpha,\beta$ abbreviate $\alpha_{RL},\beta_{RL}$ (shape coefficients, not the KL coefficient). Step-by-step: $R_{RL}=\alpha d-\beta d\log d$; product rule on $d\log d$ gives $\log d+1$; set to zero: $\log d=\alpha/\beta-1$.
 - Best-of-$n$ peak: $d^*=\alpha/(2\beta)$.
+  - Step-by-step: $R_{bon}=\alpha d-\beta d^2$; derivative $\alpha-2\beta d=0$. KL at either peak is $(d^*)^2$.
 - Hacking monitor: $g_k = \mathrm{pass}_{train}(k) - \mathrm{pass}_{audit}(k)$ on frozen held-out prompts at checkpoint $k$, with a paired bootstrap interval (Module 15, Lesson 15.4).
 - KL in reward, group estimator: score$_i=r_i-\beta\sum_t\mathrm{kl}_{i,t}$, then centered and divided by group std.
+  - where: $r_i$ = outcome reward of response $i$; $\mathrm{kl}_{i,t}$ = per-token KL estimate; $\beta$ = KL coefficient. $\mathrm{pass}_{train}$, $\mathrm{pass}_{audit}$ in the monitor = pass rates under the training checker and the independent audit.
 
 **Worked Example (synthetic coefficients; not fitted values from the paper):**
-1. *Peaks.* $\alpha=1$, $\beta=0.5$ for both forms. RL: $d^*=e^{1}=2.718$, KL $=7.39$ nats, $R=2.718(1-0.5\cdot1)=1.359$. Best-of-$n$: $d^*=1$, KL $=1$ nat, $R=0.5$. Best-of-16 spends KL $=\log16-15/16=1.835$ ($d=1.355$); best-of-1000 spends 5.909 ($d=2.431$).
+1. *Peaks.* $\alpha=1$, $\beta=0.5$ for both forms. RL: $d^*=e^{1/0.5-1}=e^{1}=2.718$, KL $=2.718^2=7.39$ nats, $R=2.718(1-0.5\cdot1)=1.359$. Best-of-$n$: $d^*=1/(2\cdot0.5)=1$, KL $=1$ nat, $R=1(1-0.5\cdot1)=0.5$. Best-of-16 spends KL $=\log16-15/16=1.835$ ($d=1.355$); best-of-1000 spends 5.909 ($d=2.431$).
 2. *Interpretation.* Each method has a gold peak at a finite KL; past it, more optimization lowers gold reward. Logging KL-to-init lets you place a checkpoint on this axis; the coefficients must be estimated per setup.
-3. *KL placement* (**D**, CLM-046). $G=2$, both responses correct ($r=[1,1]$), summed KL $[2,10]$, $\beta=0.05$: scores $[0.90,0.50]$, mean 0.70, sample std 0.2828, advantages $[+0.707,-0.707]$. Without KL this group would have zero advantage. With KL in the reward and std normalization, a small KL difference becomes a unit-scale signal; with KL in the loss, both responses would receive the same-size KL gradient per token regardless of group.
+3. *KL placement* (**D**, CLM-046). $G=2$, both responses correct ($r=[1,1]$), summed KL $[2,10]$, $\beta=0.05$: scores $[1-0.05\times2,\ 1-0.05\times10]=[0.90,0.50]$, mean 0.70, sample std $\sqrt{(0.2^2+0.2^2)/1}=0.2828$, advantages $[+0.707,-0.707]$. Without KL this group would have zero advantage. With KL in the reward and std normalization, a small KL difference becomes a unit-scale signal; with KL in the loss, both responses would receive the same-size KL gradient per token regardless of group.
 4. *Monitor.* At checkpoints 0, 200, 400: training-checker pass 0.52, 0.71, 0.86; audit pass 0.50, 0.66, 0.58. Gap 0.02, 0.05, 0.28 (synthetic). Stop or roll back at 200 if the declared margin is 0.10 and the gap's lower bound at 400 exceeds it.
 
 **Knowledge Check:**
@@ -302,7 +324,8 @@ Where does an RL step's wall time go, and what placement makes it shorter withou
 - **Disaggregated placement**: dedicated rollout and training resources. StreamRL reports that colocation couples resources although generation is memory-bandwidth-bound and training compute-bound, identifies pipeline bubbles and skewness bubbles (long-tail output lengths), and reports up to 2.66× throughput with streaming and skewness-aware scheduling (**O**, CLM-023).
 - **Long tail**: DORA's authors state rollout accounts for 50%–80% of step time (citing prior work) and that p99 length can exceed the median by over 10× in math and code (**O**, CLM-025). Treat the range as something to measure.
 - **Weight sync**: copying new weights to rollout replicas after each update. Lower bound: model bytes over the slowest effective bandwidth (**D**, CLM-027).
-- **Length cap and reward**: DAPO masks truncated samples and adds a soft overlong punishment, linear from 0 at $L_{max}-L_{cache}$ to −1 at $L_{max}$ (16,384 + 4,096 tokens in its setup) (**O**, CLM-047). The cap is a systems knob with a reward consequence.
+- **Length cap and reward**: DAPO masks truncated samples and adds a soft overlong punishment, linear from 0 at $L_{max}-L_{cache}$ to −1 at $L_{max}$ (16,384 + 4,096 tokens in its setup) (**O**, CLM-047).
+  - Step-by-step with those numbers: $L_{max}=20{,}480$, $L_{max}-L_{cache}=16{,}384$; the penalty is $(L_{max}-L_{cache}-|y|)/L_{cache}$ for $|y|$ in between, so an 18,432-token response gets $-2{,}048/4{,}096=-0.5$. The cap is a systems knob with a reward consequence.
 
 **Mechanism Explanation — Pinned verl Loop (O, CLM-028):**
 `verl/trainer/ppo/ray_trainer.py::RayPPOTrainer.fit` at commit `fbb4b3a8bf636f290c9c59fc346f756849e9c241`, one synchronous step:
@@ -316,17 +339,19 @@ Each stage is timed with `marked_timer` (`gen`, `reward`, `old_log_prob`, `adv`,
 
 **Quantitative Model / Derivation (D, CLM-026, CLM-027):**
 - $T_{gen}=\max_i L_i/v$ (all sequences decode concurrently at per-sequence rate $v$).
+  - where: $L_i$ = generated tokens of response $i$; $v$ = tokens/s per sequence; $B$ = responses per step.
 - Decode-slot utilization $U=\sum_iL_i/(B\max_iL_i)$.
+  - Step-by-step: $B$ slots are held for $\max_iL_i$ decode steps, so $B\max_iL_i$ slot-steps are reserved; $\sum_iL_i$ of them produce tokens.
 - Step time $T=T_{gen}+T_{reward}+T_{logprob}+T_{ref}+T_{update}+T_{sync}$; rollout fraction $T_{gen}/T$.
 - $T_{sync}\ge \text{bytes}/\text{bandwidth}$, plus resharding, engine reload, and cache invalidation.
 - Assumes constant $v$; in practice $v$ rises as the batch drains (Module 04), so this is an upper bound on the long-tail penalty.
 
 **Worked Example (synthetic):**
 1. *Lengths.* $B=512$: 461 responses of 4,096 tokens, 46 of 12,288, 5 of 32,768.
-   - $\sum L = 1{,}888{,}256+565{,}248+163{,}840=2{,}617{,}344$; $B\max L=16{,}777{,}216$; $U=15.6\%$.
-2. *Step time.* $v=30$ tok/s per sequence: $T_{gen}=32{,}768/30=1{,}092.3$ s, while a 4,096-token response finishes at 136.5 s. With $T_{logprob}=120$ s, $T_{update}=300$ s, other stages 0: $T=1{,}512.3$ s, rollout fraction 72.2%.
-3. *Cap at 16,384.* The 5 longest are truncated: $T_{gen}=546.1$ s, $T=966.1$ s, rollout fraction 56.5%. The 5 truncated responses now need a reward rule (filter or soft punishment, CLM-047), and dropping them biases group statistics toward short answers (CLM-025).
-4. *Weight sync.* 7×10⁹ parameters in bf16 = 14 GB: 0.28 s at an effective 50 GB/s, 4.48 s over a 25 Gb/s (3.125 GB/s) link. Colocated, this is negligible next to $T_{gen}$; disaggregated across a slow link with frequent syncs, it is not.
+   - $\sum L = 461\times4{,}096+46\times12{,}288+5\times32{,}768=1{,}888{,}256+565{,}248+163{,}840=2{,}617{,}344$; $B\max L=512\times32{,}768=16{,}777{,}216$; $U=2{,}617{,}344/16{,}777{,}216=15.6\%$.
+2. *Step time.* $v=30$ tok/s per sequence: $T_{gen}=32{,}768/30=1{,}092.3$ s, while a 4,096-token response finishes at 136.5 s. With $T_{logprob}=120$ s, $T_{update}=300$ s, other stages 0: $T=1{,}092.3+120+300=1{,}512.3$ s, rollout fraction $1{,}092.3/1{,}512.3=72.2\%$.
+3. *Cap at 16,384.* The 5 longest are truncated: $T_{gen}=16{,}384/30=546.1$ s, $T=546.1+420=966.1$ s, rollout fraction 56.5%. The 5 truncated responses now need a reward rule (filter or soft punishment, CLM-047), and dropping them biases group statistics toward short answers (CLM-025).
+4. *Weight sync.* 7×10⁹ parameters in bf16 (2 bytes each) = 14 GB: 14/50 = 0.28 s at an effective 50 GB/s, 14/3.125 = 4.48 s over a 25 Gb/s (25/8 = 3.125 GB/s) link. Colocated, this is negligible next to $T_{gen}$; disaggregated across a slow link with frequent syncs, it is not.
 
 **Knowledge Check:**
 1. Why does doubling rollout GPUs barely shorten $T_{gen}$ when one sequence is 8× the median length?
@@ -358,6 +383,7 @@ How off-policy is each training batch, from staleness and from sampler/trainer n
 - **Three-policy view**: $\pi_{rollout}$ (the engine that sampled, with its numerics and version), $\pi_{old}$ or $\pi_{prox}$ (the anchor for the trust region), and $\pi_\theta$ (being updated). Hilton et al. decouple the proximal policy (controls update size) from the behavior policy (used for off-policy correction) (**O**, CLM-031).
 - **Asynchronous RL and staleness**: generation and training overlap, so a batch contains samples from older policy versions. Noukhovitch et al. find off-policy tolerance depends on the algorithm (online DPO most robust in their tests) and report about 40% and 70% faster training while matching synchronous results on their tasks (**O**, CLM-030).
 - **AReaL**: interruptible rollout workers discard and recompute KV caches with new weights mid-generation (trajectories span versions), admission enforces $\lfloor(N_r-1)/B\rfloor\le i+\eta$, and a decoupled PPO objective uses a recent proximal policy. In its ablation (1.5B, math), naive PPO degraded with staleness (AIME24 23.3 at $\eta=4$ vs 42.0 synchronous) while the decoupled objective stayed near the oracle up to $\eta=8$ (41.0); unbounded staleness was still worse (**O**, CLM-024).
+  - where: $N_r$ = trajectories generated so far (1-indexed); $B$ = training batch size; $i$ = current policy version; $\eta$ = maximum allowed version lag (not a learning rate). $\lfloor(N_r-1)/B\rfloor$ is the version that will consume trajectory $N_r$.
 - **verl staleness knob**: the experimental fully-async trainer defaults `staleness_threshold` 0.1, `trigger_parameter_sync_step` 4, `partial_rollout` True; its README defines the threshold as a maximum proportion of stale samples, 0 as synchronous, ~1 as one-step-off-policy (**O**, CLM-029). This is not AReaL's version lag $\eta$.
 - **Staleness accounting**: PACE separates generation staleness (accumulated while a trajectory is generated) from waiting staleness (accumulated in the pool) (**O**, CLM-037).
 - **Log-probability mismatch**: rollout and training engines assign different probabilities to the same tokens even with identical weights. Qi et al. identify BF16's 7 mantissa bits as the primary source in their experiments and report FP16 virtually eliminated it; they describe sequence-level IS as unbiased but high-variance, truncated IS $\min(\rho,C)$ and masked IS $\rho\,\mathbb{1}[\rho\le C]$ as bias-for-variance trades, an extra forward pass (~25% cost under their assumption), and a remaining deployment gap (**O**, CLM-032). Root cause analysis is Module 30.
@@ -377,14 +403,17 @@ So the IS weight corrects $\pi_{rollout}\to\pi_{old}$, and the PPO ratio and cli
 
 **Quantitative Model / Derivation:**
 - Token TIS: $w_t=\min(\pi_{old}(o_t)/\pi_{rollout}(o_t),\ C)$; sequence IS: $w=\exp\sum_t\log\rho_t$.
+  - where: $\rho_t=\pi_{old}(o_t)/\pi_{rollout}(o_t)$ (correction ratio, distinct from the PPO ratio $r_t=\pi_\theta/\pi_{old}$); $C$ = truncation cap (`rollout_is_threshold`); $T$ = response length in tokens. Example: $\pi_{old}=0.30$, $\pi_{rollout}=0.10$ gives $\rho=3$, and TIS at $C=2$ uses $w=2$.
 - With independent per-token log-ratio noise $\sigma$, the sequence log-weight has s.d. $\sigma\sqrt T$ (**D**, CLM-039).
+  - Step-by-step: $\log w=\sum_{t=1}^T\log\rho_t$; variances of independent terms add, so $\mathrm{Var}=T\sigma^2$ and s.d. $=\sigma\sqrt T$.
 - ESS $=(\sum_iw_i)^2/\sum_iw_i^2$.
+  - Check: equal weights give $(Bw)^2/(Bw^2)=B$; one nonzero weight gives 1.
 - AReaL admission: $\lfloor(N_r-1)/B\rfloor\le i+\eta$.
 
 **Worked Example (synthetic):**
-1. *Sequence weights.* $\sigma=0.02$ per token, $T=1000$: log-weight s.d. $0.02\sqrt{1000}=0.632$; a $+2\sigma$ sequence has $w=e^{1.265}=3.54$. Token-level weights stay near 1 but drop the cross-token product (biased) (**D**, CLM-039).
-2. *ESS and truncation.* Eight sequence weights $[1,1,1,1,1,1,1,10]$: ESS $=17^2/107=2.70$ of 8. With TIS at $C=2$: $[1,\ldots,1,2]$, ESS $=9^2/11=7.36$. Truncation restored most of the effective batch at the cost of under-weighting the one sequence the trainer now likes far more than the sampler did.
-3. *Staleness admission.* $B=512$, trainer at version $i=10$, $\eta=2$: generation may continue while $\lfloor(N_r-1)/512\rfloor\le12$, i.e., up to $N_r=6{,}656$ trajectories; trajectory 6,657 waits for version 11.
+1. *Sequence weights.* $\sigma=0.02$ per token, $T=1000$: log-weight s.d. $0.02\sqrt{1000}=0.632$; a $+2\sigma$ sequence (two sequence-level s.d.: log-weight $2\times0.632=1.265$) has $w=e^{1.265}=3.54$. Token-level weights stay near 1 but drop the cross-token product (biased) (**D**, CLM-039).
+2. *ESS and truncation.* Eight sequence weights $[1,1,1,1,1,1,1,10]$: $\sum w=7+10=17$, $\sum w^2=7+100=107$, ESS $=17^2/107=2.70$ of 8. With TIS at $C=2$: $[1,\ldots,1,2]$, $\sum w=9$, $\sum w^2=11$, ESS $=9^2/11=7.36$. Truncation restored most of the effective batch at the cost of under-weighting the one sequence the trainer now likes far more than the sampler did.
+3. *Staleness admission.* $B=512$, trainer at version $i=10$, $\eta=2$: generation may continue while $\lfloor(N_r-1)/512\rfloor\le12$, i.e., $N_r-1\le12\times512+511=6{,}655$, up to $N_r=6{,}656$ trajectories; trajectory 6,657 waits for version 11.
 4. *Interpretation.* Staleness and mismatch both show up as $\pi_{old}\neq\pi_{rollout}$. To separate them, measure mismatch at zero staleness (synchronous step, same weights) and subtract.
 
 **Knowledge Check:**
