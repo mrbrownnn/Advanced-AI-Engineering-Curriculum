@@ -13,6 +13,7 @@ This module owns production telemetry boundaries, trace continuity and sampling,
 - **What You Will Do**: Define signal contracts; trace pinned OpenTelemetry GenAI conventions; propagate context; simulate biased sampling and censoring; build offered-outcome SLIs and burn alerts; calibrate proxy-quality signals; budget telemetry; and execute a mitigation-first incident runbook.
 - **Environment**: Python 3.10+, a small trace/ledger simulator, optional OpenTelemetry Collector. All fixtures are synthetic unless marked source observation.
 - **Evidence Rule**: Registry claims appear as source observation **O**, derivation **D**, or hypothesis **H** with `CLM-###`. Detector output, LLM-judge output, and embedding distance are instrument readings, never ground truth.
+- **If You Only Have One Week**: Lessons 23.2, 23.3, 23.4 — they quantify sampling and censoring bias, build offered-outcome SLIs, and derive multiwindow burn alerts; conventions, proxy quality, governance, and autoscaling build on those three.
 
 ## 01 Baseline Assumptions
 

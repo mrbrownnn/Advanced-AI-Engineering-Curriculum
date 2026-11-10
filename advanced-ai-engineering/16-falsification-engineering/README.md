@@ -30,6 +30,7 @@ Module 15 owns evaluation programs, estimates, graders, and release decisions. T
 - **Environment**: Python 3.10+, Hypothesis or an equivalent property-testing engine, isolated model/tool mocks, reproducible seeds, a fault injector, and disposable sandboxes for effectful tests.
 - **Evidence Rule**: Keep source observations (**O**), explicit derivations (**D**), and telemetry-dependent hypotheses (**H**) separate. `CLM-xxx` identifiers point to `research-registry/16-falsification-engineering.yaml`.
 - **Running fixture**: Lessons 16.2–16.6 follow one **synthetic** case, fixture F-16 (timeout after commit), from generation through shrinking, metamorphic adjudication, differential testing, mutation, replay, and promotion. Its traces and tables come from a small deterministic toy model that was executed for this module (**D**, CLM-019). The model is not in the repository and is not a production system; its rules are stated in Lesson 16.2 so the learner can rebuild it in LAB A.
+- **If You Only Have One Week**: Lessons 16.1, 16.2, 16.3 — they turn a requirement into a falsifiable contract and search it with property, stateful, and metamorphic tests; differential, mutation, fault-injection, and portfolio work build on those three.
 
 ## 01 Baseline Assumptions
 

@@ -32,6 +32,7 @@ Module 00 introduced experimental units, confidence intervals, and falsification
 - **What You Will Do**: Derive compute-optimal allocations under competing published fits; fit and stress a scaling law on proxy runs; implement muP and show learning-rate drift under standard parametrization; induce and fix attention-logit and output-logit instabilities; trace z-loss, skip-step, and schedule code at a pinned OLMo-core commit; compare cosine and warmup-stable-decay schedules; optimize a data mixture on proxies and test whether it transfers; and average checkpoints.
 - **Environment**: Python 3.10+, NumPy/SciPy, PyTorch. Hardware tiers are `CPU`, `COLAB-GPU` (one free/low-tier Colab GPU), and `TRACE` (pinned source or published-log replay). No local GPU is assumed. Models are tiny decoders (≤ ~50M parameters) on public text.
 - **Evidence Rule**: Keep source observations (**O**), explicit derivations (**D**), and measurement-dependent hypotheses (**H**) separate. Author-reported results are labeled as such. All numbers in worked examples are synthetic or recomputed from cited fits and are labeled.
+- **If You Only Have One Week**: Lessons 25.1, 25.2, 25.4 — they allocate compute, fit a scaling law and state when it fails, and keep the run stable enough to test it; μP, schedules, and data mixtures build on those three.
 
 ## 01 Baseline Assumptions
 

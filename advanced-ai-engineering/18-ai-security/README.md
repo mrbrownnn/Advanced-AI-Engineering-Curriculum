@@ -21,6 +21,7 @@ Module 12 introduced authority policy for tool calls and the budget reservation 
 - **What You Will Do**: Build a source–sink threat model, execute direct/indirect injection and retrieval poisoning in a sandbox, evaluate detectors under adaptive attack, implement per-action authorization, an egress policy proxy, and a per-principal budget ledger, trace AgentDojo, and diagnose an exfiltration incident.
 - **Environment**: Python 3.10+, an isolated agent sandbox with mock email/files/banking tools, a small vector store, AgentDojo or equivalent harness, a network egress proxy with a sandbox-only resolver and listener, and no production credentials.
 - **Evidence Rule**: Keep source observations (**O**), explicit derivations (**D**), and telemetry-dependent hypotheses (**H**) separate. Every rate in a worked example is synthetic unless it carries an experiment-card reference (EC-1 to EC-14). All attack work runs only in authorized sandboxes, with canary values instead of real secrets and reserved names (`.example`, `.test`) instead of real endpoints.
+- **If You Only Have One Week**: Lessons 18.1, 18.2, 18.4 — they map sources, sinks, and authority, demonstrate injection and poisoning, and enforce per-action authorization that survives model compromise; probabilistic defenses, output handling, and red teaming build on those three.
 
 ## 01 Baseline Assumptions
 

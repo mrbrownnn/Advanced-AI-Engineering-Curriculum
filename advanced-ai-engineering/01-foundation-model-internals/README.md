@@ -12,6 +12,7 @@ This module builds a mechanistic decoder-only model while refusing the common sh
 - **What You Will Do**: Implement a minimal decoder layer, prove its shape invariants, turn logits into a documented sampling contract, test causal isolation and RoPE, compare MHA/MQA/GQA with MLA latent state, reconcile analytical counts with real parameters, profile deviations from the model, and trace a pinned Transformers forward and sampling path.
 - **Environment**: Python 3.10+ and PyTorch; a GPU is optional for profiler studies but not for shape, accounting, sampling, or invariant tests.
 - **Research Cutoff**: Evidence registry updated 2026-09-30 (WP-F1 review). Implementation claims remain pinned to the revisions in §05.
+- **If You Only Have One Week**: Lessons 1.1, 1.3, 1.6 — they turn a configuration into tensor shapes, attention geometry, and scoped parameter and FLOP counts; sampling, positions, numerics, sparse experts, and source tracing build on those three.
 
 ## 01 Baseline Assumptions
 

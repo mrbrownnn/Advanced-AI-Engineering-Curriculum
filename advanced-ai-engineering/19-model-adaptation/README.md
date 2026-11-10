@@ -29,6 +29,7 @@ Module 01 introduced parameter accounting (Lesson 1.5), Module 05 quantization c
 - **What You Will Do**: Write an adaptation decision record with a falsifiable comparison, compute and measure training memory and LoRA parameter counts, implement and trace LoRA at a pinned PEFT commit, build SFT and preference data with correct templates, loss masks, and provenance filters, run DPO/GRPO-style updates on a small model, and gate an adapter on target, retained capability, and safety.
 - **Environment**: Python 3.10+, PyTorch, Transformers, PEFT (and optionally TRL), one GPU able to fine-tune a ≤3B open-weight model with LoRA, the Module 15 evaluation harness, and a fixed safety prompt suite. No production data without the Module 08 lineage controls.
 - **Evidence Rule**: Keep source observations (**O**), explicit derivations (**D**), and measurement-dependent hypotheses (**H**) separate. All numbers in worked examples are declared synthetic or derived; author-reported results are labeled as such.
+- **If You Only Have One Week**: Lessons 19.1, 19.4, 19.6 — they decide whether to adapt at all, build data that survives leakage and provenance checks, and gate release on gain, retained capability, and safety; memory, LoRA mechanics, and preference optimization build on those three.
 
 ## 01 Baseline Assumptions
 

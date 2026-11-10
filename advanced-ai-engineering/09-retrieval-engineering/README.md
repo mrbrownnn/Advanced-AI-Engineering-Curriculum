@@ -21,6 +21,7 @@ This module covers lexical and dense retrieval, exact and approximate nearest ne
 - **What you will do:** implement lexical and exact-dense baselines; quantify representation and approximation loss separately; tune HNSW under selective filters; build hybrid fusion and bounded reranking; measure judgment and service trade-offs; trace Lucene source; and diagnose a loaded retrieval regression.
 - **Environment:** Python 3.10+ for experiment orchestration and analysis, plus a pinned search engine or ANN implementation and a versioned corpus/query/judgment set. Record index hardware, build/search parameters, concurrency, filters, and cache state.
 - **Evidence rule:** separate source observations (**O**), derivations (**D**), and telemetry-dependent hypotheses (**H**). Paper gains remain scoped to model, corpus, queries, judgments, index, hardware, and baseline.
+- **If You Only Have One Week**: Lessons 9.1, 9.3, 9.6 — they cover the lexical baseline, exact-versus-ANN loss under filters, and judged quality against latency; dense encoders, fusion, reranking, and adaptation build on those three.
 
 ## 01 Baseline Assumptions
 

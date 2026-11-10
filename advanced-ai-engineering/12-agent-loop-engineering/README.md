@@ -30,6 +30,7 @@ This module owns the observe–decide–act loop, tool and observation contracts
 - **What You Will Do**: Implement and instrument a bounded controller, define tool and observation contracts, inject ambiguous effects and recovery failures, compare progress and reflection mechanisms, trace a pinned LangGraph path, and defend a governed operational-agent design.
 - **Environment**: Python 3.10+ for controller and fault-injection harnesses. Sandboxed mock tools and an append-only trajectory store are required; external side effects are optional and must remain disposable or simulated.
 - **Evidence Rule**: Label source observations (**O**), explicit derivations (**D**), and telemetry-dependent hypotheses (**H**). Model claims about success, failure, or tool completion are not execution evidence.
+- **If You Only Have One Week**: Lessons 12.1, 12.3, 12.5 — they model the loop as a bounded controller, bound budgets and retries, and verify effects under external authority; tool contracts, progress detection, and trajectory evaluation build on those three.
 
 ## 01 Baseline Assumptions
 

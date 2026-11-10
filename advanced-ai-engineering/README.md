@@ -18,6 +18,8 @@ Scientific Experimentation → Foundation Model Internals → Inference GPU Fund
 → AI Economics → Observability / Reliability → Model-System Co-design → Capstone
 ```
 
+Multi-Agent Systems (37) and Tool Ecosystem & Protocols (38) follow the Durable Agent Runtime; Feedback Loop & AI Product (39) follows Model Adaptation.
+
 ### Central Principle
 
 ```
@@ -87,6 +89,9 @@ advanced-ai-engineering/
 ├── 22-ai-economics/                  Cost and routing
 ├── 23-observability-reliability/     Tracing, SLOs, incidents
 ├── 24-model-system-codesign/         Architecture-system coupling
+├── 37-multi-agent-systems/          Multi-agent topologies, cost, cascading failure
+├── 38-tool-ecosystem-protocols/      MCP, tool contracts, registry, per-tool auth
+├── 39-feedback-loop-ai-product/      User feedback, A/B testing, latency/trust UX
 ├── 25-pretraining-dynamics-scaling/ Expert: scaling laws, μP, instabilities
 ├── 26-distributed-low-precision-training/ Expert: ZeRO/FSDP, FP8
 ├── 27-rl-post-training-systems/     Expert: RLVR, GRPO estimators, async RL
@@ -122,4 +127,4 @@ Repository-level material outside this folder: [paper library](../paper-library/
 
 ## Status
 
-Modules 00–24 (core) and 25–28 (expert) are authored against the [instructional schema](INSTRUCTIONAL_SCHEMA.md), each with a research registry and knowledge model. Modules 29–36 are proposed in [EXPERT-TRACK.md](EXPERT-TRACK.md). Run `python tools/validate_curriculum.py` for the static checks; passing them does not certify technical correctness.
+Modules 00–24 and 37–39 (core) and 25–28 (expert) are authored against the [instructional schema](INSTRUCTIONAL_SCHEMA.md), each with a research registry and knowledge model. Modules 29–36 are proposed in [EXPERT-TRACK.md](EXPERT-TRACK.md). Run `python tools/validate_curriculum.py` for the static checks; passing them does not certify technical correctness.

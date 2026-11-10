@@ -26,6 +26,7 @@ media bytes --decode/canonicalize--> processor --> encoder --> bridge/projector
 - **What You Will Do**: Build a stage ledger for a multimodal request. Compute decoder-visible modality tokens and logical KV from pinned processor code for four architectures. Measure padding and cache behavior under mixed batches. Align audio and video on a shared clock. Run a five-way discriminating diagnosis of an OOM. Choose a representation budget inside a measured quality boundary.
 - **Environment**: Python 3.10+, PyTorch, Transformers at the pinned revision (`d6c1e71bd717bf092f8293f0c3c9bd4a5ac5401a`), Pillow, NumPy. Labs A, C, and the accounting parts of B and D run on CPU. Optional: one NVIDIA GPU and vLLM at the pinned revision (`25b0add7b8a1c944d5c4e364f2de6aa82497a2ad`) for live encoder-cache and memory measurements.
 - **Evidence Rule**: Source observations are **O**, explicit derivations **D**, and measurement-dependent hypotheses **H**, each with a `CLM-###` from the research registry. All worked-example inputs are labeled synthetic or pinned-configuration values. Author-reported numbers are quoted only with their scope, and frontier results inspected at abstract level are labeled as such.
+- **If You Only Have One Week**: Lessons 21.1, 21.2, 21.5 — they build the stage ledger, compute decoder-visible modality tokens and KV, and discriminate memory and latency causes; batching, cross-stream timing, and the quality boundary build on those three.
 
 ## 01 Baseline Assumptions
 

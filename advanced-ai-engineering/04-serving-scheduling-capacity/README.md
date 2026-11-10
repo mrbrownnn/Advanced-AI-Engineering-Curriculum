@@ -11,6 +11,7 @@ Mastering serving, scheduling, and capacity planning is what transforms an engin
 - **Engineering Problem**: Maximizing inference goodput and capacity utilization while enforcing strict bounds on Time-To-First-Token (TTFT) and Inter-Token Latency (ITL) under dynamic, multi-tenant workloads.
 - **What You Will Do**: Implement a discrete-event continuous batching scheduler simulator, evaluate chunked prefill mechanics under heterogeneous prompt distributions, model queueing saturation knees using Little's Law and M/G/1 theory, diagnose a multi-factor production latency incident, trace vLLM scheduler execution paths, and design an enterprise serving platform capacity plan.
 - **Environment**: A standard Python 3.10+ development environment for the scheduler simulator and queueing test harnesses (Labs A–D). Access to a single NVIDIA GPU (Ampere/Ada/Hopper) is optional but valuable for running live inference benchmarks.
+- **If You Only Have One Week**: Lessons 4.1, 4.4, 4.7 — they decompose request metrics, locate the saturation knee, and discriminate bottlenecks for capacity planning; batching, chunked prefill, scheduling, and admission control build on those three.
 
 ## 01 Baseline Assumptions
 - **Transformer Forward Pass & Dimensions**: You understand the sequence dimensions, self-attention tensor shapes, and linear projection FLOP counts for standard autoregressive decoders (Module 01).

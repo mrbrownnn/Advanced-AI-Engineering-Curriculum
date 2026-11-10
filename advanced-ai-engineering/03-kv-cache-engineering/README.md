@@ -7,6 +7,7 @@ KV cache is often one of the dominant sources of dynamic memory consumption in L
 - **Engineering Problem**: Solving memory exhaustion and latency spikes under continuous batching.
 - **What You Will Do**: Build a paged KV allocator, simulate external vs internal fragmentation, diagnose a latency incident, and design an architecture transfer plan.
 - **Environment**: A basic Python environment for the simulator (Labs A-C). Access to a single GPU is optional but recommended for latency bounds testing (Lab D).
+- **If You Only Have One Week**: Lessons 3.1, 3.3, 3.5 — they derive KV bytes, explain paged block tables, and diagnose scheduler memory pressure; sharing, prefix caching, routing, quantization, and offloading build on those three.
 
 ## 01 Baseline Assumptions
 - **Architecture**: You can state K/V head geometry for MHA, MQA, and GQA (Module 01, Lesson 1.3) and the MLA retained-state model—one joint latent $c^{KV}$ of width $d_c$ plus one head-shared RoPE key $k^R$ of width $d_h^R$ per token per layer, with per-head K/V reconstructed rather than cached (Module 01, Lesson 1.7). This module converts that element count into bytes, blocks, and runtime layout; it does not re-derive MLA.

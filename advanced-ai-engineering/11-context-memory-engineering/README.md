@@ -30,6 +30,7 @@ This module owns model-aware context budgeting, effective-context testing, memor
 - **What you will do:** account for serialized context; map effective-context limits; design typed/versioned memory; implement write/read/correct/delete and conflict policies; compare compaction strategies; inject stale, poisoned, fragmented, and cross-tenant state; trace current helpers; and diagnose the earliest failing memory stage.
 - **Environment:** Python 3.10+ with the target tokenizer or server usage accounting, a versioned state store/search fixture, and a reproducible model endpoint. Pin serialization protocol, model, prompt, memory schema, selectors, summarizers, and evaluator revisions.
 - **Evidence rule:** distinguish source observations (**O**), explicit derivations (**D**), and telemetry-dependent hypotheses (**H**). Cognitive terms are software metaphors unless an implementation contract defines them.
+- **If You Only Have One Week**: Lessons 11.1, 11.3, 11.4 — they budget serialized context and define typed memory with a source of truth and a write/read/update/forget lifecycle; effective context, compression, and memory evaluation build on those three.
 
 ## 01 Baseline Assumptions
 

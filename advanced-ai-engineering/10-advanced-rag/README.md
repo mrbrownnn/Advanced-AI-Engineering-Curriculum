@@ -24,6 +24,7 @@ This module owns query orchestration, incremental-index freshness and version co
 - **What you will do:** define a versioned RAG request contract; implement replay-safe updates and deletes; measure query-visible freshness; compare query and context policies; resolve temporal/authority conflicts; audit claim-level citations; test RAG against long-context and hybrid routes; and diagnose stale unsupported answers.
 - **Environment:** Python 3.10+ with a versioned document store/search fixture and reproducible generation endpoint; optional distributed index and load generator for replica/cache/failure tests. Pin source, index, query transformation, prompt, model, evaluator, and cache revisions.
 - **Evidence rule:** keep source observations (**O**), derivations (**D**), and telemetry-dependent hypotheses (**H**) distinct. A paper result remains scoped to its model, corpus, retriever, prompt, task, and metric.
+- **If You Only Have One Week**: Lessons 10.1, 10.2, 10.5 — they define the evidence contract, query-visible freshness under updates and deletes, and claim-level citation support; orchestration, contradiction handling, and adaptive routes build on those three.
 
 ## 01 Baseline Assumptions
 

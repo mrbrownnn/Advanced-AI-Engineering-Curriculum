@@ -24,6 +24,7 @@ Module 13 owns the single-version model I/O boundary. Module 15 owns general eva
 - **What You Will Do**: Build a harness manifest and change classifier, run paired migration evaluations, run and govern an automated prompt optimizer, quantify selection bias, size a canary, design rollback, trace DSPy optimizer source, and diagnose a forced-migration incident.
 - **Environment**: Python 3.10+, access to at least two model versions (hosted or local), a frozen evaluation set with a validated grader, DSPy or an equivalent optimizer, and a traffic-replay or simulated canary harness.
 - **Evidence Rule**: Keep source observations (**O**), explicit derivations (**D**), and telemetry-dependent hypotheses (**H**) separate.
+- **If You Only Have One Week**: Lessons 17.1, 17.2, 17.5 — they pin the change surface, measure paired regression flips, and stage rollout with a controlled canary; prompt optimization, selection bias, and rollback state build on those three.
 
 ## 01 Baseline Assumptions
 

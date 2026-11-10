@@ -29,6 +29,7 @@ This module owns workflow history/checkpoints, deterministic replay, activities/
 - **What You Will Do**: Build durable history and effect boundaries, crash every commit window, implement idempotency/compensation/fencing, exercise durable joins and approvals, replay old histories, trace Temporal, and defend a recovery architecture.
 - **Environment**: Python 3.10+, a durable workflow runtime or deterministic local simulator, transactional storage, disposable external-effect mocks, and fault injection around persistence and acknowledgement boundaries.
 - **Evidence Rule**: Distinguish source observations (**O**), derivations (**D**), and telemetry-dependent hypotheses (**H**). Runtime marketing terms never replace an explicit persistence and effect contract.
+- **If You Only Have One Week**: Lessons 14.1, 14.2, 14.3 — they cover durable state and replay, idempotent effect boundaries, and honest compensation with fencing; joins, timers, recovery telemetry, and versioning build on those three.
 
 ## 01 Baseline Assumptions
 

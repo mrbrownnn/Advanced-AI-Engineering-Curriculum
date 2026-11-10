@@ -28,6 +28,7 @@ This module owns the evaluation program: contracts, datasets, grader validation,
 - **What You Will Do**: Specify an evaluation contract, build a versioned sliced dataset, calibrate graders, run paired dependence-aware comparisons, account for all terminal outcomes, trace the evaluation harness, and defend an offline-to-online release gate.
 - **Environment**: Python 3.10+ with NumPy and SciPy, immutable dataset/run manifests, deterministic and model-based graders, optional blinded human labels, and a statistical notebook or test harness.
 - **Evidence Rule**: **O** is a source observation, **D** is a derivation under stated assumptions, and **H** is an engineering hypothesis requiring telemetry. `CLM-xxx` identifiers point to `research-registry/15-evaluation-engineering.yaml`. Every dataset in this module's worked examples is **synthetic** and is labeled so; none is a measurement of a real system.
+- **If You Only Have One Week**: Lessons 15.1, 15.3, 15.4 — they define the decision, unit, and estimand, treat graders as instruments, and turn paired uncertainty into a release gate; dataset lineage, online validity, and harness operations build on those three.
 
 ## 01 Baseline Assumptions
 

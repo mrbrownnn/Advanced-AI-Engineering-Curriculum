@@ -22,6 +22,7 @@ It covers provenance, validation, drift, leakage, deduplication, contamination, 
 - **What you will do:** build immutable manifests and lineage; implement layered validation and quarantine; diagnose drift and training-serving skew; red-team leakage and decontamination; control synthetic mixtures; operate a human-label and active-learning loop; and defend promotion, deletion, and rollback.
 - **Environment:** Python 3.10+ with dataframe, hashing, validation, and statistical tooling; an object-store or filesystem snapshot fixture; optional distributed processing for scale tests. Pin source snapshots, schemas, transforms, tokenizers, detectors, label policy, and execution environment.
 - **Evidence rule:** distinguish source observation (**O**), assumption-backed derivation (**D**), and telemetry-dependent hypothesis (**H**). A passed check is evidence only for the invariant that check actually measures.
+- **If You Only Have One Week**: Lessons 8.1, 8.2, 8.4 — they make a release replayable through contracts and lineage, gate it with layered validation, and keep evaluation free of leakage; drift, synthetic data, and labeling build on those three.
 
 ## 01 Baseline Assumptions
 

@@ -32,6 +32,7 @@ Module 01 provides parameter accounting and tensor shapes; Module 02 provides me
 - **What You Will Do**: Reconcile memory and communication ledgers for ZeRO/FSDP; choose activation recomputation from tensor-level evidence; schedule TP/SP/PP/CP/EP forward and backward work; measure overlap from timelines; break FP8/MX/NVFP4 recipes; and select checkpoint intervals and asynchronous persistence controls from observed failure and storage behavior.
 - **Environment**: Python 3.10+, NumPy and PyTorch. Hardware tiers are `CPU`, `COLAB-GPU` (one free/low-tier Colab GPU), and `TRACE` (pinned source or published-log replay). No local GPU or multi-node cluster is assumed.
 - **Evidence Rule**: Keep source observations (**O**), explicit derivations (**D**), and measurement-dependent hypotheses (**H**) separate. Author-reported results remain scoped to their configurations; synthetic inputs are labeled.
+- **If You Only Have One Week**: Lessons 26.1, 26.3, 26.6 — they reconcile ZeRO/FSDP memory, compose parallelism with its communication, and bound checkpoint and restart waste; recomputation, overlap, and low-precision recipes build on those three.
 
 ## 01 Baseline Assumptions
 
