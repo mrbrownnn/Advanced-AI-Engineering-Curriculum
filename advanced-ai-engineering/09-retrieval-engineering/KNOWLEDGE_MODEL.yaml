@@ -1,5 +1,5 @@
 module: "09-retrieval-engineering"
-registry_version: "1.1.0"
+registry_version: "1.2.0"
 
 required_concepts:
   - "retrieval_contract"
@@ -16,6 +16,13 @@ required_concepts:
   - "recall_at_k"
   - "mrr"
   - "ndcg"
+  - "contrastive_loss"
+  - "temperature"
+  - "hard_negative_mining"
+  - "false_negatives"
+  - "margin_mse"
+  - "synthetic_query_adaptation"
+  - "evaluation_leakage"
   - "latency_quality_frontier"
 
 prerequisite_concepts:
@@ -26,6 +33,11 @@ prerequisite_concepts:
   - "latency_goodput"
 
 first_occurrence_concepts:
+  - "contrastive_loss"
+  - "hard_negative_mining"
+  - "false_negatives"
+  - "margin_mse"
+  - "synthetic_query_adaptation"
   - "retrieval_contract"
   - "bm25"
   - "dense_dual_encoder"
@@ -37,12 +49,16 @@ first_occurrence_concepts:
   - "late_interaction"
 
 concept_dependencies:
+  - { concept: "contrastive_loss", depends_on: ["dense_dual_encoder", "temperature"] }
+  - { concept: "hard_negative_mining", depends_on: ["contrastive_loss", "false_negatives"] }
+  - { concept: "synthetic_query_adaptation", depends_on: ["margin_mse", "evaluation_leakage"] }
   - { concept: "hnsw", depends_on: ["exact_knn", "similarity_metrics"] }
   - { concept: "hybrid_fusion", depends_on: ["bm25", "dense_dual_encoder"] }
   - { concept: "reranking", depends_on: ["retrieval_contract", "hybrid_fusion"] }
   - { concept: "latency_quality_frontier", depends_on: ["ann_recall", "reranking", "latency_goodput"] }
 
 mechanisms:
+  - {"id": "MECH-07", "description": "Adaptation uses candidate-softmax supervision, audited hard negatives, teacher margins and synthetic-query filtering, followed by independent exact retrieval and fixed-pool reranker evaluation.", "evidence_ids": ["CLM-021", "CLM-022", "CLM-023", "CLM-024", "CLM-025", "CLM-026", "CLM-027"], "derived_from": ["MECH-03", "MECH-05", "MECH-06"]}
   - id: "MECH-01"
     description: "A retrieval contract fixes query population, corpus snapshot, document/chunk identity, relevance event and judgments, filters/ACLs, cutoff, latency/capacity boundary, and downstream consumer."
     evidence_ids: ["CLM-008", "CLM-009", "CLM-010"]
@@ -69,6 +85,7 @@ mechanisms:
     derived_from: ["MECH-01", "MECH-02", "MECH-03", "MECH-04", "MECH-05"]
 
 mathematical_models:
+  - {"id": "MATH-08", "description": "InfoNCE temperature/gradient; shared negatives WB(1+n)-1; independent false-negative probability1-(1-f)^n; teacher-margin MSE and offset-versus-scale invariance. Synthetic arithmetic is not measured quality.", "evidence_ids": ["CLM-028", "CLM-030"], "derived_from": ["MECH-07"]}
   - id: "MATH-01"
     description: "BM25 term contribution uses IDF multiplied by saturated term frequency normalized by document length; k1, b, analyzer, field, corpus statistics, and the IDF convention must be declared. ln((N-n+0.5)/(n+0.5)) is zero at n=N/2 and negative above it, while Lucene's ln(1+(N-n+0.5)/(n+0.5)) is always positive; on the module's four-document fixture the two conventions reverse the ranking."
     evidence_ids: ["CLM-001", "CLM-013"]
@@ -99,6 +116,7 @@ mathematical_models:
     derived_from: ["MECH-05"]
 
 implementation_mechanisms:
+  - {"id": "IMPL-04", "description": "sentence-transformers main snapshot, not release: candidate concatenation/optional gather/scale; mining masks and opt-in margins; MarginMSELoss target differences. GradCache is not ordinary microbatch accumulation.", "evidence_ids": ["CLM-029", "CLM-030", "CLM-033"], "derived_from": ["MECH-07"]}
   - id: "IMPL-01"
     description: "An index manifest pins corpus, chunker, analyzer or encoder, vector normalization, distance, index build, filter schema, deletion state, and immutable snapshot."
     evidence_ids: ["CLM-001", "CLM-002", "CLM-003"]
@@ -113,6 +131,7 @@ implementation_mechanisms:
     derived_from: ["MECH-02", "MECH-03"]
 
 failure_modes:
+  - {"id": "FAIL-09", "description": "False negatives receive strong hard-candidate gradients; synthetic query exposure, held-out label tuning and incomplete judgment pools can turn apparent adaptation gains into invalid evidence.", "evidence_ids": ["CLM-024", "CLM-028", "CLM-031", "CLM-032"], "derived_from": ["MECH-07", "MECH-06"]}
   - id: "FAIL-01"
     description: "Analyzer mismatch destroys lexical identity through incompatible tokenization, normalization, fields, or corpus statistics."
     evidence_ids: ["CLM-001", "CLM-011"]
@@ -147,6 +166,7 @@ failure_modes:
     derived_from: ["MECH-05", "MATH-07"]
 
 production_connections:
+  - {"id": "PROD-03", "description": "Adaptation release pins train/dev/test and generator/teacher lineage, re-encodes the corpus, checks exact relevance, expands judgments and preserves compatible encoder/index rollback.", "evidence_ids": ["CLM-028", "CLM-031", "CLM-032", "CLM-033"], "derived_from": ["IMPL-04", "FAIL-09"]}
   - id: "PROD-01"
     description: "Tune candidate depth, ANN effort, branch fanout, fusion, and reranking jointly on a quality-latency-cost frontier under representative concurrency and filters."
     evidence_ids: ["CLM-004", "CLM-005", "CLM-006", "CLM-010", "CLM-012"]
@@ -173,6 +193,7 @@ todo_verify:
     derived_from: ["RESEARCH-02"]
 
 candidate_capabilities:
+  - { capability: "Design and falsify retrieval adaptation without confusing harder negatives with better labels or leaking evaluation supervision.", mapped_mechanisms: ["MECH-07", "MATH-08", "IMPL-04", "FAIL-09", "PROD-03"] }
   - { capability: "Implement and explain lexical, dense, and exact/approximate candidate paths.", mapped_mechanisms: ["MECH-02", "MECH-03", "MATH-01", "MATH-02", "MATH-06", "IMPL-03"] }
   - { capability: "Build hybrid fusion and reranking with inspectable candidate lineage.", mapped_mechanisms: ["MECH-04", "MECH-05", "MATH-03", "MATH-07", "IMPL-02", "FAIL-08"] }
   - { capability: "Evaluate retrieval with relevance, approximation, and system boundaries separated.", mapped_mechanisms: ["MECH-06", "MATH-04", "MATH-05", "PROD-01", "FAIL-07"] }
