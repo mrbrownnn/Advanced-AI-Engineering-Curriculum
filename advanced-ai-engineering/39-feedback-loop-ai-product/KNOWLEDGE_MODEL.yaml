@@ -1,0 +1,233 @@
+module: "39-feedback-loop-ai-product"
+registry_version: "1.0.0"
+
+required_concepts:
+  - "feedback_signal_measurement"
+  - "feedback_denominator"
+  - "exposure_logging"
+  - "nonresponse_bias"
+  - "position_bias"
+  - "inverse_propensity_weighting"
+  - "sycophancy"
+  - "approval_reward"
+  - "feedback_to_eval_routing"
+  - "label_provenance"
+  - "kto_objective"
+  - "edit_feedback"
+  - "feedback_poisoning"
+  - "sample_ratio_mismatch"
+  - "cuped"
+  - "novelty_primacy"
+  - "ab_test_guardrails"
+  - "response_time_thresholds"
+  - "overreliance"
+  - "signal_validity"
+
+prerequisite_concepts:
+  - "offered_denominator"
+  - "online_validity"
+  - "paired_block_statistics"
+  - "grader_validity"
+  - "train_eval_separation"
+  - "preference_optimization"
+  - "calibration"
+  - "delayed_labels"
+  - "latency_decomposition"
+
+first_occurrence_concepts:
+  - "feedback_signal_measurement"
+  - "feedback_denominator"
+  - "nonresponse_bias"
+  - "inverse_propensity_weighting"
+  - "sycophancy"
+  - "approval_reward"
+  - "kto_objective"
+  - "edit_feedback"
+  - "sample_ratio_mismatch"
+  - "cuped"
+  - "novelty_primacy"
+  - "response_time_thresholds"
+  - "overreliance"
+
+concept_dependencies:
+  - concept: "feedback_denominator"
+    depends_on: ["offered_denominator", "exposure_logging"]
+  - concept: "feedback_signal_measurement"
+    depends_on: ["feedback_denominator", "signal_validity"]
+  - concept: "nonresponse_bias"
+    depends_on: ["feedback_denominator"]
+  - concept: "inverse_propensity_weighting"
+    depends_on: ["nonresponse_bias", "position_bias"]
+  - concept: "approval_reward"
+    depends_on: ["sycophancy", "preference_optimization"]
+  - concept: "feedback_to_eval_routing"
+    depends_on: ["label_provenance", "grader_validity", "nonresponse_bias"]
+  - concept: "kto_objective"
+    depends_on: ["preference_optimization", "label_provenance"]
+  - concept: "feedback_poisoning"
+    depends_on: ["train_eval_separation", "label_provenance"]
+  - concept: "sample_ratio_mismatch"
+    depends_on: ["online_validity"]
+  - concept: "cuped"
+    depends_on: ["online_validity", "paired_block_statistics"]
+  - concept: "ab_test_guardrails"
+    depends_on: ["approval_reward", "sample_ratio_mismatch", "novelty_primacy", "delayed_labels"]
+  - concept: "overreliance"
+    depends_on: ["calibration", "signal_validity"]
+  - concept: "response_time_thresholds"
+    depends_on: ["latency_decomposition"]
+
+mechanisms:
+  - id: "MECH-01"
+    description: "Feedback as measurement: each explicit (thumbs, rating, side-by-side) or implicit (accept, copy, edit, regenerate, dwell, abandon) signal is an event emitted by a selected subset of users with a signal-specific propensity. What it measures (approval, reliance, preference gap, dissatisfaction) must be stated and validated against adjudicated outcomes; accept and copy track reliance or perceived productivity, not correctness, and the meaning of regenerate, edit, dwell, and abandonment in chat LLMs is unvalidated."
+    evidence_ids: ["CLM-011", "CLM-012", "CLM-048", "CLM-050", "CLM-051", "CLM-052"]
+    derived_from: []
+
+  - id: "MECH-02"
+    description: "Denominator join: feedback rows exist only when a user acts and are ingested asynchronously, so per-exposure rates require joining feedback to an exposure/trace log; per-feedback-event shares, per-exposed-response rates, and per-user rates are different estimands."
+    evidence_ids: ["CLM-033", "CLM-034", "CLM-042"]
+    derived_from: []
+
+  - id: "MECH-03"
+    description: "Presentation and position bias: users click or select partly by position and trust in the ranking; relative interpretations (click > skip above) are more robust than absolute ones; propensity under a position-based model can be estimated by swap interventions. Transfer to multi-draft or citation LLM UIs is a hypothesis."
+    evidence_ids: ["CLM-001", "CLM-002", "CLM-003", "CLM-055"]
+    derived_from: []
+
+  - id: "MECH-04"
+    description: "Approval reward and sycophancy: preference and approval signals reward agreement with user beliefs and persuasive but wrong answers when raters cannot verify; adding a thumbs-based reward weakened the primary reward that held sycophancy in check in the 2025 GPT-4o update, which passed offline evals and A/B tests."
+    evidence_ids: ["CLM-004", "CLM-005", "CLM-006", "CLM-007", "CLM-008", "CLM-009", "CLM-010", "CLM-049"]
+    derived_from: []
+
+  - id: "MECH-05"
+    description: "Feedback-to-eval routing: feedback events select candidates for independent adjudication; labels carry provenance and are separated from training data; public preference platforms and usage logs carry population, access, and gaming caveats; LLM judges may fail to recognize feedback-driven fixes."
+    evidence_ids: ["CLM-016", "CLM-017", "CLM-018", "CLM-019", "CLM-021", "CLM-047"]
+    derived_from: ["MECH-01", "MECH-02"]
+
+  - id: "MECH-06"
+    description: "Feedback-to-training: unpaired binary feedback fits KTO with class weights for imbalance; edits can drive preference inference without fine-tuning (PRELUDE/CIPHER, simulated users); every feedback channel is an untrusted write path into training data (single-user knowledge injection)."
+    evidence_ids: ["CLM-013", "CLM-014", "CLM-015", "CLM-020", "CLM-046"]
+    derived_from: ["MECH-05"]
+
+  - id: "MECH-07"
+    description: "Experiment integrity and sensitivity: SRM is a symptom check comparing observed and designed assignment ratios with a Pearson chi-square; CUPED subtracts a pre-period covariate to reduce variance by (1 - rho^2); novelty/primacy and early regression to the mean require time-aware reading; simulated-user A/B tests are surrogates."
+    evidence_ids: ["CLM-022", "CLM-023", "CLM-024", "CLM-025", "CLM-026", "CLM-027", "CLM-028"]
+    derived_from: []
+
+  - id: "MECH-08"
+    description: "Latency and trust UX: response-time thresholds of about 0.1 s, 1 s, and 10 s set UI feedback budgets; explanations and trust cues can raise acceptance regardless of correctness, and designs that reduce overreliance can be less liked."
+    evidence_ids: ["CLM-035", "CLM-036", "CLM-037", "CLM-038", "CLM-039"]
+    derived_from: []
+
+mathematical_models:
+  - id: "MATH-01"
+    description: "Nonresponse-biased thumbs share: observed up share = s*r_u/(s*r_u + (1-s)*r_d); s=0.8, r_u=0.02, r_d=0.10 gives 0.444, and r_u=0.04 gives 0.615 with no quality change. IPW by 1/r recovers s when propensities are known and unconfounded."
+    evidence_ids: ["CLM-040", "CLM-041", "CLM-056"]
+    derived_from: ["MECH-02"]
+
+  - id: "MATH-02"
+    description: "IPS for position bias: under P(click)=P(examine|rank)*P(relevant), E[1[click]/p_rank] = P(relevant); swap ratio CTR(swap)/CTR(no swap) estimates p_r/p_k; variance grows as p -> 0."
+    evidence_ids: ["CLM-003", "CLM-041"]
+    derived_from: ["MECH-03"]
+
+  - id: "MATH-03"
+    description: "KTO objective L = E[lambda_y - v(x,y)] with KL reference point z_0 and imbalance rule lambda_D*n_D/(lambda_U*n_U) in [1, 1.5]; for 1 up : 4 down and lambda_U=1, lambda_D in [4, 6]."
+    evidence_ids: ["CLM-013", "CLM-014", "CLM-046"]
+    derived_from: []
+
+  - id: "MATH-04"
+    description: "SRM Pearson chi-square: chi2 = sum (o_i - e_i)^2/e_i, df = k-1; 50,500/49,500 gives p = 1.57e-3 (no alert at 0.001), 50,600/49,400 gives p = 1.48e-4; the same 1% skew at n = 1,000 gives p = 0.75."
+    evidence_ids: ["CLM-029", "CLM-030", "CLM-043"]
+    derived_from: []
+
+  - id: "MATH-05"
+    description: "CUPED variance and planning: theta* = cov/var(X), var factor (1 - rho^2), coverage approximation (1 - c*rho^2); two-arm n = 15.70*sigma^2/delta^2 at alpha 0.05, power 0.8."
+    evidence_ids: ["CLM-022", "CLM-023", "CLM-044", "CLM-045", "CLM-032"]
+    derived_from: ["MECH-07"]
+
+implementation_mechanisms:
+  - id: "IMPL-01"
+    description: "GrowthBook gbstats at 362047d2: check_srm Pearson chi-square with df = len(users) - 1, called per dimension; DEFAULT_SRM_THRESHOLD = 0.001, overridable by settings, healthy when p >= threshold."
+    evidence_ids: ["CLM-029", "CLM-030"]
+    derived_from: []
+
+  - id: "IMPL-02"
+    description: "GrowthBook regression adjustment at 362047d2: pooled theta from joint control+treatment statistics; theta = 0 when pre-period variance is near zero, and create_theta_adjusted_statistics then silently reverts to unadjusted statistics; delta-method ratio variance in variance_of_ratios."
+    evidence_ids: ["CLM-031", "CLM-032"]
+    derived_from: []
+
+  - id: "IMPL-03"
+    description: "Langfuse scores at 5349d484: typed scores (NUMERIC, CATEGORICAL, BOOLEAN, CORRECTION, TEXT) attached to trace, session, observation, or dataset run; CORRECTION and TEXT excluded from aggregation; public POST enqueues SCORE_CREATE events asynchronously."
+    evidence_ids: ["CLM-033", "CLM-034"]
+    derived_from: []
+
+failure_modes:
+  - id: "FAIL-01"
+    description: "Approval-optimized release: a thumbs-derived reward or approval-metric gate selects for agreement; offline evals and A/B approval metrics pass while behavior degrades for some users or over time."
+    evidence_ids: ["CLM-006", "CLM-007", "CLM-049", "CLM-009"]
+    derived_from: ["MECH-04"]
+
+  - id: "FAIL-02"
+    description: "Denominator loss: a thumbs share computed from score rows moves with response propensity or UI prominence instead of quality."
+    evidence_ids: ["CLM-040", "CLM-042"]
+    derived_from: ["MATH-01"]
+
+  - id: "FAIL-03"
+    description: "Feedback poisoning: votes or edits from an untrusted user enter preference tuning and inject behavior for all users."
+    evidence_ids: ["CLM-020"]
+    derived_from: ["MECH-06"]
+
+  - id: "FAIL-04"
+    description: "Invalid experiment: SRM ignored, CUPED silently not applied, or an early novelty trend read as the effect."
+    evidence_ids: ["CLM-024", "CLM-025", "CLM-031", "CLM-043"]
+    derived_from: ["MECH-07"]
+
+  - id: "FAIL-05"
+    description: "Trust UI raises overreliance while satisfaction and acceptance rise."
+    evidence_ids: ["CLM-038", "CLM-039", "CLM-048"]
+    derived_from: ["MECH-08"]
+
+production_connections:
+  - id: "PROD-01"
+    description: "Experimentation platforms implement SRM and CUPED with their own thresholds and fallbacks; record the platform, revision, and settings in every decision record."
+    evidence_ids: ["CLM-029", "CLM-030", "CLM-031"]
+    derived_from: []
+
+  - id: "PROD-02"
+    description: "Feedback capture tools store optional scores keyed to traces; build the exposure join and reconcile async ingestion before computing rates."
+    evidence_ids: ["CLM-033", "CLM-034", "CLM-042"]
+    derived_from: []
+
+research_connections:
+  - id: "RES-01"
+    description: "Frontier evidence on feedback optimization: targeted manipulation under simulated feedback, misleading RLHF, social sycophancy, single-user knowledge injection, judges missing feedback-driven fixes, and LLM-simulated A/B surrogacy."
+    evidence_ids: ["CLM-008", "CLM-009", "CLM-010", "CLM-020", "CLM-021", "CLM-027"]
+    derived_from: []
+
+todo_verify:
+  - id: "TODO-01"
+    description: "Validate the meaning of regenerate, edit, dwell, and abandonment, the streaming perceived-latency effect, interference in LLM experiments, position bias in multi-draft UIs, quality-dependent nonresponse, and transfer of web latency results; each is a hypothesis with a stated test."
+    evidence_ids: ["CLM-050", "CLM-051", "CLM-052", "CLM-053", "CLM-054", "CLM-055", "CLM-056", "CLM-057"]
+    derived_from: []
+
+  - id: "TODO-02"
+    description: "Mastery fixture values are synthetic and must not be read as measurements."
+    evidence_ids: ["CLM-058"]
+    derived_from: []
+
+candidate_capabilities:
+  - capability: "Define what each feedback signal measures, join it to an exposure denominator, and state its validity status."
+    mapped_mechanisms: ["MECH-01", "MECH-02", "IMPL-03", "PROD-02"]
+  - capability: "Quantify and correct nonresponse and position bias with propensity weighting, and design the randomized elicitation that makes correction possible."
+    mapped_mechanisms: ["MECH-03", "MATH-01", "MATH-02", "FAIL-02"]
+  - capability: "Explain how approval rewards produce sycophancy and design guardrails that block approval-optimized regressions."
+    mapped_mechanisms: ["MECH-04", "FAIL-01", "RES-01"]
+  - capability: "Route feedback into adjudicated evaluation sets with label provenance."
+    mapped_mechanisms: ["MECH-05"]
+  - capability: "Turn binary and edit feedback into training data with KTO weighting and provenance filtering against poisoning."
+    mapped_mechanisms: ["MECH-06", "MATH-03", "FAIL-03"]
+  - capability: "Run and audit an LLM feature A/B test: SRM, CUPED with fallback detection, novelty/primacy, and guardrails."
+    mapped_mechanisms: ["MECH-07", "MATH-04", "MATH-05", "IMPL-01", "IMPL-02", "FAIL-04", "PROD-01"]
+  - capability: "Set latency and trust UX targets and measure overreliance rather than satisfaction alone."
+    mapped_mechanisms: ["MECH-08", "FAIL-05", "TODO-01"]
+  - capability: "Work conditionally from a synthetic product fixture."
+    mapped_mechanisms: ["TODO-02"]

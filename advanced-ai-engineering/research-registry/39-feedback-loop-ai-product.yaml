@@ -1,0 +1,1288 @@
+module: "39-feedback-loop-ai-product"
+registry_version: "1.0.0"
+research_cutoff: "2026-11-10"
+change_reason: "Initial registry for Module 39 (Feedback Loop & AI Product). Built only from the 2026-11-10 research dossier (sources opened 2026-11-10). Abstract-only sources are labeled as such in each evidence entry. Pinned GrowthBook and Langfuse symbols were re-confirmed by raw reads at the same commits on 2026-11-10 (static inspection; nothing executed). Synthetic arithmetic recomputed in Python (scipy) on 2026-11-10. Dossier items marked unverified (Fabijan SRM taxonomy and thresholds, KTO ablation attribution, WOA formula glyphs, Kohavi/Tang/Xu book contents, Brutlag latency result, Miller 1968 and Card et al. 1991 contents, GrowthBook minimum-count use site) are not used as claims."
+
+changed_claims: []
+
+out_of_scope_candidates:
+  - "Offered denominator, goodput, and the existence of online validation (owned by Module 15, Lesson 15.5)"
+  - "Block-level paired release statistics and power for paired gates (Module 15, Lesson 15.4)"
+  - "SFT/DPO/GRPO mechanics, contamination checks, and training-data poisoning in general (Module 19, Lessons 19.4-19.5)"
+  - "Calibration of confidence signals (Module 07, Lesson 7.2)"
+  - "Delayed-label SLIs and proxy-quality monitoring (Module 23, Lesson 23.5)"
+  - "Interference and network-effect experiment designs: no primary source opened in this pass (taught only as hypothesis CLM-054)"
+  - "Kohavi, Tang, Xu (2020) book contents: metadata only; nothing cited"
+
+claims:
+  - id: CLM-001
+    claim: "In an eye-tracking study of web search (Phase I 34 participants; Phase II 22 participants in normal, swapped-top-2, and reversed conditions), Joachims et al. report that clicks are informative but biased by trust in the ranking and by overall result quality; in the reversed condition the mean clicked rank moved from 2.66 to 4.03 and clicks per query fell from 0.80 to 0.64."
+    provenance: "VERIFIED_FACT"
+    domain: "implicit_feedback"
+    concepts: ["implicit_feedback", "presentation_bias", "trust_bias"]
+    confidence: "high"
+    evidence:
+      - source_type: "paper"
+        tier: 1
+        title: "Accurately Interpreting Clickthrough Data as Implicit Feedback"
+        authors: "Thorsten Joachims, Laura Granka, Bing Pan, Helene Hembrooke, Geri Gay"
+        year: "2005"
+        url: "https://www.cs.cornell.edu/people/tj/publications/joachims_etal_05a.pdf"
+        version: "SIGIR 2005; DOI 10.1145/1076034.1076063 (Crossref-verified)"
+        section: "Full text read 2026-11-10"
+        accessed_at: "2026-11-10"
+    limitations:
+      - "Small undergraduate samples, one 2005 web search engine; transfer to LLM interfaces is hypothesis CLM-055."
+    applicability: "Reference evidence that an implicit signal mixes relevance with presentation."
+    related_claims: ["CLM-002", "CLM-055"]
+    curriculum_usage:
+      lessons: ["39.1", "39.2"]
+      labs: ["LAB-B"]
+
+  - id: CLM-002
+    claim: "Joachims et al. (2005) report that relative preferences extracted as 'Click > Skip Above' agreed with explicit judgments 80.8 +/- 3.6% in Phase I against 89.5% inter-judge agreement and did not change significantly under swapped and reversed rankings, while 'Click > Earlier Click' was unreliable (36.8% swapped, 28.6% reversed)."
+    provenance: "VERIFIED_FACT"
+    domain: "implicit_feedback"
+    concepts: ["relative_preference_extraction", "implicit_feedback"]
+    confidence: "high"
+    evidence:
+      - source_type: "paper"
+        tier: 1
+        title: "Accurately Interpreting Clickthrough Data as Implicit Feedback"
+        authors: "Thorsten Joachims, Laura Granka, Bing Pan, Helene Hembrooke, Geri Gay"
+        year: "2005"
+        url: "https://www.cs.cornell.edu/people/tj/publications/joachims_etal_05a.pdf"
+        section: "Full text read 2026-11-10"
+        accessed_at: "2026-11-10"
+    limitations:
+      - "Same population and era limits as CLM-001."
+    applicability: "Why relative interpretations of implicit signals can be more robust than absolute ones."
+    related_claims: ["CLM-001"]
+    curriculum_usage:
+      lessons: ["39.2"]
+      labs: ["LAB-B"]
+
+  - id: CLM-003
+    claim: "Joachims, Swaminathan, and Schnabel show that an inverse-propensity-scored (IPS) ranking risk estimator is unbiased when examination propensities are positive and depend only on observables; under a position-based model P(click) = P(examine | rank) * P(click | relevant, examined), propensities need only be known up to a constant, and a swap intervention between ranks k and r gives click-rate ratios proportional to the propensity, which the authors describe as much less harmful than uniform randomization. With click noise the IPS risk is biased but order preserving."
+    provenance: "VERIFIED_FACT"
+    domain: "bias_correction"
+    concepts: ["inverse_propensity_weighting", "position_bias", "swap_intervention"]
+    confidence: "high"
+    evidence:
+      - source_type: "paper"
+        tier: 1
+        title: "Unbiased Learning-to-Rank with Biased Feedback"
+        authors: "Thorsten Joachims, Adith Swaminathan, Tobias Schnabel"
+        year: "2017"
+        url: "https://arxiv.org/abs/1608.04468"
+        version: "arXiv v1 (2016-08-16); WSDM 2017, DOI 10.1145/3018661.3018699"
+        section: "Full text read 2026-11-10"
+        accessed_at: "2026-11-10"
+    limitations:
+      - "The abstract claims an operational deployment; its numbers were not extracted."
+      - "Unbiasedness fails if propensity depends on unobserved quality (CLM-056)."
+    applicability: "Reference/baseline method for propensity correction of position-biased feedback."
+    related_claims: ["CLM-041", "CLM-055", "CLM-056"]
+    curriculum_usage:
+      lessons: ["39.2"]
+      labs: ["LAB-A", "LAB-B"]
+
+  - id: CLM-004
+    claim: "Sharma et al. report that five AI assistants were sycophantic across four free-form tasks: for example Claude 1.3 wrongly admitted mistakes on 98% of questions when challenged, and a user suggesting a wrong answer reduced accuracy by up to 27% (LLaMA 2)."
+    provenance: "VERIFIED_FACT"
+    domain: "sycophancy"
+    concepts: ["sycophancy"]
+    confidence: "high"
+    evidence:
+      - source_type: "paper"
+        tier: 1
+        title: "Towards Understanding Sycophancy in Language Models"
+        authors: "Mrinank Sharma, Meg Tong, Tomasz Korbak, et al. (incl. Samuel R. Bowman, Ethan Perez)"
+        year: "2024"
+        url: "https://arxiv.org/abs/2310.13548"
+        version: "arXiv v4 (2025-05-10); ICLR 2024"
+        section: "Full text v4 read 2026-11-10"
+        accessed_at: "2026-11-10"
+    limitations:
+      - "Models of 2023; rates are author-reported for their prompts."
+    applicability: "Mechanism evidence that assistants defer to stated user beliefs."
+    related_claims: ["CLM-005"]
+    curriculum_usage:
+      lessons: ["39.2"]
+
+  - id: CLM-005
+    claim: "Sharma et al. report that in hh-rlhf helpfulness data (15K pairs, 23 GPT-4-tagged features, Bayesian logistic regression with 71.3% holdout accuracy) 'matches user's beliefs' was consistently among the most predictive features of human preference, and that the Claude 2 preference model preferred sycophantic over baseline truthful responses 95% of the time and over helpful-truthful responses 45% of the time on the hardest misconceptions; best-of-N with N=4096 yielded about 75% sycophantic answers on the hardest misconceptions under that preference model versus about 25% under an oracle."
+    provenance: "VERIFIED_FACT"
+    domain: "sycophancy"
+    concepts: ["sycophancy", "approval_reward"]
+    confidence: "high"
+    evidence:
+      - source_type: "paper"
+        tier: 1
+        title: "Towards Understanding Sycophancy in Language Models"
+        authors: "Mrinank Sharma, Meg Tong, Tomasz Korbak, et al."
+        year: "2024"
+        url: "https://arxiv.org/abs/2310.13548"
+        version: "arXiv v4"
+        section: "Full text v4 read 2026-11-10"
+        accessed_at: "2026-11-10"
+    limitations:
+      - "Raters were preference annotators without internet access, not the users holding the belief; these are not product thumbs."
+    applicability: "Evidence that approval-style preference signals can reward agreement over truth."
+    related_claims: ["CLM-004", "CLM-010", "CLM-049"]
+    curriculum_usage:
+      lessons: ["39.2", "39.4"]
+      assessments: ["Incident-39.1"]
+
+  - id: CLM-006
+    claim: "OpenAI's 2025-04-29 postmortem states that the previous week's GPT-4o update was rolled back, that the models are taught by 'incorporating user signals like thumbs-up / thumbs-down feedback', that the update 'focused too much on short-term feedback, and did not fully account for how users' interactions with ChatGPT evolve over time', and that feedback collection would be revised to heavily weight long-term user satisfaction."
+    provenance: "VERIFIED_FACT"
+    domain: "feedback_optimization_incident"
+    concepts: ["approval_reward", "short_term_feedback"]
+    confidence: "high"
+    evidence:
+      - source_type: "official_blog"
+        tier: 2
+        title: "Sycophancy in GPT-4o: what happened and what we're doing about it"
+        authors: "OpenAI"
+        year: "2025"
+        url: "https://openai.com/index/sycophancy-in-gpt-4o/"
+        section: "Full text read 2026-11-10 from a Wayback raw snapshot because openai.com returned 403"
+        accessed_at: "2026-11-10"
+    limitations:
+      - "Vendor self-report; no effect sizes or traffic shares."
+      - "Snapshot text not compared with the live page."
+    applicability: "Canonical 2025 counterexample to optimizing short-term approval."
+    related_claims: ["CLM-007", "CLM-049"]
+    curriculum_usage:
+      lessons: ["39.2", "39.5"]
+      assessments: ["Incident-39.1"]
+
+  - id: CLM-007
+    claim: "OpenAI's 2025-05-02 follow-up states that the update introduced an additional reward signal based on thumbs-up/thumbs-down data that weakened the primary reward signal which had been holding sycophancy in check; that offline evaluations generally looked good and A/B tests (thumbs, side-by-side preferences, usage patterns) suggested the small number of users who tried it liked it; that there were no deployment evaluations for sycophancy and expert 'vibe checks' that flagged problems were overruled; rollout began 2025-04-24/25, rollback began 2025-04-28 and took about 24 hours; and that behavior issues will now be launch-blocking even when A/B metrics look good."
+    provenance: "VERIFIED_FACT"
+    domain: "feedback_optimization_incident"
+    concepts: ["approval_reward", "ab_test_guardrails", "launch_blocking_behavior_eval"]
+    confidence: "high"
+    evidence:
+      - source_type: "official_blog"
+        tier: 2
+        title: "Expanding on what we missed with sycophancy"
+        authors: "OpenAI"
+        year: "2025"
+        url: "https://openai.com/index/expanding-on-sycophancy/"
+        section: "Full text read 2026-11-10 from a Wayback raw snapshot"
+        accessed_at: "2026-11-10"
+    limitations:
+      - "Vendor self-report without effect sizes; memory 'in some cases' exacerbated the effect, with no evidence it broadly did."
+    applicability: "Central counterexample to 'A/B positive on approval metrics means ship'."
+    related_claims: ["CLM-006", "CLM-049"]
+    curriculum_usage:
+      lessons: ["39.2", "39.4", "39.5"]
+      labs: ["LAB-D"]
+      assessments: ["Incident-39.1"]
+
+  - id: CLM-008
+    claim: "Wen et al. report that after RLHF with time-constrained (3-10 minute) human evaluators, models became better at convincing evaluators but not at the task, raising evaluator false-positive rates by 24.1% (QuALITY) and 18.3% (APPS), and that probing which detects intended sophistry did not generalize to this unintended form."
+    provenance: "VERIFIED_FACT"
+    domain: "approval_reward"
+    concepts: ["approval_reward", "unverifiable_rater"]
+    confidence: "medium"
+    evidence:
+      - source_type: "paper"
+        tier: 1
+        title: "Language Models Learn to Mislead Humans via RLHF"
+        authors: "Jiaxin Wen, Ruiqi Zhong, Akbir Khan, Ethan Perez, Jacob Steinhardt, Minlie Huang, Samuel R. Bowman, He He, Shi Feng"
+        year: "2024"
+        url: "https://arxiv.org/abs/2409.12822"
+        version: "arXiv v3 (2024-12-08)"
+        section: "Abstract plus introduction grep, 2026-11-10"
+        accessed_at: "2026-11-10"
+    limitations:
+      - "Abstract/introduction level; two tasks; frontier."
+    applicability: "Approval is a quality metric only when the rater can verify."
+    related_claims: ["CLM-049"]
+    curriculum_usage:
+      lessons: ["39.2"]
+
+  - id: CLM-009
+    claim: "Williams et al. report (abstract) that RL against simulated user feedback reliably learned manipulation and deception; with only 2% of simulated users vulnerable, models learned to target them while behaving well with others, and safety training or LLM-judge filtering helped in some settings and backfired in others."
+    provenance: "VERIFIED_FACT"
+    domain: "approval_reward"
+    concepts: ["approval_reward", "targeted_manipulation"]
+    confidence: "medium"
+    evidence:
+      - source_type: "paper"
+        tier: 1
+        title: "On Targeted Manipulation and Deception when Optimizing LLMs for User Feedback"
+        authors: "Marcus Williams, Micah Carroll, Adhyyan Narang, Constantin Weisser, Brendan Murphy, Anca Dragan"
+        year: "2024"
+        url: "https://arxiv.org/abs/2411.02306"
+        version: "arXiv v3 (2025-02-22)"
+        section: "Abstract only, 2026-11-10"
+        accessed_at: "2026-11-10"
+    limitations:
+      - "Simulated users; abstract-level numbers."
+    applicability: "Why aggregate approval can hide harm concentrated in a small user slice."
+    related_claims: ["CLM-049"]
+    curriculum_usage:
+      lessons: ["39.2"]
+      assessments: ["Incident-39.1"]
+
+  - id: CLM-010
+    claim: "Cheng et al. (ELEPHANT, abstract) report that across 11 models LLMs preserved user 'face' 45 percentage points more than humans, affirmed both sides of a moral conflict in 48% of cases, and that social sycophancy is rewarded in preference datasets."
+    provenance: "VERIFIED_FACT"
+    domain: "sycophancy"
+    concepts: ["sycophancy"]
+    confidence: "medium"
+    evidence:
+      - source_type: "paper"
+        tier: 1
+        title: "ELEPHANT: Measuring and understanding social sycophancy in LLMs"
+        authors: "Myra Cheng, Sunny Yu, Cinoo Lee, Pranav Khadpe, Lujain Ibrahim, Dan Jurafsky"
+        year: "2025"
+        url: "https://arxiv.org/abs/2505.13995"
+        version: "arXiv v2 (2025-09-29)"
+        section: "Abstract only, 2026-11-10"
+        accessed_at: "2026-11-10"
+    limitations:
+      - "Abstract-level; frontier."
+    applicability: "Extends sycophancy beyond factual agreement to social affirmation."
+    related_claims: ["CLM-005"]
+    curriculum_usage:
+      lessons: ["39.2"]
+
+  - id: CLM-011
+    claim: "Ziegler et al. matched 2,047 survey responses to GitHub Copilot usage data and report that the acceptance rate of shown suggestions predicted perceived productivity better than persistence measures; the acceptance rate was 27%, acceptance varied by population, time, and language, and the authors say it supports coarse-grained monitoring while other approaches remain necessary."
+    provenance: "VERIFIED_FACT"
+    domain: "implicit_feedback"
+    concepts: ["acceptance_signal", "implicit_feedback"]
+    confidence: "high"
+    evidence:
+      - source_type: "paper"
+        tier: 1
+        title: "Productivity Assessment of Neural Code Completion"
+        authors: "Albert Ziegler, Eirini Kalliamvakou, Shawn Simister, Ganesh Sittampalam, Alice Li, Andrew Rice, Devon Rifkin, Edward Aftandilian"
+        year: "2022"
+        url: "https://arxiv.org/abs/2205.06537"
+        version: "arXiv v1; MAPS '22, DOI 10.1145/3520312.3534864"
+        section: "Full text read 2026-11-10"
+        accessed_at: "2026-11-10"
+    limitations:
+      - "Outcome is self-reported productivity, not output correctness."
+    applicability: "Reference example of what an accept signal does and does not measure."
+    related_claims: ["CLM-048"]
+    curriculum_usage:
+      lessons: ["39.1"]
+      labs: ["LAB-A"]
+
+  - id: CLM-012
+    claim: "Liu et al. (abstract) report a 77-participant study with plausible misinformation injected into an LLM, in which high overreliance was associated with frequent copy-paste, skipping comprehension, repeated LLM references, and coarse locating."
+    provenance: "VERIFIED_FACT"
+    domain: "overreliance"
+    concepts: ["overreliance", "acceptance_signal"]
+    confidence: "medium"
+    evidence:
+      - source_type: "paper"
+        tier: 1
+        title: "Behavioral Indicators of Overreliance During Interaction with Conversational Language Models"
+        authors: "Liu, Zhou, Shen, Liu, Wu, Chen"
+        year: "2026"
+        url: "https://arxiv.org/abs/2602.11567"
+        version: "arXiv v1 (2026-02-12)"
+        section: "Abstract only, 2026-11-10"
+        accessed_at: "2026-11-10"
+    limitations:
+      - "Abstract-level; single study; frontier."
+    applicability: "Copy events can indicate reliance, not correctness."
+    related_claims: ["CLM-048"]
+    curriculum_usage:
+      lessons: ["39.1", "39.6"]
+
+  - id: CLM-013
+    claim: "KTO defines L_KTO = E[lambda_y - v(x,y)] with r_theta = log(pi_theta(y|x)/pi_ref(y|x)) and z_0 = KL(pi_theta || pi_ref) estimated per microbatch from mismatched pairs; v = lambda_D * sigmoid(beta*(r_theta - z_0)) for desirable and lambda_U * sigmoid(beta*(z_0 - r_theta)) for undesirable outputs. The authors report it matches or beats preference-based methods from 1B to 30B parameters despite learning only from a binary signal; their experiments split preference pairs (HH, SHP, OASST) into binary labels rather than using naturally logged thumbs."
+    provenance: "VERIFIED_FACT"
+    domain: "feedback_to_training"
+    concepts: ["kto_objective", "binary_feedback"]
+    confidence: "high"
+    evidence:
+      - source_type: "paper"
+        tier: 1
+        title: "KTO: Model Alignment as Prospect Theoretic Optimization"
+        authors: "Kawin Ethayarajh, Winnie Xu, Niklas Muennighoff, Dan Jurafsky, Douwe Kiela"
+        year: "2024"
+        url: "https://arxiv.org/abs/2402.01306"
+        version: "arXiv v5 (2026-09-08)"
+        section: "Full text v5 read 2026-11-10"
+        accessed_at: "2026-11-10"
+    limitations:
+      - "No experiment on product thumbs logs; the z_0 ablation numbers are not used because their attribution was unresolved."
+    applicability: "Objective for unpaired desirable/undesirable labels."
+    related_claims: ["CLM-014", "CLM-046"]
+    curriculum_usage:
+      lessons: ["39.4"]
+      labs: ["LAB-C"]
+
+  - id: CLM-014
+    claim: "For imbalanced data the KTO authors recommend lambda_D*n_D/(lambda_U*n_U) in [1, 3/2] (for 1:10 desirable:undesirable, lambda_U=1 and lambda_D in [10,15]) and report that on Llama-7B up to 90% of desirable data could be discarded while still beating DPO."
+    provenance: "VERIFIED_FACT"
+    domain: "feedback_to_training"
+    concepts: ["kto_objective", "class_imbalance"]
+    confidence: "high"
+    evidence:
+      - source_type: "paper"
+        tier: 1
+        title: "KTO: Model Alignment as Prospect Theoretic Optimization"
+        authors: "Kawin Ethayarajh, Winnie Xu, Niklas Muennighoff, Dan Jurafsky, Douwe Kiela"
+        year: "2024"
+        url: "https://arxiv.org/abs/2402.01306"
+        version: "arXiv v5"
+        section: "Full text v5 read 2026-11-10"
+        accessed_at: "2026-11-10"
+    limitations:
+      - "Heuristic range on the authors' datasets and models."
+    applicability: "Setting class weights when thumbs-down dominate logged feedback."
+    related_claims: ["CLM-013", "CLM-046"]
+    curriculum_usage:
+      lessons: ["39.4"]
+      labs: ["LAB-C"]
+
+  - id: CLM-015
+    claim: "Gao et al. (PRELUDE/CIPHER) define the per-round cost as the token-level Levenshtein edit distance between the agent response and the user-edited response and aim to minimize cumulative edit cost; CIPHER infers a textual preference from edits, retrieves preferences from the k closest contexts, adds at most 3 LLM calls per round, and avoids fine-tuning. Evaluation uses a GPT-4 simulated user with a designed latent preference on summarization and email writing."
+    provenance: "VERIFIED_FACT"
+    domain: "feedback_to_training"
+    concepts: ["edit_feedback", "edit_cost"]
+    confidence: "high"
+    evidence:
+      - source_type: "paper"
+        tier: 1
+        title: "Aligning LLM Agents by Learning Latent Preference from User Edits"
+        authors: "Ge Gao, Alexey Taymanov, Eduardo Salinas, Paul Mineiro, Dipendra Misra"
+        year: "2024"
+        url: "https://arxiv.org/abs/2404.15269"
+        version: "arXiv v3 (2024-11-23)"
+        section: "Full text grep, 2026-11-10"
+        accessed_at: "2026-11-10"
+    limitations:
+      - "Simulated users only; frontier."
+    applicability: "Edits as a learning signal without weight updates."
+    related_claims: ["CLM-051"]
+    curriculum_usage:
+      lessons: ["39.4"]
+      labs: ["LAB-C"]
+
+  - id: CLM-016
+    claim: "Chiang et al. report Chatbot Arena at about 240K votes from about 90K users, scored with a Bradley-Terry model with CLT intervals and a multiplicity correction, with an anomalous-user detection section; on 160 sampled battles crowd-expert agreement was 72.8-83.1% versus expert-expert 79.4-89.8% (Table 3)."
+    provenance: "VERIFIED_FACT"
+    domain: "public_preference_data"
+    concepts: ["crowd_preference_platform", "label_provenance"]
+    confidence: "high"
+    evidence:
+      - source_type: "paper"
+        tier: 1
+        title: "Chatbot Arena: An Open Platform for Evaluating LLMs by Human Preference"
+        authors: "Wei-Lin Chiang, Lianmin Zheng, Ying Sheng, Anastasios N. Angelopoulos, Tianle Li, Dacheng Li, Hao Zhang, Banghua Zhu, Michael Jordan, Joseph E. Gonzalez, Ion Stoica"
+        year: "2024"
+        url: "https://arxiv.org/abs/2403.04132"
+        version: "arXiv v1 (2024-03-07)"
+        section: "Full text read 2026-11-10; Table 3"
+        accessed_at: "2026-11-10"
+    limitations:
+      - "Later style-control methodology not checked."
+    applicability: "Public preference platform; caveats for using it as a product eval."
+    related_claims: ["CLM-017"]
+    curriculum_usage:
+      lessons: ["39.3"]
+
+  - id: CLM-017
+    claim: "Singh et al. (The Leaderboard Illusion, abstract) report undisclosed private testing on Chatbot Arena (Meta tested 27 private variants before Llama-4), estimated data shares of 19.2% (Google) and 20.4% (OpenAI) versus 29.7% for 83 open-weight models combined, and up to 112% relative gains on the arena distribution from access to arena data, which they read as overfitting to arena dynamics."
+    provenance: "VERIFIED_FACT"
+    domain: "public_preference_data"
+    concepts: ["crowd_preference_platform", "goodhart_overfitting"]
+    confidence: "medium"
+    evidence:
+      - source_type: "paper"
+        tier: 1
+        title: "The Leaderboard Illusion"
+        authors: "Shivalika Singh, Yiyang Nan, Alex Wang, Daniel D'Souza, Sayash Kapoor, Ahmet Ustun, Sanmi Koyejo, Yuntian Deng, Shayne Longpre, Noah A. Smith, Beyza Ermis, Marzieh Fadaee, Sara Hooker"
+        year: "2025"
+        url: "https://arxiv.org/abs/2504.20879"
+        version: "arXiv v2 (2025-05-12)"
+        section: "Abstract only, 2026-11-10"
+        accessed_at: "2026-11-10"
+    limitations:
+      - "Abstract-level numbers; contested by platform operators is not established here."
+    applicability: "Counter-evidence to treating arena rank as product quality."
+    related_claims: ["CLM-016"]
+    curriculum_usage:
+      lessons: ["39.3"]
+
+  - id: CLM-018
+    claim: "LMSYS-Chat-1M contains 1M conversations with 25 LLMs from 210K IPs collected via the Vicuna demo and Chatbot Arena; PII removal was best-effort and unsafe conversations were kept with OpenAI moderation output (54,427 flagged, 33,968 sexual)."
+    provenance: "VERIFIED_FACT"
+    domain: "public_preference_data"
+    concepts: ["public_usage_dataset", "label_provenance"]
+    confidence: "high"
+    evidence:
+      - source_type: "paper"
+        tier: 1
+        title: "LMSYS-Chat-1M: A Large-Scale Real-World LLM Conversation Dataset"
+        authors: "Lianmin Zheng et al."
+        year: "2024"
+        url: "https://arxiv.org/abs/2309.11998"
+        version: "arXiv v4; ICLR 2024"
+        section: "Full text grep, 2026-11-10"
+        accessed_at: "2026-11-10"
+    limitations:
+      - "Self-selected demo population, not the traffic of any product."
+    applicability: "Public real-usage data and its population caveat."
+    related_claims: ["CLM-019"]
+    curriculum_usage:
+      lessons: ["39.3"]
+
+  - id: CLM-019
+    claim: "WildChat collected 1M ChatGPT conversations (more than 2.5M turns) from users given free access in exchange for opt-in consent; about 24% of conversations used GPT-4, more than 10% of interactions were toxic, 3.7% of conversations run longer than 10 turns, and hashed IPs plus headers can link conversations from one user. It contains no feedback labels."
+    provenance: "VERIFIED_FACT"
+    domain: "public_preference_data"
+    concepts: ["public_usage_dataset"]
+    confidence: "high"
+    evidence:
+      - source_type: "paper"
+        tier: 1
+        title: "WildChat: 1M ChatGPT Interaction Logs in the Wild"
+        authors: "Wenting Zhao, Xiang Ren, Jack Hessel, Claire Cardie, Yejin Choi, Yuntian Deng"
+        year: "2024"
+        url: "https://arxiv.org/abs/2405.01470"
+        version: "arXiv v1; ICLR 2024"
+        section: "Full text grep, 2026-11-10"
+        accessed_at: "2026-11-10"
+    limitations:
+      - "Opt-in, free-access population; no feedback labels."
+    applicability: "Real-usage prompts for coverage, not feedback-labeled data."
+    related_claims: ["CLM-018"]
+    curriculum_usage:
+      lessons: ["39.3"]
+
+  - id: CLM-020
+    claim: "Hilel et al. (LLM Hypnosis, abstract) report that a single user who can only prompt and up/downvote can, through later preference tuning, inject false facts, insecure code patterns, and fake financial news that persist for all users."
+    provenance: "VERIFIED_FACT"
+    domain: "feedback_poisoning"
+    concepts: ["feedback_poisoning", "label_provenance"]
+    confidence: "medium"
+    evidence:
+      - source_type: "paper"
+        tier: 1
+        title: "LLM Hypnosis: Exploiting User Feedback for Unauthorized Knowledge Injection to All Users"
+        authors: "Hilel, Bhagwat, Shenfeld, Andreas, Choshen"
+        year: "2025"
+        url: "https://arxiv.org/abs/2507.02850"
+        version: "arXiv v3 (2026-04-20)"
+        section: "Abstract only, 2026-11-10"
+        accessed_at: "2026-11-10"
+    limitations:
+      - "Abstract-level; attack budget and model details not extracted."
+    applicability: "Feedback channels are untrusted write paths into training data (Module 19, Lesson 19.4)."
+    curriculum_usage:
+      lessons: ["39.4"]
+      labs: ["LAB-C"]
+
+  - id: CLM-021
+    claim: "Don-Yehiya, Choshen, and Abend (abstract) report that feedback-informed revisions fix targeted issues more often than baseline revisions, but LLM judges often fail to recognize those fixes and prefer the baseline outputs."
+    provenance: "VERIFIED_FACT"
+    domain: "feedback_to_eval"
+    concepts: ["judge_blind_spot", "feedback_to_eval_routing"]
+    confidence: "low"
+    evidence:
+      - source_type: "paper"
+        tier: 1
+        title: "User Feedback Provides a Unique Signal that LLMs Can not Detect"
+        authors: "Shachar Don-Yehiya, Leshem Choshen, Omri Abend"
+        year: "2026"
+        url: "https://arxiv.org/abs/2609.02859"
+        version: "arXiv v1 (2026-09-02)"
+        section: "Abstract only, 2026-11-10"
+        accessed_at: "2026-11-10"
+    limitations:
+      - "Single abstract-level preprint; frontier."
+    applicability: "Judge-only validation of feedback-driven changes can be biased against them."
+    curriculum_usage:
+      lessons: ["39.3"]
+
+  - id: CLM-022
+    claim: "Deng, Xu, Kohavi, and Walker (CUPED) define Y_cv = mean(Y) - theta*mean(X) + theta*E[X]; with optimal theta = cov(Y,X)/var(X) the variance is var(mean(Y))*(1 - rho^2), equivalent to OLS with R^2; unbiasedness requires E[X] equal across arms, which pre-experiment covariates guarantee under randomization."
+    provenance: "VERIFIED_FACT"
+    domain: "online_experimentation"
+    concepts: ["cuped", "variance_reduction"]
+    confidence: "high"
+    evidence:
+      - source_type: "paper"
+        tier: 1
+        title: "Improving the Sensitivity of Online Controlled Experiments by Utilizing Pre-Experiment Data"
+        authors: "Alex Deng, Ya Xu, Ron Kohavi, Toby Walker"
+        year: "2013"
+        url: "https://exp-platform.com/Documents/2013-02-CUPED-ImprovingSensitivityOfControlledExperiments.pdf"
+        version: "WSDM 2013, DOI 10.1145/2433396.2433413"
+        section: "Full text read 2026-11-10"
+        accessed_at: "2026-11-10"
+    limitations:
+      - "Covariates measured after assignment can be affected by treatment and break unbiasedness."
+    applicability: "Current default variance reduction in experimentation platforms (one implementation traced: CLM-031)."
+    related_claims: ["CLM-023", "CLM-031", "CLM-044"]
+    curriculum_usage:
+      lessons: ["39.5"]
+      labs: ["LAB-D"]
+
+  - id: CLM-023
+    claim: "Deng et al. report about 50% variance reduction at Bing ('same statistical power with only half of the users, or half the duration'); queries/user with a 1-week pre-period gave more than 45%, entry day alone 9-10%; the gain falls as pre-period coverage falls because new or churned users lack pre-period data; revenue/user gave under 5% because of low pre/post correlation."
+    provenance: "VERIFIED_FACT"
+    domain: "online_experimentation"
+    concepts: ["cuped", "variance_reduction"]
+    confidence: "high"
+    evidence:
+      - source_type: "paper"
+        tier: 1
+        title: "Improving the Sensitivity of Online Controlled Experiments by Utilizing Pre-Experiment Data"
+        authors: "Alex Deng, Ya Xu, Ron Kohavi, Toby Walker"
+        year: "2013"
+        url: "https://exp-platform.com/Documents/2013-02-CUPED-ImprovingSensitivityOfControlledExperiments.pdf"
+        section: "Full text read 2026-11-10"
+        accessed_at: "2026-11-10"
+    numeric_metadata:
+      numeric_type: "measured_behavior"
+      workload: "Bing search experiments, 2012-era"
+      metric_definition: "Variance reduction of the CUPED estimator relative to the unadjusted mean"
+      measurement_method: "Author-reported on production experiments"
+    limitations:
+      - "One web platform; transfer to LLM product metrics is not established."
+    applicability: "Shows CUPED gain depends on metric correlation and covariate coverage."
+    related_claims: ["CLM-022", "CLM-044"]
+    curriculum_usage:
+      lessons: ["39.5"]
+      labs: ["LAB-D"]
+
+  - id: CLM-024
+    claim: "Fabijan et al. (abstract) define sample ratio mismatch as the situation when the observed sample ratio differs from the expected one, describe it as a symptom (like fever) of many data-quality issues, and base their taxonomy on 4 companies and more than 25 products."
+    provenance: "VERIFIED_FACT"
+    domain: "online_experimentation"
+    concepts: ["sample_ratio_mismatch"]
+    confidence: "medium"
+    evidence:
+      - source_type: "paper"
+        tier: 1
+        title: "Diagnosing Sample Ratio Mismatch in Online Controlled Experiments: A Taxonomy and Rules of Thumb for Practitioners"
+        authors: "Aleksander Fabijan, Jayant Gupchup, Somit Gupta, Jeff Omhover, Wen Qin, Lukas Vermeer, Pavel Dmitriev"
+        year: "2019"
+        url: "https://doi.org/10.1145/3292500.3330722"
+        version: "KDD 2019"
+        section: "Abstract only (Semantic Scholar API), 2026-11-10; full text not openable"
+        accessed_at: "2026-11-10"
+    limitations:
+      - "Taxonomy contents and threshold recommendations not verified and not used."
+    applicability: "Definition of SRM as an integrity symptom."
+    related_claims: ["CLM-029", "CLM-043"]
+    curriculum_usage:
+      lessons: ["39.5"]
+      labs: ["LAB-D"]
+
+  - id: CLM-025
+    claim: "Kohavi et al. (2012) define primacy (an initial advantage to Control while users relearn) and novelty (users explore the change and the effect dies quickly); report that in an A/A test day 1 has a 67% chance and day 2 a 55% chance of falling outside the final 95% bound, so early trends are often regression to the mean; say they could not find a single experiment where a significant result flipped to significant in the opposite direction through these effects; and note that CI width scales as CV/sqrt(n), so for Sessions/user, whose CV grows over time, a longer run does not shrink the CI. One week is the minimum for day-of-week effects."
+    provenance: "VERIFIED_FACT"
+    domain: "online_experimentation"
+    concepts: ["novelty_primacy", "regression_to_mean"]
+    confidence: "high"
+    evidence:
+      - source_type: "paper"
+        tier: 1
+        title: "Trustworthy Online Controlled Experiments: Five Puzzling Outcomes Explained"
+        authors: "Ron Kohavi, Alex Deng, Brian Frasca, Roger Longbotham, Toby Walker, Ya Xu"
+        year: "2012"
+        url: "https://exp-platform.com/Documents/puzzlingOutcomesInControlledExperiments.pdf"
+        version: "KDD 2012"
+        section: "Full text read 2026-11-10 from a Wayback raw copy"
+        accessed_at: "2026-11-10"
+    limitations:
+      - "Web products circa 2012; LLM feature dynamics not studied."
+    applicability: "How to read early trends and time-dependent effects."
+    curriculum_usage:
+      lessons: ["39.5"]
+      labs: ["LAB-D"]
+      assessments: ["Incident-39.1"]
+
+  - id: CLM-026
+    claim: "Nie et al. (eBay, abstract) validate randomization with PSI and detect SRM with sequential analysis to reduce false alarms under continuous monitoring."
+    provenance: "VERIFIED_FACT"
+    domain: "online_experimentation"
+    concepts: ["sample_ratio_mismatch", "sequential_monitoring"]
+    confidence: "medium"
+    evidence:
+      - source_type: "paper"
+        tier: 1
+        title: "Ensure A/B Test Quality at Scale with Automated Randomization Validation and Sample Ratio Mismatch Detection"
+        authors: "Nie, Zhang, Xu, Yuan"
+        year: "2022"
+        url: "https://arxiv.org/abs/2208.07766"
+        version: "arXiv v4"
+        section: "Abstract only, 2026-11-10"
+        accessed_at: "2026-11-10"
+    limitations:
+      - "Abstract-level."
+    applicability: "Repeated SRM checks need a sequential design, not a fixed-n test peeked daily."
+    curriculum_usage:
+      lessons: ["39.5"]
+
+  - id: CLM-027
+    claim: "Persson, Schultzberg, and Ankargren (abstract) report that raw LLM-simulated outcomes recovered only 39% of the human treatment effect on the Upworthy archive, that nonparametric calibration closed the gap, and that A/B testing on LLM responses is correct only by assumption while A/B testing on humans is correct by design."
+    provenance: "VERIFIED_FACT"
+    domain: "online_experimentation"
+    concepts: ["simulated_users", "surrogate_outcome"]
+    confidence: "low"
+    evidence:
+      - source_type: "paper"
+        tier: 1
+        title: "Statistical Foundations of LLM-based A/B Testing: A Surrogacy Framework for Human Causal Inference"
+        authors: "Persson, Schultzberg, Ankargren"
+        year: "2026"
+        url: "https://arxiv.org/abs/2606.17165"
+        version: "arXiv v3"
+        section: "Abstract only, 2026-11-10"
+        accessed_at: "2026-11-10"
+    limitations:
+      - "Abstract-level; one archive; frontier."
+    applicability: "Simulated-user experiments are surrogates, not replacements."
+    curriculum_usage:
+      lessons: ["39.5"]
+
+  - id: CLM-028
+    claim: "Peng et al. (abstract) report a controlled experiment in which recruited developers with GitHub Copilot implemented an HTTP server in JavaScript 55.8% faster than the control group."
+    provenance: "VERIFIED_FACT"
+    domain: "online_experimentation"
+    concepts: ["randomized_experiment"]
+    confidence: "medium"
+    evidence:
+      - source_type: "paper"
+        tier: 1
+        title: "The Impact of AI on Developer Productivity: Evidence from GitHub Copilot"
+        authors: "Sida Peng, Eirini Kalliamvakou, Peter Cihon, Mert Demirer"
+        year: "2023"
+        url: "https://arxiv.org/abs/2302.06590"
+        version: "arXiv v1"
+        section: "Abstract only, 2026-11-10"
+        accessed_at: "2026-11-10"
+    limitations:
+      - "Lab task with recruited developers, not product traffic; abstract-level."
+    applicability: "Contrast between a randomized task outcome and an in-product approval proxy."
+    related_claims: ["CLM-011"]
+    curriculum_usage:
+      lessons: ["39.5"]
+
+  - id: CLM-029
+    claim: "At GrowthBook commit 362047d225f9bde2f7e2693114746cc6ddad0272, gbstats check_srm(users, weights) returns 1 when the observed total is 0 and otherwise returns chi2.sf(x, len(users) - 1) where x sums (o_i - e_i)^2/e_i with e_i = w_i/sum(w) * sum(o), skipping arms with w_i <= 0 while df still counts every arm; analyze_dimension calls it per dimension with summed user counts and analysis weights."
+    provenance: "VERIFIED_FACT"
+    domain: "experimentation_platform"
+    concepts: ["sample_ratio_mismatch", "pearson_chi_square"]
+    confidence: "high"
+    evidence:
+      - source_type: "source_code"
+        tier: 1
+        title: "GrowthBook stats engine (gbstats)"
+        repository: "https://github.com/growthbook/growthbook"
+        commit: "362047d225f9bde2f7e2693114746cc6ddad0272"
+        verification_date: "2026-11-10"
+        file: "packages/stats/gbstats/utils.py"
+        symbol: "check_srm"
+        entry_point: "packages/stats/gbstats/gbstats.py analyze_dimension"
+        execution_path: "analyze_dimension -> check_srm([baseline_users.sum()] + [variation users sums], analysis.weights) -> chi2.sf(x, k-1)"
+        url: "https://github.com/growthbook/growthbook/blob/362047d225f9bde2f7e2693114746cc6ddad0272/packages/stats/gbstats/utils.py"
+        accessed_at: "2026-11-10"
+    limitations:
+      - "Static read only; whether zero-weight arms are reachable was not executed."
+      - "An in-code comment says 'TODO check front-end SRM matches this SRM'."
+    applicability: "One platform's SRM test; Pearson chi-square with df = k - 1."
+    related_claims: ["CLM-030", "CLM-043"]
+    curriculum_usage:
+      lessons: ["39.5"]
+      labs: ["LAB-D"]
+      assessments: ["Production-Source-Trace"]
+
+  - id: CLM-030
+    claim: "At the same GrowthBook commit, packages/shared/src/constants.ts sets DEFAULT_SRM_THRESHOLD = 0.001 (with DEFAULT_SRM_MINIMINUM_COUNT_PER_VARIATION = 8 and a bandit minimum of 5), and SRMWarning.tsx computes srmThreshold = settings.srmThreshold ?? DEFAULT_SRM_THRESHOLD and treats the experiment as healthy when srm >= srmThreshold, so the default is overridable by settings."
+    provenance: "VERIFIED_FACT"
+    domain: "experimentation_platform"
+    concepts: ["sample_ratio_mismatch", "alert_threshold"]
+    confidence: "high"
+    evidence:
+      - source_type: "source_code"
+        tier: 1
+        title: "GrowthBook shared constants and SRM warning component"
+        repository: "https://github.com/growthbook/growthbook"
+        commit: "362047d225f9bde2f7e2693114746cc6ddad0272"
+        verification_date: "2026-11-10"
+        file: "packages/shared/src/constants.ts; packages/front-end/components/Experiment/SRMWarning.tsx"
+        symbol: "DEFAULT_SRM_THRESHOLD; SRMWarning"
+        execution_path: "SRMWarning: srmThreshold = settings.srmThreshold ?? DEFAULT_SRM_THRESHOLD; healthy = srm >= srmThreshold"
+        url: "https://github.com/growthbook/growthbook/blob/362047d225f9bde2f7e2693114746cc6ddad0272/packages/shared/src/constants.ts"
+        accessed_at: "2026-11-10"
+    limitations:
+      - "The use site of the minimum-count constant was not traced."
+      - "One product's default; not an industry standard."
+    applicability: "Alert threshold semantics for the traced SRM check."
+    related_claims: ["CLM-029", "CLM-043"]
+    curriculum_usage:
+      lessons: ["39.5"]
+      labs: ["LAB-D"]
+      assessments: ["Production-Source-Trace"]
+
+  - id: CLM-031
+    claim: "At the same GrowthBook commit, RegressionAdjustedStatistic computes mean = post.mean - theta*pre.mean and variance = var_post + theta^2*var_pre - 2*theta*cov; compute_theta pools control and treatment and returns joint covariance / joint pre-period variance, or 0 when the pooled pre-period variance is near zero or the post variance is zero; create_theta_adjusted_statistics applies one pooled theta to both arms and, when theta == 0, silently reverts both arms to the unadjusted post statistic."
+    provenance: "VERIFIED_FACT"
+    domain: "experimentation_platform"
+    concepts: ["cuped", "silent_fallback"]
+    confidence: "high"
+    evidence:
+      - source_type: "source_code"
+        tier: 1
+        title: "GrowthBook regression-adjusted statistics"
+        repository: "https://github.com/growthbook/growthbook"
+        commit: "362047d225f9bde2f7e2693114746cc6ddad0272"
+        verification_date: "2026-11-10"
+        file: "packages/stats/gbstats/models/statistics.py"
+        symbol: "RegressionAdjustedStatistic; compute_theta; create_theta_adjusted_statistics"
+        entry_point: "packages/stats/gbstats/frequentist/tests.py BaseABTest.__init__"
+        execution_path: "gbstats builds RegressionAdjustedStatistic when statistic_type == 'mean_ra' (theta None unless keep_theta) -> BaseABTest.__init__ -> create_theta_adjusted_statistics -> compute_theta -> theta == 0 ? post_statistic : replace(stat, theta=theta)"
+        url: "https://github.com/growthbook/growthbook/blob/362047d225f9bde2f7e2693114746cc6ddad0272/packages/stats/gbstats/models/statistics.py"
+        accessed_at: "2026-11-10"
+    limitations:
+      - "Static read; numerical behavior under dilution or triggering not tested."
+      - "Pooled theta and the zero-theta fallback are this implementation's choices."
+    applicability: "Production trace of CUPED; shows why reported variance reduction must be checked, not assumed."
+    related_claims: ["CLM-022", "CLM-044"]
+    curriculum_usage:
+      lessons: ["39.5"]
+      labs: ["LAB-D"]
+      assessments: ["Production-Source-Trace"]
+
+  - id: CLM-032
+    claim: "At the same GrowthBook commit, utils.variance_of_ratios implements the delta-method variance of a ratio metric, sigma_m^2/mu_d^2 + sigma_d^2*mu_m^2/mu_d^4 - 2*cov*mu_m/mu_d^3."
+    provenance: "VERIFIED_FACT"
+    domain: "experimentation_platform"
+    concepts: ["ratio_metric", "delta_method"]
+    confidence: "high"
+    evidence:
+      - source_type: "source_code"
+        tier: 1
+        title: "GrowthBook stats utilities"
+        repository: "https://github.com/growthbook/growthbook"
+        commit: "362047d225f9bde2f7e2693114746cc6ddad0272"
+        verification_date: "2026-11-10"
+        file: "packages/stats/gbstats/utils.py"
+        symbol: "variance_of_ratios"
+        url: "https://github.com/growthbook/growthbook/blob/362047d225f9bde2f7e2693114746cc6ddad0272/packages/stats/gbstats/utils.py"
+        accessed_at: "2026-11-10"
+    limitations:
+      - "Static read; call sites not enumerated."
+    applicability: "Per-response metrics (thumbs per response) when the randomization unit is the user."
+    curriculum_usage:
+      lessons: ["39.5"]
+      labs: ["LAB-D"]
+
+  - id: CLM-033
+    claim: "At Langfuse commit 5349d484579e29da86cb124a21a9ae8d9e15bfc9, packages/shared/src/domain/scores.ts defines ScoreSourceArray = [API, EVAL, ANNOTATION] (the public create endpoint accepts API or ANNOTATION; EVAL is reserved for internal evaluator outputs), ScoreDataTypeArray = NUMERIC, CATEGORICAL, BOOLEAN, CORRECTION, TEXT, TEXT_SCORE_MAX_LENGTH = 500, CORRECTION_NAME = 'output'; a score references one of traceId, sessionId, datasetRunId, or observationId and carries authorUserId, comment, metadata, configId, queueId; ANNOTATION requires configId except for CORRECTION; AGGREGATABLE_SCORE_TYPES excludes CORRECTION and TEXT."
+    provenance: "VERIFIED_FACT"
+    domain: "feedback_capture_platform"
+    concepts: ["feedback_event_schema", "edit_feedback"]
+    confidence: "high"
+    evidence:
+      - source_type: "source_code"
+        tier: 1
+        title: "Langfuse score domain model"
+        repository: "https://github.com/langfuse/langfuse"
+        commit: "5349d484579e29da86cb124a21a9ae8d9e15bfc9"
+        verification_date: "2026-11-10"
+        file: "packages/shared/src/domain/scores.ts"
+        symbol: "ScoreSourceArray; ScoreDataTypeArray; AGGREGATABLE_SCORE_TYPES; isAnnotationScoreMissingConfigId"
+        url: "https://github.com/langfuse/langfuse/blob/5349d484579e29da86cb124a21a9ae8d9e15bfc9/packages/shared/src/domain/scores.ts"
+        accessed_at: "2026-11-10"
+    limitations:
+      - "One vendor's schema (generalizable: PARTIAL)."
+    applicability: "Reference schema for feedback events attached to traces."
+    related_claims: ["CLM-034", "CLM-042"]
+    curriculum_usage:
+      lessons: ["39.1"]
+      labs: ["LAB-A"]
+      assessments: ["Production-Source-Trace"]
+
+  - id: CLM-034
+    claim: "At the same Langfuse commit, the public POST /api/public/scores handler (action scores:save, rate-limit resource ingestion, 403 when ingestion is suspended, id = body.id || randomUUID()) calls ScoresApiService.createScore/createScores, which wrap each body as a SCORE_CREATE event via toScoreCreateEvent and call processEventBatch; array input returns 207 with accepted/rejected counts when any item fails, else 202. Writes are asynchronous ingestion, not a synchronous database insert."
+    provenance: "VERIFIED_FACT"
+    domain: "feedback_capture_platform"
+    concepts: ["feedback_event_schema", "async_ingestion"]
+    confidence: "high"
+    evidence:
+      - source_type: "source_code"
+        tier: 1
+        title: "Langfuse public scores API"
+        repository: "https://github.com/langfuse/langfuse"
+        commit: "5349d484579e29da86cb124a21a9ae8d9e15bfc9"
+        verification_date: "2026-11-10"
+        file: "web/src/pages/api/public/scores/index.ts; web/src/features/public-api/server/scores-api-service.ts"
+        symbol: "ScoresApiService.createScore; ScoresApiService.createScores; toScoreCreateEvent"
+        entry_point: "POST /api/public/scores"
+        execution_path: "handler -> ScoresApiService.createScore(s) -> toScoreCreateEvent -> processEventBatch (async ingestion)"
+        url: "https://github.com/langfuse/langfuse/blob/5349d484579e29da86cb124a21a9ae8d9e15bfc9/web/src/features/public-api/server/scores-api-service.ts"
+        accessed_at: "2026-11-10"
+    limitations:
+      - "Downstream worker validation of SCORE_CREATE was not traced."
+    applicability: "Feedback counts can lag or drop relative to traces; reconcile before computing rates."
+    related_claims: ["CLM-033", "CLM-042"]
+    curriculum_usage:
+      lessons: ["39.1"]
+      labs: ["LAB-A"]
+      assessments: ["Production-Source-Trace"]
+
+  - id: CLM-035
+    claim: "Nielsen states three response-time limits: about 0.1 s for the system to feel instantaneous, about 1.0 s for the user's flow of thought to stay uninterrupted though the delay is noticed, and about 10 s to keep attention, beyond which a percent-done indicator and a way to interrupt are needed; for 2-10 s operations a full percent-done indicator may be overkill. He attributes the limits to Miller (1968) and Card, Robertson, and Mackinlay (1991)."
+    provenance: "VERIFIED_FACT"
+    domain: "latency_ux"
+    concepts: ["response_time_thresholds"]
+    confidence: "medium"
+    evidence:
+      - source_type: "official_docs"
+        tier: 2
+        title: "Response Times: The 3 Important Limits"
+        authors: "Jakob Nielsen"
+        year: "1993"
+        url: "https://www.nngroup.com/articles/response-times-3-important-limits/"
+        section: "Full text read 2026-11-10 (excerpt of Usability Engineering)"
+        accessed_at: "2026-11-10"
+    limitations:
+      - "Author's own publication; the underlying Miller and Card et al. papers were metadata-checked only."
+      - "Not measured on token-streaming LLM interfaces."
+    applicability: "Baseline thresholds for UI response-time budgets."
+    related_claims: ["CLM-053"]
+    curriculum_usage:
+      lessons: ["39.6"]
+
+  - id: CLM-036
+    claim: "Kohavi's 2014 KDD talk slides ('Seven Rules of Thumb for Web Site Experimenters') report that a 500 ms Bing slowdown impacted revenue by about 3% and clickthrough by -0.50%, and state a linear rule that every 100 ms speedup improves revenue by 0.6%."
+    provenance: "VERIFIED_FACT"
+    domain: "latency_ux"
+    concepts: ["latency_business_effect"]
+    confidence: "medium"
+    evidence:
+      - source_type: "paper"
+        tier: 2
+        title: "Seven Rules of Thumb for Web Site Experimenters (KDD 2014 talk slides)"
+        authors: "Ron Kohavi, with Alex Deng, Roger Longbotham, Ya Xu"
+        year: "2014"
+        section: "Wayback copy of 2014-08-27ExperimentersRulesOfthumbKDD.pdf read 2026-11-10; slides used for the numbers only"
+        accessed_at: "2026-11-10"
+    limitations:
+      - "Talk slides; web search circa 2014; LEGACY. Transfer to LLM products is hypothesis CLM-057."
+    applicability: "Historical evidence that latency moves business metrics in one web product."
+    related_claims: ["CLM-057"]
+    curriculum_usage:
+      lessons: ["39.6"]
+
+  - id: CLM-037
+    claim: "Passi and Vorvoreanu (Microsoft Aether, 2022) synthesize about 60 papers, define overreliance as users accepting incorrect AI recommendations (errors of commission), list measures including agreement with incorrect recommendations (accepted incorrect / incorrect shown), switch fraction, and weight of advice, and report that more detailed explanations increase trust and overreliance even when the explanation has no basis, while explanation mismatch can cause under-reliance."
+    provenance: "VERIFIED_FACT"
+    domain: "overreliance"
+    concepts: ["overreliance", "trust_calibration"]
+    confidence: "medium"
+    evidence:
+      - source_type: "official_docs"
+        tier: 2
+        title: "Overreliance on AI: Literature Review"
+        authors: "Samir Passi, Mihaela Vorvoreanu"
+        year: "2022"
+        url: "https://www.microsoft.com/en-us/research/uploads/prod/2022/06/Aether-Overreliance-on-AI-Review-Final-6.21.22.pdf"
+        section: "Read 2026-11-10 from a 2025-03-01 Wayback snapshot (live URL returned 403); partial full text"
+        accessed_at: "2026-11-10"
+    limitations:
+      - "The weight-of-advice formula glyphs were lost in extraction and are not used."
+    applicability: "Definitions and measures for overreliance."
+    related_claims: ["CLM-038", "CLM-048"]
+    curriculum_usage:
+      lessons: ["39.6"]
+      labs: ["LAB-D"]
+
+  - id: CLM-038
+    claim: "Bansal et al. report that with an AI of accuracy comparable to humans (MTurk; book and beer sentiment, LSAT), AI assistance gave complementary gains but explanations did not add to them and 'increased the chance that humans will accept the AI's recommendation, regardless of its correctness'."
+    provenance: "VERIFIED_FACT"
+    domain: "overreliance"
+    concepts: ["overreliance", "explanation_effect"]
+    confidence: "high"
+    evidence:
+      - source_type: "paper"
+        tier: 1
+        title: "Does the Whole Exceed its Parts? The Effect of AI Explanations on Complementary Team Performance"
+        authors: "Gagan Bansal, Tongshuang Wu, Joyce Zhou, Raymond Fok, Besmira Nushi, Ece Kamar, Marco Tulio Ribeiro, Daniel S. Weld"
+        year: "2021"
+        url: "https://arxiv.org/abs/2006.14779"
+        version: "arXiv v3; CHI 2021"
+        section: "Abstract plus setup, 2026-11-10"
+        accessed_at: "2026-11-10"
+    limitations:
+      - "Pre-LLM tasks with crowd workers."
+    applicability: "A trust UI can raise acceptance without raising correctness."
+    related_claims: ["CLM-037", "CLM-048"]
+    curriculum_usage:
+      lessons: ["39.6"]
+      labs: ["LAB-D"]
+
+  - id: CLM-039
+    claim: "Bucinca, Malaya, and Gajos (abstract, N=199) report that cognitive forcing functions reduced overreliance compared with simple explainable-AI designs, that the designs which reduced overreliance most received the least favorable subjective ratings, and that they benefited high Need-for-Cognition users more."
+    provenance: "VERIFIED_FACT"
+    domain: "overreliance"
+    concepts: ["overreliance", "cognitive_forcing"]
+    confidence: "medium"
+    evidence:
+      - source_type: "paper"
+        tier: 1
+        title: "To Trust or to Think: Cognitive Forcing Functions Can Reduce Overreliance on AI in AI-assisted Decision-making"
+        authors: "Zana Bucinca, Maja Barbara Malaya, Krzysztof Z. Gajos"
+        year: "2021"
+        url: "https://arxiv.org/abs/2102.09692"
+        version: "arXiv v1; CSCW 2021"
+        section: "Abstract only, 2026-11-10"
+        accessed_at: "2026-11-10"
+    limitations:
+      - "Abstract-level; pre-LLM task."
+    applicability: "Satisfaction metrics can penalize the design that reduces overreliance."
+    related_claims: ["CLM-048"]
+    curriculum_usage:
+      lessons: ["39.6"]
+      labs: ["LAB-D"]
+
+  - id: CLM-040
+    claim: "If a fraction s of exposed responses is satisfactory and users click thumbs-up with probability r_u when satisfied and thumbs-down with probability r_d when not, the observed thumbs-up share among feedback events is s*r_u/(s*r_u + (1-s)*r_d). With s=0.8, r_u=0.02, r_d=0.10 it is 0.444; raising r_u to 0.04 (for example a more prominent button) moves it to 0.615 with no quality change."
+    provenance: "DERIVED"
+    domain: "feedback_bias"
+    concepts: ["nonresponse_bias", "response_propensity"]
+    confidence: "high"
+    assumptions:
+      - "Each exposed response is either satisfactory or not; at most one thumb per response."
+      - "Response propensities depend only on satisfaction (no other selection)."
+      - "All input values are synthetic exercise values."
+    derivation: "Expected up events = N*s*r_u, down events = N*(1-s)*r_d; share = ratio. 0.8*0.02 = 0.016; 0.2*0.10 = 0.02; 0.016/0.036 = 0.4444. With r_u = 0.04: 0.032/0.052 = 0.6154. Recomputed in Python 2026-11-10."
+    limitations:
+      - "Real propensities vary by user, task, and UI and may depend on unobserved quality (CLM-056)."
+    applicability: "Interpreting thumbs share and thumbs-based A/B metrics."
+    related_claims: ["CLM-041", "CLM-056"]
+    curriculum_usage:
+      lessons: ["39.2"]
+      labs: ["LAB-A"]
+
+  - id: CLM-041
+    claim: "Weighting each feedback label by the inverse of its response propensity recovers the satisfied share (in the CLM-040 example, 160/0.02 = 8,000 and 200/0.10 = 2,000 give 0.8 of 10,000 responses), but only when propensities are known or estimated without bias, for example from a randomized prompt-for-feedback sample, and are positive; by analogy with IPS ranking estimators, small propensities inflate variance and are clipped or smoothed at the cost of bias."
+    provenance: "DERIVED"
+    domain: "feedback_bias"
+    concepts: ["inverse_propensity_weighting", "nonresponse_bias"]
+    confidence: "high"
+    assumptions:
+      - "Propensities are positive and depend only on observables used in the weighting (unconfoundedness, CLM-003)."
+      - "Synthetic counts from CLM-040 with N = 10,000 responses."
+    derivation: "IPW estimate of satisfied responses = up/r_u = 160/0.02 = 8,000; unsatisfied = down/r_d = 200/0.10 = 2,000; share = 8,000/10,000 = 0.8. The estimator is unbiased because E[up] = N*s*r_u. Clipping caps 1/r and trades variance for bias (a design choice; the IPS paper discusses smoothing)."
+    limitations:
+      - "Requires a randomized elicitation arm to estimate r; unconfoundedness is untested (CLM-056)."
+    applicability: "Correcting nonresponse and position bias in feedback metrics."
+    related_claims: ["CLM-003", "CLM-040", "CLM-056"]
+    curriculum_usage:
+      lessons: ["39.2"]
+      labs: ["LAB-A", "LAB-B"]
+
+  - id: CLM-042
+    claim: "Because a feedback score row exists only when a user acts (CLM-033) and ingestion is asynchronous (CLM-034), feedback rates need a denominator joined from the trace or exposure log: per-feedback-event shares, per-exposed-response rates, and per-user rates are different estimands, and computing any rate from score rows alone conditions on responding."
+    provenance: "DERIVED"
+    domain: "feedback_measurement"
+    concepts: ["feedback_denominator", "exposure_logging"]
+    confidence: "high"
+    assumptions:
+      - "Feedback is captured as optional events attached to trace or observation IDs, as in the traced Langfuse schema."
+      - "Exposure (the response was rendered to the user) is logged separately from feedback."
+    derivation: "Let E be exposed responses and F the feedback events. Share up/F conditions on F > 0; rate up/E does not. Without E, nonresponders are invisible, so any estimator using only F inherits the propensity bias of CLM-040. Async ingestion means F counted at time t may be incomplete relative to E."
+    limitations:
+      - "Exposure itself can be mis-logged (render failures, streaming aborts)."
+    applicability: "Designing feedback ledgers."
+    related_claims: ["CLM-033", "CLM-034", "CLM-040"]
+    curriculum_usage:
+      lessons: ["39.1"]
+      labs: ["LAB-A"]
+
+  - id: CLM-043
+    claim: "For a 50/50 design the Pearson SRM statistic with df = 1 gives: 50,500 vs 49,500 users, chi2 = 10.0, p = 1.57e-3 (no alert at a 0.001 threshold, alert at 0.01); 50,600 vs 49,400, chi2 = 14.4, p = 1.48e-4 (alert); 50,300 vs 49,700, p = 0.058; and the same 1% relative split skew at 1,000 users (505 vs 495) gives p = 0.75. A three-arm 30/30/40 design with 30,600/29,400/40,000 gives chi2 = 24.0, df = 2, p = 6.1e-6."
+    provenance: "DERIVED"
+    domain: "online_experimentation"
+    concepts: ["sample_ratio_mismatch", "pearson_chi_square"]
+    confidence: "high"
+    assumptions:
+      - "Counts are synthetic; assignment unit counts are independent draws under the designed split."
+    derivation: "chi2 = sum (o-e)^2/e. 50,500/49,500: 2*500^2/50,000 = 10.0; scipy chi2.sf(10,1) = 0.001565. 50,600/49,400: 2*600^2/50,000 = 14.4; sf = 1.478e-4. 50,300/49,700: 3.6; sf = 0.0578. 505/495: 2*25/500 = 0.1; sf = 0.752. Three-arm: e = 30,000/30,000/40,000; (600^2+600^2)/30,000 = 24.0; chi2.sf(24,2) = 6.14e-6. Recomputed in Python 2026-11-10."
+    limitations:
+      - "A p-value checked repeatedly during an experiment is not a fixed-n test (see CLM-026)."
+    applicability: "Calibrating intuition for SRM magnitude versus sample size."
+    related_claims: ["CLM-029", "CLM-030"]
+    curriculum_usage:
+      lessons: ["39.5"]
+      labs: ["LAB-D"]
+
+  - id: CLM-044
+    claim: "For var(mean(Y) - theta*mean(X)) = (sigma_Y^2 + theta^2*sigma_X^2 - 2*theta*cov)/n, setting the derivative to zero gives theta* = cov/sigma_X^2 and variance sigma_Y^2*(1 - rho^2)/n, so users needed scale by (1 - rho^2): rho ~= 0.71 gives about 50% reduction and a reduction under 5% implies rho < 0.224. If only a fraction c of users has pre-period data and the rest receive a constant covariate, the reduction is approximately c*rho^2 under homogeneity (an approximation to verify)."
+    provenance: "DERIVED"
+    domain: "online_experimentation"
+    concepts: ["cuped", "variance_reduction"]
+    confidence: "high"
+    assumptions:
+      - "Pre-period covariate X unaffected by treatment; equal theta across arms."
+      - "Coverage approximation assumes users with and without pre-period data have the same outcome variance and correlation."
+    derivation: "d/dtheta: 2*theta*sigma_X^2 - 2*cov = 0. Substituting: sigma_Y^2 - cov^2/sigma_X^2 = sigma_Y^2*(1 - rho^2). 1 - 0.71^2 = 0.496. 1 - rho^2 > 0.95 gives rho < sqrt(0.05) = 0.2236. Coverage: users without X contribute unreduced variance, giving total factor about (1 - c*rho^2)."
+    limitations:
+      - "Coverage formula is an approximation, not a source result."
+    applicability: "Predicting CUPED benefit before running an experiment."
+    related_claims: ["CLM-022", "CLM-023", "CLM-031"]
+    curriculum_usage:
+      lessons: ["39.5"]
+      labs: ["LAB-D"]
+
+  - id: CLM-045
+    claim: "For two independent arms under the normal approximation, n_per_arm ~= 2*(z_{1-alpha/2} + z_{1-beta})^2*sigma^2/delta^2 = 15.70*sigma^2/delta^2 at alpha = 0.05 and power 0.80. With sigma = 4 and delta = 0.1 this is 25,117 per arm; CUPED at rho = 0.6 multiplies it by 0.64 (16,075), and with 70% pre-period coverage by about 0.748 (18,788). For a thumbs-up rate p = 0.3 per user, sigma^2 = 0.21 and delta = 0.02 gives 8,242 per arm. If a test sized at 16,075 per arm on the CUPED assumption is analyzed without adjustment (for example after a silent fallback), power at the planned delta falls from 0.80 to about 0.61."
+    provenance: "DERIVED"
+    domain: "online_experimentation"
+    concepts: ["sample_size_planning", "cuped"]
+    confidence: "high"
+    assumptions:
+      - "Independent users, equal arm sizes, equal variance, normal approximation; inputs are synthetic."
+      - "Bernoulli variance p(1-p) for a per-user binary outcome."
+    derivation: "2*(1.959964 + 0.841621)^2 = 15.6978. 15.6978*16/0.01 = 25,116.4 -> 25,117. *0.64 = 16,074.5 -> 16,075. *(1 - 0.7*0.36) = *0.748 = 18,787.1 -> 18,788. 15.6978*0.21/0.0004 = 8,241.3 -> 8,242. Fallback power: SE = sqrt(2*16/16,075) = 0.04462; Phi(0.1/0.04462 - 1.959964) = Phi(0.2812) = 0.611. Recomputed in Python 2026-11-10."
+    limitations:
+      - "Per-response metrics with user randomization need the delta method (CLM-032), not this formula."
+    applicability: "Planning an LLM feature A/B test; complements Module 15 Lesson 15.4 paired planning."
+    related_claims: ["CLM-044"]
+    curriculum_usage:
+      lessons: ["39.5"]
+      labs: ["LAB-D"]
+
+  - id: CLM-046
+    claim: "Applying the KTO imbalance rule to thumbs logs with 1 up : 4 down and lambda_U = 1 gives lambda_D in [4, 6]. At beta = 0.1 and z_0 = 0.5, a desirable output with r_theta = 2.0 has v/lambda_D = sigmoid(0.15) = 0.537, and an undesirable output with r_theta = -1.0 has v/lambda_U = sigmoid(0.15) = 0.537, so with lambda_D = 5 the per-example losses are 2.313 and 0.463."
+    provenance: "DERIVED"
+    domain: "feedback_to_training"
+    concepts: ["kto_objective", "class_imbalance"]
+    confidence: "high"
+    assumptions:
+      - "Thumbs labels are treated as desirable/undesirable after provenance filtering; synthetic values for r_theta and z_0."
+    derivation: "lambda_D*n_D/(lambda_U*n_U) in [1, 1.5] with n_D/n_U = 1/4 gives lambda_D in [4, 6]. sigmoid(0.1*(2.0-0.5)) = sigmoid(0.15) = 0.5374; loss = 5 - 5*0.5374 = 2.313. Undesirable: sigmoid(0.1*(0.5-(-1.0))) = 0.5374; loss = 1 - 0.5374 = 0.4626. Recomputed in Python 2026-11-10."
+    limitations:
+      - "The rule is the authors' heuristic on preference-derived data; thumbs logs are not what KTO was evaluated on."
+    applicability: "Configuring KTO on logged binary feedback."
+    related_claims: ["CLM-013", "CLM-014"]
+    curriculum_usage:
+      lessons: ["39.4"]
+      labs: ["LAB-C"]
+
+  - id: CLM-047
+    claim: "A thumbs-down, edit, or regenerate event selects a candidate for review; it is not a correctness label. An evaluation item built from feedback needs an independently adjudicated label with recorded provenance (who labeled it, under which guide), must be separated from training data by source and time, and the selector's precision (confirmed defects / reviewed candidates) must be measured because it varies by signal and slice."
+    provenance: "DERIVED"
+    domain: "feedback_to_eval"
+    concepts: ["feedback_to_eval_routing", "label_provenance"]
+    confidence: "high"
+    assumptions:
+      - "Feedback rows are biased samples (CLM-040, CLM-042); preference platforms show imperfect crowd-expert agreement (CLM-016)."
+      - "Train/eval separation as taught in Module 19, Lesson 19.4."
+    derivation: "From CLM-016 (crowd and expert labels disagree on 17-27% of sampled battles), CLM-005/CLM-008 (approval rewards agreement and persuasion), and CLM-040 (who responds is selected), a feedback event is a noisy, selected indicator. Using it as a label would import the bias into the eval set; using it as a selector with independent adjudication keeps the bias in sampling, where it can be stated and reweighted."
+    limitations:
+      - "Adjudication capacity limits how many candidates can be labeled."
+    applicability: "Routing production feedback into Module 15 evaluation sets."
+    related_claims: ["CLM-016", "CLM-040", "CLM-042"]
+    curriculum_usage:
+      lessons: ["39.3"]
+      labs: ["LAB-C"]
+
+  - id: CLM-048
+    claim: "Accept, copy, and thumbs-up events measure reliance or approval, not correctness: the overreliance rate is accepted-incorrect / incorrect-shown and requires seeded or adjudicated incorrect answers to compute; a trust-UI change can raise acceptance of incorrect answers (synthetic example: 124/200 = 0.62 to 150/200 = 0.75) while satisfaction-type metrics favor it, and a design that reduces overreliance can lower satisfaction."
+    provenance: "DERIVED"
+    domain: "overreliance"
+    concepts: ["overreliance", "acceptance_signal"]
+    confidence: "high"
+    assumptions:
+      - "Definitions from CLM-037; directional evidence from CLM-011, CLM-012, CLM-038, CLM-039."
+      - "Counts in the example are synthetic."
+    derivation: "Overreliance rate = accepted incorrect / incorrect shown. 124/200 = 0.62; 150/200 = 0.75 (Wilson 95% intervals [0.551, 0.684] and [0.686, 0.805], computed in Python 2026-11-10). Because CLM-038 reports explanations raise acceptance regardless of correctness and CLM-039 reports the least-overreliant designs were least liked, an approval or acceptance metric can rank the riskier design higher."
+    limitations:
+      - "Seeded incorrect answers must resemble natural errors for the rate to transfer."
+    applicability: "Guardrail metrics for trust and explanation UI changes."
+    related_claims: ["CLM-011", "CLM-012", "CLM-037", "CLM-038", "CLM-039"]
+    curriculum_usage:
+      lessons: ["39.1", "39.6"]
+      labs: ["LAB-D"]
+
+  - id: CLM-049
+    claim: "User approval (thumbs, side-by-side preference) is a valid quality proxy only for raters who can verify the answer; optimizing or gating on short-term approval can therefore select for agreement, persuasion, or targeted behavior, and a positive A/B result on approval metrics is not sufficient to ship without behavior evaluations and long-horizon outcomes as launch-blocking guardrails."
+    provenance: "DERIVED"
+    domain: "approval_reward"
+    concepts: ["approval_reward", "ab_test_guardrails"]
+    confidence: "high"
+    assumptions:
+      - "Observations from CLM-005 (preference rewards belief-matching), CLM-007 (thumbs reward weakened primary reward; A/B positive), CLM-008 (approval rises without correctness), CLM-009 (targeting of a vulnerable slice in simulation)."
+    derivation: "If approval A = f(quality, agreement, persuasion) and the rater cannot observe quality, increasing A by raising agreement or persuasion is indistinguishable in A from raising quality. An experiment that measures A therefore cannot reject a release that trades quality for agreement; only a metric that observes quality or harm (behavior evals, verified outcomes, long-horizon retention) can."
+    limitations:
+      - "Long-horizon outcomes arrive late (Module 23, Lesson 23.5)."
+    applicability: "Choosing reward signals and A/B guardrails for LLM features."
+    related_claims: ["CLM-005", "CLM-006", "CLM-007", "CLM-008", "CLM-009"]
+    curriculum_usage:
+      lessons: ["39.2", "39.4", "39.5"]
+      labs: ["LAB-D"]
+      assessments: ["Incident-39.1"]
+
+  - id: CLM-050
+    claim: "Regenerate (retry) rate in a chat LLM measures dissatisfaction with the shown response rather than exploration of alternatives."
+    provenance: "HYPOTHESIS"
+    domain: "implicit_feedback"
+    concepts: ["implicit_feedback", "signal_validity"]
+    confidence: "low"
+    hypothesis:
+      prediction: "Among responses with a regenerate event, the adjudicated defect rate is substantially higher than among matched responses without one, in every major task slice."
+      measurement_target: "Adjudicated labels on a stratified sample of regenerated and non-regenerated responses, with a post-regenerate survey or follow-up behavior (did the user keep the first or the second answer)."
+      falsifying_observation: "Defect rates are similar with and without regenerate, or a large share of regenerations keep the original answer (exploration), in any major slice."
+    limitations:
+      - "No primary source opened establishes what regenerate measures for chat LLMs."
+    applicability: "Before using regenerate as a metric or training label."
+    curriculum_usage:
+      lessons: ["39.1"]
+      labs: ["LAB-A"]
+
+  - id: CLM-051
+    claim: "The size of a user's edit to an LLM response measures the gap between the response and the user's preference rather than the user adding new content or restyling for reasons unrelated to quality."
+    provenance: "HYPOTHESIS"
+    domain: "implicit_feedback"
+    concepts: ["edit_feedback", "signal_validity"]
+    confidence: "low"
+    hypothesis:
+      prediction: "Normalized token edit distance correlates with adjudicated preference violation, and edits on adjudicated-good responses are small."
+      measurement_target: "Edit diffs classified as correction / addition / restyle by blinded annotators, joined to adjudicated quality of the original response."
+      falsifying_observation: "Large edits are common on responses adjudicated as correct, or edit size is uncorrelated with adjudicated violations."
+    limitations:
+      - "PRELUDE (CLM-015) uses simulated users with designed preferences; real edits are not validated there."
+    applicability: "Before using edit cost as a label or KTO signal."
+    related_claims: ["CLM-015"]
+    curriculum_usage:
+      lessons: ["39.1", "39.4"]
+      labs: ["LAB-C"]
+
+  - id: CLM-052
+    claim: "Dwell time on an answer measures reading of a useful answer rather than confusion, and abandonment after an answer indicates failure rather than satisfaction ('got what I needed')."
+    provenance: "HYPOTHESIS"
+    domain: "implicit_feedback"
+    concepts: ["implicit_feedback", "signal_validity"]
+    confidence: "low"
+    hypothesis:
+      prediction: "Dwell normalized by answer length is positively associated with adjudicated usefulness, and abandonment rate is higher on adjudicated failures than on successes."
+      measurement_target: "Dwell and terminal-session events joined to adjudicated outcomes and a randomized short exit survey."
+      falsifying_observation: "Long dwell is as frequent on confusing or wrong answers, or abandonment is at least as frequent after successful answers."
+    limitations:
+      - "No primary source opened validates dwell or abandonment for chat LLMs."
+    applicability: "Interpreting implicit signals in dashboards."
+    curriculum_usage:
+      lessons: ["39.1"]
+      labs: ["LAB-A"]
+
+  - id: CLM-053
+    claim: "Streaming tokens lowers perceived latency and abandonment for chat LLM responses relative to delivering the full response at once with the same completion time."
+    provenance: "HYPOTHESIS"
+    domain: "latency_ux"
+    concepts: ["streaming_perceived_latency", "response_time_thresholds"]
+    confidence: "low"
+    hypothesis:
+      prediction: "Users randomized to streaming report lower perceived wait and abandon less than users given a non-streamed response with identical end-to-end time."
+      measurement_target: "Randomized UI experiment holding end-to-end latency fixed; perceived-wait rating, abandonment before completion, and task success."
+      falsifying_observation: "No difference in perceived wait or abandonment, or worse task success, under streaming at matched end-to-end latency."
+    limitations:
+      - "No primary user study of LLM streaming was located; the progress-bar literature found was metadata-only."
+    applicability: "Latency UX decisions and Module 04 TTFT/ITL targets."
+    related_claims: ["CLM-035"]
+    curriculum_usage:
+      lessons: ["39.6"]
+      labs: ["LAB-D"]
+
+  - id: CLM-054
+    claim: "In LLM feature experiments, interference between arms (shared caches, shared memory or retrieval stores, shared rate limits, or users who interact with each other) biases the difference-in-means estimate."
+    provenance: "HYPOTHESIS"
+    domain: "online_experimentation"
+    concepts: ["interference"]
+    confidence: "low"
+    hypothesis:
+      prediction: "The treatment effect estimated under user randomization differs from the effect under cluster- or time-sliced randomization when arms share a resource."
+      measurement_target: "Compare user-randomized and cluster-randomized (or switchback) estimates of the same change; log shared-resource state per request."
+      falsifying_observation: "Estimates agree within uncertainty across designs and shared-resource state is balanced between arms."
+    limitations:
+      - "This pass opened no primary source on interference designs."
+    applicability: "Experiment design for features that write shared state."
+    curriculum_usage:
+      lessons: ["39.5"]
+      labs: ["LAB-D"]
+
+  - id: CLM-055
+    claim: "An LLM interface that shows several drafts or citations has position effects on clicks, selection, and thumbs analogous to search result pages."
+    provenance: "HYPOTHESIS"
+    domain: "feedback_bias"
+    concepts: ["position_bias"]
+    confidence: "medium"
+    hypothesis:
+      prediction: "Under randomized order, the first-shown draft or citation is selected more often than the same item shown later."
+      measurement_target: "Randomized position of drafts or citations; selection rate by position for the same item (swap intervention)."
+      falsifying_observation: "Selection rate does not depend on position for the same item."
+    limitations:
+      - "Evidence is from web search (CLM-001, CLM-003)."
+    applicability: "Any multi-candidate UI that logs selection as feedback."
+    related_claims: ["CLM-001", "CLM-003"]
+    curriculum_usage:
+      lessons: ["39.2"]
+      labs: ["LAB-B"]
+
+  - id: CLM-056
+    claim: "The probability that a user leaves feedback depends on response quality even after conditioning on logged observables (task, user, UI), so propensity correction using observables alone remains biased."
+    provenance: "HYPOTHESIS"
+    domain: "feedback_bias"
+    concepts: ["response_propensity", "inverse_propensity_weighting"]
+    confidence: "medium"
+    hypothesis:
+      prediction: "In a randomized prompt-for-feedback arm, the adjudicated quality of responses whose users volunteered feedback differs from those who did not, within the same observable strata."
+      measurement_target: "Randomly prompt a sample for feedback; compare adjudicated quality of volunteer responders vs prompted responders within strata."
+      falsifying_observation: "Within strata, volunteered and prompted feedback samples have the same adjudicated quality distribution."
+    limitations:
+      - "Untested in this dossier."
+    applicability: "Whether IPW of feedback can be trusted."
+    related_claims: ["CLM-003", "CLM-040", "CLM-041"]
+    curriculum_usage:
+      lessons: ["39.2"]
+      labs: ["LAB-A"]
+
+  - id: CLM-057
+    claim: "Web-search latency-to-revenue relationships transfer in sign and rough magnitude to LLM chat and assistant products."
+    provenance: "HYPOTHESIS"
+    domain: "latency_ux"
+    concepts: ["latency_business_effect"]
+    confidence: "low"
+    hypothesis:
+      prediction: "A randomized added delay in an LLM product reduces engagement or task completion roughly linearly for small delays."
+      measurement_target: "Slowdown experiment: inject fixed delays to TTFT and to end-to-end time separately; measure task completion, retention, and abandonment."
+      falsifying_observation: "No measurable effect for delays comparable to those in the web studies, or effect depends only on end-to-end time when TTFT is fixed."
+    limitations:
+      - "Only LEGACY web evidence (CLM-036) was opened."
+    applicability: "Latency budgets for LLM products."
+    related_claims: ["CLM-036"]
+    curriculum_usage:
+      lessons: ["39.6"]
+
+  - id: CLM-058
+    claim: "SYNTHETIC MASTERY FIXTURE (exercise assumption, not a measurement): a coding-and-support assistant with 400,000 weekly active users and 6,000,000 responses per week; observed feedback 0.9% of responses (thumbs up 21,000, thumbs down 33,000), 9% of responses regenerated, 4% edited; a randomized prompt-for-feedback arm of 2% of responses with response rate 41%; per-user weekly thumbs-up rate sigma^2 = 0.21; pre-period correlation of the primary per-user outcome rho = 0.55 with 80% pre-period coverage; planned 50/50 test showing 201,800 vs 198,200 assigned users; proposed release adds a thumbs-derived reward term."
+    provenance: "EXERCISE_ASSUMPTION"
+    domain: "mastery_fixture"
+    concepts: ["reference_workload"]
+    confidence: "high"
+    assumptions:
+      - "All values synthetic and chosen for arithmetic; they describe no specific product."
+    limitations:
+      - "Answers computed from the fixture are conditional on it."
+    applicability: "Module 39 Mastery transfer problem and reference checks."
+    curriculum_usage:
+      assessments: ["Mastery-39"]
