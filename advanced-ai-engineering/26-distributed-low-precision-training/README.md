@@ -103,7 +103,15 @@ At FSDP2 commit `38cca96300da024842405ecefa081e4761254922`, `fully_shard` instal
 **Quantitative Model / Derivation:**
 For $N$ data-parallel ranks and $\Psi$ parameters under the cited 16-byte Adam layout:
 $$M_1=4\Psi+12\Psi/N,\quad M_2=2\Psi+14\Psi/N,\quad M_3=16\Psi/N.$$
-ZeRO's element-volume model gives $2\Psi$ communicated elements/step for stages 1–2 and $3\Psi$ for stage 3 (**O**, CLM-002). A ring collective over payload $S$ moves approximately $2(N-1)S/N$ bytes per rank (**D**, CLM-016). These are volume models, not elapsed-time predictions.
+where $M_k$ is per-rank persistent model-state bytes at ZeRO stage $k$, $\Psi$ is parameter count, and $N$ is data-parallel degree.
+
+*Step-by-step (reading the formulas):*
+1. The 16 bytes/parameter split into $2\Psi$ (16-bit parameters) $+\,2\Psi$ (16-bit gradients) $+\,12\Psi$ (optimizer state); the differences between $M_1$, $M_2$, and $M_3$ expose this split.
+2. Stage 1 divides only the $12\Psi$ optimizer term by $N$: $2\Psi+2\Psi+12\Psi/N=4\Psi+12\Psi/N$.
+3. Stage 2 also divides gradients: $2\Psi+(2\Psi+12\Psi)/N=2\Psi+14\Psi/N$.
+4. Stage 3 also divides parameters: $(2+2+12)\Psi/N=16\Psi/N$.
+
+ZeRO's element-volume model gives $2\Psi$ communicated elements/step for stages 1–2 and $3\Psi$ for stage 3 (**O**, CLM-002). A ring collective over payload $S$ moves approximately $2(N-1)S/N$ bytes per rank (**D**, CLM-016): a ring all-reduce is a reduce-scatter plus an all-gather, each sending $(N-1)$ chunks of size $S/N$. For $N=8$, $2\cdot7/8=1.75$, so each rank sends about $1.75S$. These are volume models, not elapsed-time predictions.
 
 **Worked Example (derived; synthetic):**
 A $10^9$-parameter model on $N=8$ ranks has persistent state predictions: stage 1, $4+12/8=5.5$ GB/rank; stage 2, $2+14/8=3.75$ GB/rank; stage 3, $16/8=2$ GB/rank. Add a synthetic 3.0 GB activation peak, 0.8 GB workspace/reserve allowance, and one 0.5 GB transient gather: stage 3 predicts 6.3 GB peak, not 2 GB. At two-byte communicated elements, the stage-3 ZeRO model is 6 GB/rank/step versus 4 GB for stages 1–2. Interpretation: stage 3 buys fit with more communication and materialization sensitivity. Limits: decimal GB, ideal partitioning, no padding or topology model.
@@ -148,8 +156,10 @@ Under Korthikanti et al.'s 16-bit GPT-style assumptions, per-layer activation st
 $$sbh(34+5as/h)\ \text{bytes},$$
 where $s$ is sequence length, $b$ microbatch, $h$ hidden width, and $a$ attention heads. TP+SP divides the estimate by TP degree $t$; selective recomputation leaves about $34sbh/t$; full layer recomputation stores about $2sbh$ before optional partitioning (**O**, CLM-007). These formulas exclude allocator and kernel workspace.
 
+*Step-by-step (term structure):* expanding gives $34sbh+5as^2b$. The first term is linear in $s$; the second, $sbh\cdot5as/h=5as^2b$, is the quadratic attention-score term. Selective recomputation drops the quadratic term, so its saving fraction is $(5as/h)/(34+5as/h)$.
+
 **Worked Example (derived; synthetic):**
-Let $s=4096$, $b=1$, $h=4096$, $a=32$, $t=8$. Then $5as/h=0.0391$, and baseline storage is about $571.1$ MB/layer before TP+SP, or $71.4$ MB/layer after division by 8. Selective recomputation is about $570.4/8=71.3$ MB/layer here because the chosen $a/h$ ratio makes the score term small; full checkpointing is $33.6$ MB/layer before partitioning. This counterexample shows the published symbolic ledger must be instantiated: selective recomputation does not always dominate. At longer $s$, the quadratic term grows and the ranking changes.
+Let $s=4096$, $b=1$, $h=4096$, $a=32$, $t=8$, so $sbh=16{,}777{,}216$. Then $5as/h=5\cdot32\cdot4096/4096=160$, and baseline storage is $sbh(34+160)\approx3{,}254.8$ MB/layer before TP+SP, or $406.8$ MB/layer after division by 8. Selective recomputation leaves $34sbh/8\approx71.3$ MB/layer, about $5.7\times$ less than $406.8$ ($194/34$), because the score term (160) dominates the linear term (34). Full checkpointing is $2sbh\approx33.6$ MB/layer before partitioning, but replays the whole layer. Counterexample: at $s=128$ with the same $a,h$, $5as/h=5$, so selective recomputation removes only $5/39\approx12.8\%$ of the estimate. The published symbolic ledger must be instantiated: selective recomputation does not always dominate. At longer $s$, the quadratic term grows and the ranking changes.
 
 **Knowledge Check:**
 1. What state must be preserved so dropout recomputation matches forward?
@@ -189,6 +199,8 @@ Each dimension cuts one tensor axis or layer set and introduces matching forward
 
 **Quantitative Model / Derivation:**
 For $p$ balanced stages and $m$ microbatches, ideal-compute-normalized 1F1B bubble is $\beta=(p-1)/m$; elapsed idle fraction is $\beta/(1+\beta)$. With $v$ virtual chunks, $\beta=(p-1)/(mv)$ and pipeline communication grows by $v$ (**O**, CLM-010). Zero Bubble splits backward into input-gradient $B$ and parameter-gradient $W$ work to fill idle slots; feasibility depends on measured $F/B/W$ times and memory (**O**, CLM-011).
+
+*Step-by-step (bubble fraction):* let $t_f+t_b$ be one microbatch's forward plus backward time on one stage. Ideal busy time per stage is $m(t_f+t_b)$. Warmup and drain leave $p-1$ idle slots of the same size, so idle time is $(p-1)(t_f+t_b)$. Dividing idle by ideal gives $\beta=(p-1)/m$; dividing idle by elapsed (ideal + idle) gives $\beta/(1+\beta)$. With $v$ chunks per rank, each slot shrinks by $v$, so $\beta=(p-1)/(mv)$.
 
 **Worked Example (derived; synthetic):**
 For $p=8$, $m=32$, 1F1B gives $\beta=7/32=0.21875$, so elapsed idle fraction is $0.21875/1.21875=17.95\%$. With $v=2$, $\beta=7/64=0.109375$, idle fraction is $9.86\%$, but pipeline communication doubles. If one stage takes 25% longer, the balanced-stage formula becomes optimistic; increasing $m$ cannot remove that bottleneck. A zero-bubble schedule may fill nominal gaps but can raise activation residency or alter optimizer synchronization. PACI instead trades exact synchronous semantics for bounded forward/backward weight-version drift through local accumulation; it remains a 2026 frontier preprint verified only at abstract level here (**O**, CLM-012).
@@ -272,10 +284,10 @@ Which tensors may use low precision, with which scale and accumulator, without h
 A scale maps a high-precision tensor into a representable low-precision range. Delayed scales can lag distribution shifts; current scales need current amax; coarse scales let one outlier waste resolution for a whole tensor; blocks reduce that coupling but add metadata and transpose constraints. GEMMs may accept low-precision inputs while accumulating or outputting higher precision. The pinned Transformer Engine recipe objects make these choices explicit—delayed/current/block scaling, 32-value MXFP8 blocks, and NVFP4 controls—but configuration presence does not prove hardware support or accuracy (**O**, CLM-019). A 2025 MXFP8 study reports BF16-matched runs up to 8B parameters and 15T tokens with E4M3 and a specific shared-scale rounding rule; that result is recipe- and workload-scoped (**O**, CLM-022).
 
 **Quantitative Model / Trade-off Comparison:**
-For symmetric scale $s_q=x_{max}/q_{max}$, quantization is $q=\operatorname{round}(x/s_q)$ with clipping and reconstruction $\hat x=s_q q$. Track saturation rate, zero/underflow rate, amax/scale lag, block outlier ratio, accumulator growth, and loss delta against BF16. A successful short proxy does not bound long-run risk: Fishman et al. report prolonged FP8 instability tied to SwiGLU outlier amplification (**O**, CLM-023).
+For symmetric scale $s_q=x_{max}/q_{max}$, quantization is $q=\operatorname{round}(x/s_q)$ with clipping and reconstruction $\hat x=s_q q$. Here $x_{max}$ is the amax of the tensor or block that shares the scale, $q_{max}$ is the format's largest representable magnitude (448 for E4M3, 57,344 for E5M2), and $q$ is the stored low-precision code. Example: a tensor with amax 3.5 in E4M3 gets $s_q=3.5/448=0.0078125$, so 3.5 maps to 448; any later value above 3.5 under the same scale clips. Track saturation rate, zero/underflow rate, amax/scale lag, block outlier ratio, accumulator growth, and loss delta against BF16. A successful short proxy does not bound long-run risk: Fishman et al. report prolonged FP8 instability tied to SwiGLU outlier amplification (**O**, CLM-023).
 
 **Worked Example (synthetic):**
-A 32-value block has 31 values near 1 and one outlier 128. Using a toy signed 4-bit maximum 7, one shared scale is $128/7=18.29$; all 31 values round to zero. If transformed or split so local maxima are 8, scale is $8/7=1.14$ and unit values survive near one code step. This is not an NVFP4 accuracy claim; it demonstrates why block size, outlier transforms, and scale hierarchy are part of the recipe. A delayed scale based on prior amax 8 would clip the new 128 outlier, while a current scale avoids clipping but coarsens every other value.
+A 32-value block has 31 values near 1 and one outlier 128. Using a toy signed 4-bit maximum 7, one shared scale is $128/7=18.29$; each unit value maps to $1/18.29=0.055$, so all 31 values round to zero. If transformed or split so local maxima are 8, scale is $8/7=1.14$; $1/1.14=0.875$ rounds to code 1, so unit values survive near one code step. This is not an NVFP4 accuracy claim; it demonstrates why block size, outlier transforms, and scale hierarchy are part of the recipe. A delayed scale based on prior amax 8 would clip the new 128 outlier, while a current scale avoids clipping but coarsens every other value.
 
 **Knowledge Check:**
 1. Why does “FP8 GEMM” not imply FP8 optimizer state or accumulator?
@@ -315,10 +327,17 @@ A blocking checkpoint pauses useful work, persists state, and resumes. A failure
 **Quantitative Model / Derivation:**
 Under independent exponential failures and first-order assumptions,
 $$W(\tau)\approx C/\tau+\tau/(2M)+R/M.$$
-Differentiating gives $\tau^*=\sqrt{2CM}$ (**D**, CLM-030). The primary-source statements of Young and Daly were not verified (publisher full text inaccessible); neither formula is quoted (`TODO_VERIFY`).
+where $W$ is wasted time per unit of useful time, and $C$, $\tau$, $M$, $R$ are as defined above (same time unit).
+
+*Step-by-step:*
+1. Checkpoint stall: one stall $C$ per interval $\tau$ gives $C/\tau$.
+2. Lost work: failures arrive at rate $1/M$; a failure lands on average halfway through an interval, losing $\tau/2$, so $\tau/(2M)$.
+3. Restart: each failure also costs $R$, so $R/M$, which does not depend on $\tau$.
+4. Set $dW/d\tau=-C/\tau^2+1/(2M)=0$, giving $\tau^*=\sqrt{2CM}$ (**D**, CLM-030).
+5. Substituting back, $W(\tau^*)\approx\sqrt{2C/M}+R/M$. The primary-source statements of Young and Daly were not verified (publisher full text inaccessible); neither formula is quoted (`TODO_VERIFY`).
 
 **Worked Example (derived; synthetic):**
-Let $C=120$ s, $M=24$ h $=86{,}400$ s, and $R=600$ s. $\tau^*=\sqrt{2\cdot120\cdot86{,}400}=4{,}553.7$ s = 75.9 min. Waste is $120/4553.7 + 4553.7/(172800)+600/86400=5.97\%$. If asynchronous staging reduces exposed $C$ to 15 s and persistence keeps up, $\tau^*=1{,}609.9$ s=26.8 min and waste is $2.56\%$. If upload needs 45 min, a 26.8-min cadence accumulates writes; the assumption fails and the policy needs backpressure or a longer interval.
+Let $C=120$ s, $M=24$ h $=86{,}400$ s, and $R=600$ s. $\tau^*=\sqrt{2\cdot120\cdot86{,}400}=4{,}553.7$ s = 75.9 min. Waste is $120/4553.7 + 4553.7/172{,}800+600/86{,}400=2.635\%+2.635\%+0.694\%\approx5.96\%$ (equivalently $\sqrt{2\cdot120/86{,}400}+600/86{,}400$). If asynchronous staging reduces exposed $C$ to 15 s and persistence keeps up, $\tau^*=1{,}609.9$ s=26.8 min and waste is $2.56\%$. If upload needs 45 min, a 26.8-min cadence accumulates writes; the assumption fails and the policy needs backpressure or a longer interval.
 
 **Knowledge Check:**
 1. Why does reducing $R$ not change the first-order stationary point?

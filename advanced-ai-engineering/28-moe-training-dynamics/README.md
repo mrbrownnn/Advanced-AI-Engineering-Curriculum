@@ -87,7 +87,7 @@ For one token, which experts run, with what weights, and which parameters receiv
 - **Router**: a linear map from the hidden state to $E$ logits $x_1..x_E$, one per expert.
 - **Softmax router**: Switch uses $p_i(x)=e^{h(x)_i}/\sum_j e^{h(x)_j}$ and routes each token to one expert ($k=1$) (**O**, CLM-002). Shazeer et al. introduced noisy top-$k$ gating, $G(x)=\mathrm{Softmax}(\mathrm{KeepTopK}(H(x),k))$, which applies softmax *after* top-$k$ (**O**, CLM-001). Softmax-then-top-$k$ and top-$k$-then-softmax give different gate values for the same logits.
 - **Sigmoid router with renormalization**: DeepSeek-V3 scores each expert independently with $s_{i,t}=\mathrm{Sigmoid}(u_t^\top e_i)$ and normalizes the selected scores to sum to 1. It also adds $N_s$ shared experts that every token uses (**O**, CLM-009).
-- **Token-choice vs expert-choice**: in token-choice, each token picks $k$ experts. In expert-choice, each expert picks its top-$k$ tokens with capacity $k=n c/e$, so a token can get several experts or none (**O**, CLM-006).
+- **Token-choice vs expert-choice**: in token-choice, each token picks $k$ experts. In expert-choice, each expert picks its top-$k$ tokens with capacity $k=n c/e$, so a token can get several experts or none (**O**, CLM-006). Here $n$ is the number of tokens in the batch, $c$ the capacity factor, and $e$ the number of experts; this $k$ is tokens *per expert*, not the per-token top-$k$ used elsewhere. Example: $n=8$, $c=2$, $e=4$ gives each expert $8\cdot2/4=4$ tokens, 16 slots for 8 tokens, two per token on average.
 - **Causal leakage**: expert-choice selection compares tokens across positions. In causal language modeling, future tokens then influence earlier tokens' expert assignment. Wang et al. bound the leak at more than $K\log_2\frac{1-R}{R}$ bits per token, about 50 bits in their example (**O**, CLM-007). OLMoE found token choice better than expert choice at equal token budget (**O**, CLM-008).
 - **Router gradient through top-$k$**: the selection is a non-differentiable index set. Only selected experts appear in the output, so only they and their gate values receive task gradient (**D**, CLM-010).
 
@@ -99,12 +99,14 @@ State: router weights $W_r$, expert weights $\{W_e\}$. Operation for one token: 
 - Top-$k$-then-softmax: $g_i = e^{x_i}/\sum_{j\in S}e^{x_j}$; $\sum g_i = 1$.
 - Sigmoid with renormalization: $g_i=\sigma(x_i)/\sum_{j\in S}\sigma(x_j)$; $\sum g_i=1$.
 - $\partial L/\partial W_e = 0$ for $e\notin S$, for every variant.
+- Where: $x_i$ is router logit $i$; $E$ is the number of experts (count), while $E_i(\cdot)$ above is expert $i$'s function; $S$ is the selected index set, $|S|=k$; $g_i$ is the gate; $\sigma$ is the logistic sigmoid; $L$ is the training loss.
+- Step-by-step for the first bullet: the denominator sums over all $E$ experts but the numerators only over $k<E$ of them, so $\sum_{i\in S}g_i=1-\sum_{j\notin S}e^{x_j}/\sum_{j}e^{x_j}<1$. The other two variants divide by a sum over $S$ itself, so their gates sum to exactly 1.
 
 **Worked Example (synthetic logits; $E=4$, $k=2$):**
 - *Input*: $x=[2.0,\,1.0,\,0.5,\,-1.0]$.
-- *Softmax over all*: $\sum e^{x_j}=12.1239$, probabilities $[0.6095, 0.2242, 0.1360, 0.0303]$. Top-2 = experts 1, 2 with gates $0.6095, 0.2242$ (sum $0.8337$).
+- *Softmax over all*: $e^{x}=[7.3891, 2.7183, 1.6487, 0.3679]$, $\sum e^{x_j}=12.1239$, probabilities $[0.6095, 0.2242, 0.1360, 0.0303]$. Top-2 = experts 1, 2 with gates $0.6095, 0.2242$ (sum $0.8337$).
 - *Top-2 then softmax*: $e^{2}/(e^2+e^1)=0.7311$ and $0.2689$.
-- *Sigmoid*: $[0.8808, 0.7311, 0.6225, 0.2689]$. Top-2 = experts 1, 2; renormalized gates $0.8808/1.6119=0.5464$ and $0.4536$.
+- *Sigmoid*: $[0.8808, 0.7311, 0.6225, 0.2689]$. Top-2 = experts 1, 2; denominator $0.8808+0.7311=1.6119$; renormalized gates $0.8808/1.6119=0.5464$ and $0.7311/1.6119=0.4536$.
 - *Interpretation*: same logits, same experts, three different gate vectors. The softmax-over-all variant scales the output down by 0.8337, the sigmoid variant weights the two experts more evenly. Experts 3 and 4 get no gradient in any variant.
 - *Limits*: one token. Selection sets diverge once a balancing bias or capacity limit is applied (Lessons 28.3, 28.4).
 
@@ -137,6 +139,7 @@ Why does an untrained-for-balance router collapse, and how strongly must an auxi
 **Concepts & Definitions:**
 - **Router collapse**: Shazeer et al. observed the gating network converging to large weights for the same few experts, an imbalance that is self-reinforcing because favored experts train faster and are selected more (**O**, CLM-001). OLMoE reports that without a load-balancing loss most experts stay flat and become dead weights that hold memory but do no work (**O**, CLM-012).
 - **Switch load-balancing loss**: $\mathcal{L}_{bal}=\alpha N\sum_{i=1}^{N} f_i P_i$, where $f_i$ is the fraction of tokens dispatched to expert $i$ and $P_i$ the mean router probability for expert $i$. It is minimized by uniform routing; Switch uses $\alpha=10^{-2}$ (**O**, CLM-003). GShard used a related $\ell_{aux}=\frac1E\sum_e \frac{c_e}{S}m_e$ over local groups (**O**, CLM-005).
+  - Where: $N$ (Switch) and $E$ (GShard) both denote the number of experts; $\alpha$ is the auxiliary-loss weight; $f_i=(\text{tokens sent to } i)/T$ over $T$ tokens; $P_i=\frac1T\sum_t p_i(x_t)$; in GShard, $c_e$ is the number of tokens routed to expert $e$, $S$ the group size in tokens, and $m_e$ the mean gate value for expert $e$ (so $c_e/S$ plays the role of $f_i$ and $m_e$ of $P_i$). Here $S$ is a token count, not the selected set of Lesson 28.1.
 - **Interference gradient**: the gradient the balancing loss adds to the router, which is not aligned with the LM loss. Wang et al. swept $\alpha\in\{10^{-2},10^{-3},10^{-4},0\}$: small $\alpha$ caused routing collapse and large $\alpha$ notably degraded model performance (**O**, CLM-011).
 - **MaxVio**: $(\max_i \mathrm{Load}_i-\overline{\mathrm{Load}})/\overline{\mathrm{Load}}$, measured per training batch (MaxVio$_{batch}$) or over a validation set (MaxVio$_{global}$) (**O**, CLM-013).
 
@@ -145,15 +148,18 @@ The collapse loop: expert $j$ wins a few more tokens $\to$ it receives more grad
 
 **Quantitative Model / Derivation (D, CLM-014):**
 - Uniform routing ($f_i=P_i=1/N$): $N\sum f_iP_i = 1$. Full collapse onto one expert: $N\sum f_iP_i=N$.
+  - Step-by-step: uniform gives $N\cdot N\cdot\frac1N\cdot\frac1N=1$. Collapse onto expert 1 means $f_1=P_1=1$ and all other terms 0, so $N\cdot1\cdot1=N$.
 - $\partial \mathcal{L}_{bal}/\partial P_i = \alpha N f_i$ (with $f$ held constant).
+  - Step-by-step: $\mathcal{L}_{bal}$ is linear in each $P_i$ with coefficient $\alpha N f_i$; $f_i$ comes from an argmax/top-$k$ count, so it is treated as a constant.
 - For top-$k$, normalize $f_i$ by $T k$ so uniform routing still gives 1 (the Megatron-Core form, Lesson 28.3).
+  - Step-by-step: $T$ tokens make $Tk$ assignments; uniform routing sends $Tk/N$ to each expert, so $f_i=(Tk/N)/(Tk)=1/N$ again. Dividing by $T$ alone would give $f_i=k/N$ and a uniform value of $k$.
 - The value of $\mathcal{L}_{bal}$ is a proxy. Monitor per-expert load and MaxVio directly; a near-1 loss can coexist with a starved expert if $f$ and $P$ anti-correlate.
 
 **Worked Example (synthetic, $N=4$, top-1, $\alpha=10^{-2}$):**
 - *Input*: $f=[0.5, 0.25, 0.125, 0.125]$, $P=[0.4, 0.3, 0.15, 0.15]$.
-- *Loss*: $4\times(0.5\cdot0.4+0.25\cdot0.3+0.125\cdot0.15+0.125\cdot0.15)=4\times0.3125=1.25$, so $\mathcal{L}_{bal}=0.0125$ against a minimum of $0.01$.
-- *Gradient on $P$*: $\alpha N f = [0.02, 0.01, 0.005, 0.005]$. Expert 1's probability is pushed down four times harder than experts 3 and 4.
-- *MaxVio$_{batch}$*: mean load 0.25, max 0.5, so $(0.5-0.25)/0.25=1.0$.
+- *Loss*: $4\times(0.5\cdot0.4+0.25\cdot0.3+0.125\cdot0.15+0.125\cdot0.15)=4\times(0.2+0.075+0.01875+0.01875)=4\times0.3125=1.25$, so $\mathcal{L}_{bal}=0.0125$ against a minimum of $0.01$.
+- *Gradient on $P$*: $\alpha N f = 0.04\cdot[0.5, 0.25, 0.125, 0.125] = [0.02, 0.01, 0.005, 0.005]$. Expert 1's probability is pushed down four times harder than experts 3 and 4.
+- *MaxVio$_{batch}$*: mean load 0.25, max 0.5, so $(0.5-0.25)/0.25=1.0$. ($\mathrm{Load}_i$ may be a count or a fraction; MaxVio is a ratio, so the unit cancels.)
 - *Interpretation*: a loss 25% above its floor corresponds to one expert at twice its fair share. With $N=64$ the collapse ceiling is 64, so loss curves must be read relative to 1, not as absolute values.
 - *Limits*: the size of $\alpha$ that suffices depends on learning rate, initialization scale, and data clustering; it is measured (LAB A), not derived.
 
@@ -184,7 +190,7 @@ Explain the collapse loop, compute the Switch loss and its gradient, and choose 
 Can balance be enforced without a loss term, and over which set of tokens should balance be enforced?
 
 **Concepts & Definitions:**
-- **Loss-Free Balancing**: add a per-expert bias $b_i$ to the routing score *for top-$K$ selection only*; the gate that weights the expert output stays the unbiased score. After each batch, $b_i \leftarrow b_i + u\cdot\mathrm{sign}(e_i)$ with $e_i=\bar c - c_i$. The paper uses sigmoid gating and $u=0.001$ and argues the method adds no interference gradient (**O**, CLM-015). The authors report, for 1B and 3B models, validation perplexity 9.56 vs 9.50 and 7.97 vs 7.92, and MaxVio$_{global}$ 0.72 vs 0.04 and 0.52 vs 0.04 (auxiliary vs loss-free; author-reported, no variance in the table) (**O**, CLM-016).
+- **Loss-Free Balancing**: add a per-expert bias $b_i$ to the routing score *for top-$K$ selection only*; the gate that weights the expert output stays the unbiased score. After each batch, $b_i \leftarrow b_i + u\cdot\mathrm{sign}(e_i)$ with $e_i=\bar c - c_i$. Where: $c_i$ is the number of tokens assigned to expert $i$ in the batch, $\bar c$ the mean over experts, $u$ the update rate, and $K$ the per-token top-$K$ (the same quantity as $k$ elsewhere). Here $e_i$ is a load error, not an expert. An underloaded expert ($c_i<\bar c$) gets $b_i$ raised by $u$; an overloaded one gets it lowered by $u$. The paper uses sigmoid gating and $u=0.001$ and argues the method adds no interference gradient (**O**, CLM-015). The authors report, for 1B and 3B models, validation perplexity 9.56 vs 9.50 and 7.97 vs 7.92, and MaxVio$_{global}$ 0.72 vs 0.04 and 0.52 vs 0.04 (auxiliary vs loss-free; author-reported, no variance in the table) (**O**, CLM-016).
 - **DeepSeek-V3 recipe**: bias update speed $\gamma=0.001$ for the first 14.3T tokens, then 0.0 for the last 500B; a complementary *sequence-wise* balance loss with $\alpha=0.0001$; no token dropping (**O**, CLM-017). Its ablations report the auxiliary-loss-free strategy better on most benchmarks at 15.7B and 228.7B scale. At 1B, validation loss was 2.258 with a sequence-wise loss and 2.253 for both loss-free and batch-wise loss. It names two risks of batch-wise balance: imbalance within certain sequences or small batches, and domain-shift imbalance at inference (**O**, CLM-018).
 - **Balance scope**: the token set over which $f_i$ is counted. Qiu et al. note that frameworks compute it per micro-batch, which at LLM scale is nearly per-sequence and forces even code-only sequences to spread over all experts. Synchronizing $f_i$ to the global batch gave about 0.1 lower pre-training perplexity and about 2 benchmark points, specialization emerged clearly only with global balance, and overhead was under 3% (author-reported) (**O**, CLM-019). Qwen3 MoE (128 experts, 8 active, no shared experts) adopts the global-batch loss (**O**, CLM-020).
 - **Control view**: the sign update is a fixed-step integral controller. ID Balancing (2026) frames it so and proposes an integral-derivative controller for 768-expert, top-3 routing (**O**, CLM-022; FRONTIER, abstract-level). Han and Zhong analyze it as a single-step primal-dual method (**O**, CLM-023; FRONTIER, abstract-level). Kimi K3's Quantile Balancing sets each expert bias from a router-score quantile instead of a fixed-step sign update (**O**, CLM-053; FRONTIER).
@@ -194,7 +200,7 @@ At `NVIDIA/Megatron-LM` commit `e998be072d22ff57b4b49899819a1a153f4f3dc9` (main,
 1. `TopKRouter.__init__` registers an fp32 `expert_bias` and an int64 `local_tokens_per_expert` buffer when `moe_router_enable_expert_bias` is set.
 2. `moe_utils.py::topk_routing_with_score_function` with `score_function="sigmoid"` computes `scores_for_routing = scores + expert_bias`, takes top-$k$ indices from that, then gathers the *unbiased* `scores` and normalizes them over the selected experts.
 3. `TopKRouter._apply_expert_bias` adds the routing map to `local_tokens_per_expert`, only when grad is enabled, so evaluation and recomputation passes do not count.
-4. `finalize_model_grads` calls `_update_router_expert_bias` once per global batch. `get_updated_expert_bias` all-reduces counts over the TP×DP×CP group and applies `bias += rate * sign(total - count * num_experts)`. `moe_router_bias_update_rate` defaults to `1e-3`.
+4. `finalize_model_grads` calls `_update_router_expert_bias` once per global batch. `get_updated_expert_bias` all-reduces counts over the TP×DP×CP group and applies `bias += rate * sign(total - count * num_experts)`. `moe_router_bias_update_rate` defaults to `1e-3`. (Dividing the sign argument by `num_experts` shows it is the paper's $\mathrm{sign}(\bar c - c_i)$: `total / num_experts` is the mean count.)
 5. `TransformerConfig` validation rejects expert bias unless the score function is `sigmoid` or `sqrtsoftplus`.
 6. Scope is a code path: `_apply_aux_loss` reduces counts over TP×CP (micro-batch scope), `_apply_seq_aux_loss` balances each sequence and divides by batch size, and `_apply_global_aux_loss` reduces over TP×DP×CP and averages over gradient-accumulation steps. `switch_load_balancing_loss_func` multiplies by `num_experts * coeff / (topk * T^2)`. `moe_aux_loss_coeff` defaults to 0.0.
 
@@ -203,13 +209,15 @@ Lesson: the same name ("aux loss") covers three balance scopes, and the bias con
 **Quantitative Model / Derivation (D, CLM-021):**
 - Bias selection: choose $S=\mathrm{TopK}(s_i+b_i)$; gate $g_i=s_i/\sum_{j\in S}s_j$.
 - Controller step: each expert moves by $\pm u$ per global batch. Two experts whose score gap is $\Delta$ close it in about $\Delta/(2u)$ updates if one moves up and the other down.
+  - Step-by-step: each update shrinks the gap by $u$ from the overloaded expert's drop plus $u$ from the underloaded expert's rise, $2u$ in total; $\Delta/(2u)$ updates are needed (ignoring score drift from training).
 - Scope: $\mathcal{L}_{global}=\frac{1}{N_P}\sum_j N\sum_i \bar f_i P_i^{j}$ with $\bar f$ from the whole batch (CLM-019's form) versus $\frac{1}{N_P}\sum_j N\sum_i f_i^{j}P_i^{j}$ per micro-batch.
+  - Where: $j$ indexes the $N_P$ micro-batches (or parallel groups) in the global batch; $f_i^{j}$ and $P_i^{j}$ are computed inside group $j$; $\bar f_i$ is $f_i$ counted over all groups together; $\alpha$ is omitted. The only difference is which token set $f$ is counted over.
 
 **Worked Example (synthetic):**
 1. *Bias changes selection, not weight.* Sigmoid scores from Lesson 28.1 are $[0.8808, 0.7311, 0.6225, 0.2689]$, with bias $b=[-0.2, 0, +0.3, 0]$ after expert 1 was overloaded and expert 3 underloaded. Selection scores are $[0.6808, 0.7311, 0.9225, 0.2689]$, so top-2 = experts 3, 2. Gates use unbiased scores: $0.6225/1.3536 = 0.4599$ and $0.7311/1.3536=0.5401$.
 2. *Why not softmax.* Adding +1 to expert 3's logit before a softmax over all experts changes every probability, from $[0.6095, 0.2242, 0.1360, 0.0303]$ to $[0.4940, 0.1817, 0.2996, 0.0246]$ (**D**). A bias that leaks into gate values leaks into the gradient, which is what the method exists to avoid. The pinned config enforces sigmoid-family scores (CLM-024).
 3. *Controller lag.* With $u=10^{-3}$, a selection-score gap of 0.05 between an overloaded and an underloaded expert takes about $0.05/(2\times10^{-3})=25$ global batches to close.
-4. *Scope.* Two sequences: code routes all tokens to experts 1–2, prose to 3–4 ($N=4$, top-1, $P=f$ within each sequence). Per-sequence loss: $4(0.5\cdot0.5+0.5\cdot0.5)=2.0$ each, twice the floor. Global: $\bar f = [0.25]^4$, each term $4(0.25\cdot0.5\cdot2)=1.0$, the floor. The micro-batch loss penalizes exactly the domain split the global loss allows.
+4. *Scope.* Two sequences: code routes all tokens to experts 1–2, prose to 3–4 ($N=4$, top-1, $P=f$ within each sequence). Per-sequence loss: $4(0.5\cdot0.5+0.5\cdot0.5)=2.0$ each, twice the floor. Global: $\bar f = [0.25]^4$, each term $4(0.25\cdot0.5\cdot2)=1.0$, the floor. (Code sequence: $f=P=[0.5,0.5,0,0]$, so only two nonzero products. Globally, half the tokens go to experts 1–2 and half to 3–4, so each expert has $\bar f_i=0.25$; the code sequence still has $P=[0.5,0.5,0,0]$, giving $4(0.25\cdot0.5+0.25\cdot0.5)=1.0$.) The micro-batch loss penalizes exactly the domain split the global loss allows.
 - *Interpretation and limits*: global balance permits specialization but not per-micro-batch balance, which is what sets expert-parallel step time (Lesson 28.4). DeepSeek-V3 pairs global-style bias balancing with a tiny sequence loss; Qwen3 uses a global loss. Neither establishes an industry default.
 
 **Knowledge Check:**
@@ -251,6 +259,8 @@ What does imbalance cost in dropped tokens, padded compute, and all-to-all time 
 **Quantitative Model / Derivation (D, CLM-034, CLM-036):**
 - $C=\lceil Tk/E\cdot CF\rceil$; dropped $=\sum_e\max(0,n_e-C)$; padding $=EC-\sum_e\min(n_e,C)$; pad-to-max waste $=E\max_e n_e - Tk$; block-rounded waste $=\sum_e(\lceil n_e/b\rceil b - n_e)$.
 - EP training bytes per MoE layer per micro-batch per rank: $n_{a2a}\cdot Bkd\cdot\text{bytes}\cdot\frac{R-1}{R}$ with $n_{a2a}=4$ (6 with recompute); time $\ge \Gamma\cdot\text{bytes}/BW_{eff}$ where $\Gamma\ge1$ is the max-over-receivers imbalance (Module 20, Lesson 20.4; Module 24, Lesson 24.4 for the inference form).
+- Where: $T$ is tokens in the routing group; $k$ is per-token top-$k$; $E$ is the number of experts; $CF$ the capacity factor; $C$ the per-expert capacity in token slots; $n_e$ the assignments routed to expert $e$ ($\sum_e n_e=Tk$); $b$ the block size; $B$ tokens per rank per micro-batch; $d$ hidden size; "bytes" bytes per element; $R$ the EP degree; $BW_{eff}$ effective per-rank bandwidth.
+- Step-by-step: each expert gets $EC$ slots in total; the filled ones are $\sum_e\min(n_e,C)$, so the rest is padding. One all-to-all moves each of $B$ tokens to $k$ experts as a $d$-vector, $Bkd\cdot\text{bytes}$; with destinations spread evenly over $R$ ranks, $1/R$ stays local, so $\frac{R-1}{R}$ crosses the network. Forward has dispatch and combine (2); backward sends their gradients back (2 more); recomputing the MoE layer repeats the forward pair (6).
 
 **Worked Example (synthetic):**
 1. *Drop, pad, dropless.* $T=4{,}096$ tokens in one routing group, $E=8$, top-1, loads $n=[1400, 600, 500, 500, 500, 300, 100, 196]$ (mean 512, MaxVio $=(1400-512)/512=1.734$).
@@ -264,7 +274,9 @@ What does imbalance cost in dropped tokens, padded compute, and all-to-all time 
 | Dropless, $b=128$ | — | 0 | 0% | 4,352 | 256 (5.9%) |
 
    Raising capacity buys fewer drops with more padding; neither reaches zero drops below CF ≈ 2.73 here. Block rounding wastes 256 rows.
-2. *EP all-to-all in training.* $B=4{,}096$ tokens per rank per micro-batch, $k=8$, $d=4{,}096$, BF16, $R=8$ EP ranks, $BW_{eff}=50$ GB/s (synthetic), 24 MoE layers, no overlap. Per all-to-all: $4096\cdot8\cdot4096\cdot2=268{,}435{,}456$ bytes (256 MiB), of which $7/8$ ($234{,}881{,}024$ bytes) leaves the rank, so $4.70$ ms. Per layer: $4\times4.70=18.79$ ms, or $28.19$ ms with MoE recompute. Per micro-batch: $24\times18.79=451.0$ ms; at $\Gamma=1.5$, $676.5$ ms.
+
+   Step-by-step for CF 1.25: $C=\lceil 4096\cdot1/8\cdot1.25\rceil=640$. Only expert 1 overflows, so dropped $=1400-640=760$ ($760/4096=18.55\%$). Slots $=8\cdot640=5{,}120$; filled $=640+600+3\cdot500+300+100+196=3{,}336$; padding $=5{,}120-3{,}336=1{,}784$. Zero drops need $C\ge1400$, i.e. $CF\ge1400/512=2.734$. Block rounding at $b=128$: $1400\to1408$, $600\to640$, $500\to512$ (×3), $300\to384$, $100\to128$, $196\to256$, so waste $=8+40+36+84+28+60=256$ and slots $=4{,}096+256=4{,}352$.
+2. *EP all-to-all in training.* $B=4{,}096$ tokens per rank per micro-batch, $k=8$, $d=4{,}096$, BF16, $R=8$ EP ranks, $BW_{eff}=50$ GB/s (synthetic), 24 MoE layers, no overlap. Per all-to-all: $4096\cdot8\cdot4096\cdot2=268{,}435{,}456$ bytes (256 MiB), of which $7/8$ ($234{,}881{,}024$ bytes) leaves the rank, so $234{,}881{,}024/(50\times10^9)$ s $=4.70$ ms (GB $=10^9$ bytes). Per layer: $4\times4.70=18.79$ ms, or $28.19$ ms with MoE recompute. Per micro-batch: $24\times18.79=451.0$ ms; at $\Gamma=1.5$, $676.5$ ms.
 - *Interpretation*: the inference model in Module 24 counts two all-to-alls per layer; training counts four or six, and imbalance multiplies all of them. FP8 dispatch, node-limited routing, and overlap reduce exposed time; balance scope decides $\Gamma$.
 - *Limits*: payload only; ignores latency terms, deduplication across experts on the same rank, and kernel efficiency.
 
@@ -307,11 +319,14 @@ Router logits can drift upward together without changing the softmax, until bf16
 
 **Quantitative Model / Derivation (D, CLM-048, CLM-054):**
 - $L_z=\mathrm{mean}_t\,\mathrm{lse}(x_t)^2$, $\partial L_z/\partial x_j = 2\,\mathrm{lse}\,\mathrm{softmax}_j$ per token.
+  - Where: $\mathrm{lse}(x)=\log\sum_j e^{x_j}$ over one token's router logits; $B$ in the ST-MoE form is the number of tokens (not the per-rank $B$ of Lesson 28.4); $c_z$ and $c_B$ are the z-loss and balance-loss weights.
+  - Step-by-step: chain rule gives $\partial\,\mathrm{lse}^2/\partial x_j = 2\,\mathrm{lse}\cdot\partial\,\mathrm{lse}/\partial x_j$, and $\partial\,\mathrm{lse}/\partial x_j=e^{x_j}/\sum_i e^{x_i}=\mathrm{softmax}_j$. Adding a constant $a$ to every logit gives $\mathrm{lse}+a$ but leaves softmax unchanged, so only $L_z$ sees the shift.
 - Domain share $D_{e}^{(d)} = \#\{t\in d: e\in S_t\}/|d|$; uniform baseline $k/E$; report $\max_e D_e^{(d)}/(k/E)$ per domain and layer.
 - Combinations at fixed compute: $\binom{mE}{mk}$ versus $\binom{E}{k}$.
+  - Where: $\#\{\cdot\}$ counts tokens; $d$ is a domain (a set of tokens), not hidden size; $S_t$ is token $t$'s selected set; $m$ is the split factor. Each token selects $k$ of $E$ experts, so under uniform routing a given expert is selected for a fraction $k/E$ of tokens. Splitting each expert into $m$ pieces of $1/m$ size and selecting $mk$ of them keeps per-token expert FLOPs fixed.
 
 **Worked Example (synthetic):**
-1. *Z-loss.* Logits $[2.0,1.0,0.5,-1.0]$: $\mathrm{lse}=2.4952$, $\mathrm{lse}^2=6.2259$, $c_zL_z=0.006226$. Shift all logits by +10: softmax unchanged, $\mathrm{lse}^2=156.13$, $c_zL_z=0.1561$, a 25× larger penalty for a change the LM loss cannot see. Gradient coefficients $2\,\mathrm{lse}\,p=[3.041, 1.119, 0.679, 0.151]$ (× $c_z$): the most probable expert's logit is pulled down most.
+1. *Z-loss.* Logits $[2.0,1.0,0.5,-1.0]$: $\mathrm{lse}=2.4952$, $\mathrm{lse}^2=6.2259$, $c_zL_z=0.006226$. Shift all logits by +10: softmax unchanged, $\mathrm{lse}=12.4952$, $\mathrm{lse}^2=156.13$, $c_zL_z=0.1561$, a 25× larger penalty for a change the LM loss cannot see. Gradient coefficients $2\,\mathrm{lse}\,p=4.9904\cdot[0.6095, 0.2242, 0.1360, 0.0303]=[3.041, 1.119, 0.679, 0.151]$ (× $c_z$, unshifted logits): the most probable expert's logit is pulled down most.
 2. *Granularity.* 8 experts top-2 give $\binom82=28$ combinations; splitting each into 4 ($m=4$, 32 experts, top-8) gives $\binom{32}{8}=10{,}518{,}300$ at the same expert FLOPs.
 3. *Specialization vs balance.* $E=8$, top-2, uniform share $k/E=0.25$. Four equal-size domains each route every token to a disjoint expert pair (code to experts 1–2, and so on). Every expert gets the same load, so MaxVio $=0$, yet each domain's share on its own pair is $1.0$, four times the baseline, and $0$ elsewhere. Balance metrics alone report nothing.
 - *Interpretation and limits*: a z-loss value is only interpretable relative to its own history; specialization numbers depend on domain labels and layer.
@@ -355,13 +370,14 @@ Upcycling buys a good starting function at the cost of symmetric experts that di
 **Quantitative Model / Derivation (D, CLM-047):**
 - Upcycled layer at init: $y=\sum_{i\in S}g_i\,\mathrm{MLP}(x)=\mathrm{MLP}(x)$ when $\sum g_i=1$. With softmax-then-top-$k$ and no renormalization, $y=(\sum_{i\in S}g_i)\mathrm{MLP}(x)$, a scaled-down output.
 - Added parameters: $(E-1)\cdot P_{MLP}$ per converted layer; per-token expert compute $\times k$.
+  - Where: $P_{MLP}$ is the dense MLP's parameter count; $E$ experts replace one MLP, so $E-1$ copies are new (router weights, $E\cdot d$ per layer, are ignored). A SwiGLU MLP has three $d\times d_{ff}$ matrices, so $P_{MLP}=3\,d\,d_{ff}$.
 - Routing drift between checkpoints A and B on a fixed probe set: fraction of (token, layer) pairs with $S_A\neq S_B$.
 
 **Worked Example (synthetic dense decoder; $d=2048$, SwiGLU width 8192, 24 layers, convert every other layer to $E=8$, top-2):**
 - *MLP size*: $3\cdot2048\cdot8192=50{,}331{,}648$ parameters.
-- *Added parameters*: $7\times50{,}331{,}648\times12=4{,}227{,}858{,}432$.
+- *Added parameters*: $7\times50{,}331{,}648\times12=4{,}227{,}858{,}432$ ($E-1=7$ new copies; every other layer of 24 gives 12 converted layers).
 - *Per-token expert compute in a converted layer*: $2\times$ the dense MLP ($100{,}663{,}296$ weights touched).
-- *Initial output*: with renormalized top-2, identical to the dense model; with softmax-over-8 then top-2 at a near-uniform fresh router, gates sum to about $2/8$, cutting the MLP contribution to about a quarter. This is one candidate cause of an initial drop.
+- *Initial output*: with renormalized top-2, identical to the dense model; with softmax-over-8 then top-2 at a near-uniform fresh router, each probability is about $1/8$, so gates sum to about $2/8$, cutting the MLP contribution to about a quarter. This is one candidate cause of an initial drop.
 - *Decision*: if the remaining budget is short relative to the original dense budget, upcycle; if it is long, the reported crossovers (CLM-040, CLM-041) favor from-scratch MoE. The crossover for your model is a measurement.
 - *Fine-tuning plan*: freeze router or anchor it, tune non-expert parameters first, and monitor routing drift and retained capability with paired gates (Module 19, Lesson 19.6).
 
