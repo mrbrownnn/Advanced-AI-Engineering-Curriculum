@@ -29,6 +29,7 @@ Module 01 supplies model geometry; Module 02 single-GPU execution and timing; Mo
 - **What You Will Do**: Write a placement plan from memory fit, SLOs, and topology; predict and measure collective cost; trace tensor parallelism and the KV-transfer contract at a pinned vLLM commit; model forward-only pipelines, expert skew, and context parallelism; size prefill/decode disaggregation including transfer bandwidth; and plan capacity by failure domain.
 - **Environment**: Python 3.10+, PyTorch with `torch.distributed`. Two or more GPUs in one node are preferred for the measured parts of Labs B and D; a second node is optional. Without multiple GPUs, run the same code over CPU processes and label the numbers as non-representative. Labs A and C and parts of D use a discrete-event simulator that you write; every result must be labeled **measured** or **simulated**.
 - **Evidence Rule**: Keep source observations (**O**), explicit derivations (**D**), and measurement-dependent hypotheses (**H**) separate. All inputs to worked examples are synthetic and labeled; author-reported results are quoted with their scope. Units: 1 GB $=10^9$ bytes, 1 GiB $=2^{30}$ bytes; link rates in Gb/s are bits, bandwidths in GB/s are bytes.
+- **If You Only Have One Week**: Lessons 20.1, 20.2, 20.5 — they derive placement from memory fit, SLOs, and topology, predict collective cost, and decide disaggregation from KV transfer cost; tensor, pipeline, expert, and context parallelism and failure recovery build on those three.
 
 ## 01 Baseline Assumptions
 

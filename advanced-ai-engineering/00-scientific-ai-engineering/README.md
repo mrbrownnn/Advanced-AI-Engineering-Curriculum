@@ -12,6 +12,7 @@ The goal is not to turn every engineer into a statistician. The goal is to make 
 - **What You Will Do**: Build a timestamped benchmark harness, expose warmup and order bias, compare randomized paired treatments, quantify uncertainty without overstating it, break a load generator with coordinated omission, trace MLPerf LoadGen, and package a repeatable artifact.
 - **Environment**: Python 3.10+ for harness and analysis work; a GPU is optional. Hardware-specific experiments must record the accelerator, driver, runtime, clocks/power policy, and isolation state.
 - **Research Cutoff**: evidence registry 2026-09-25; WP-F1 review 2026-09-30 re-read the pinned LoadGen completion and percentile code (CLM-014) and re-checked the presence of the other pinned symbols. Canonical statistical methods remain relevant; implementation claims remain pinned to the revisions in §05.
+- **If You Only Have One Week**: Lessons 0.1, 0.3, 0.5 — they define what is being claimed, what the true experimental unit is, and whether a measured difference is real and practically important; harness mechanics, distributions, provenance, and falsification build on those three.
 
 ## 01 Baseline Assumptions
 

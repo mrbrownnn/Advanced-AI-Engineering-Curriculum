@@ -22,6 +22,7 @@ The module covers failure taxonomy, factuality/truthfulness measurement, calibra
 - **What you will do:** annotate failures at claim level; construct and calibrate confidence signals; measure proper scores and risk-coverage; break uncertainty methods under shift and correlated errors; trace generation scores in current source; and diagnose a release regression hidden by aggregates.
 - **Environment:** Python 3.10+ with numerical/statistical tooling, a reproducible model endpoint or local model, and an annotation store that preserves blinded labels and adjudication. Pin model, prompt, tokenizer, evaluator, and calibration data revisions.
 - **Evidence rule:** preserve source observations (**O**), assumption-backed derivations (**D**), and telemetry-dependent hypotheses (**H**). A detector score is not a factuality label, and a marginal guarantee is not a per-request promise.
+- **If You Only Have One Week**: Lessons 7.1, 7.2, 7.3 — they define failures without the word hallucination, measure calibration properly, and set abstention thresholds; free-form uncertainty, conformal guarantees, and regression diagnosis build on those three.
 
 ## 01 Baseline Assumptions
 

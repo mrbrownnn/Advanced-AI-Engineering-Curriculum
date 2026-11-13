@@ -24,6 +24,7 @@ The scope is inference-time reasoning, search, verification, budgeting, and diag
 - **What you will do:** instrument chain-of-thought behavior; implement self-consistency and best-of-N; derive and break pass@k assumptions; build verifier-guided search; implement budget and stopping controls; test faithfulness and verifier gaming; and diagnose an offline-to-production regression.
 - **Environment:** Python 3.10+ for sampling, search, scoring, and analysis; access to a model endpoint or local model that can return generation metadata; optional GPU access for loaded latency/capacity experiments. Pin model, runtime, tokenizer, prompt, judge, and pricing revisions.
 - **Evidence rule:** label source observations (**O**), explicit derivations (**D**), and telemetry-dependent hypotheses (**H**). A paper result remains scoped to its model, tasks, decoding, verifier, budget, and evaluation boundary.
+- **If You Only Have One Week**: Lessons 6.2, 6.4, 6.5 — they separate oracle pass@k from selected accuracy, validate verifiers beyond their own score, and account for compute and stopping; chain-of-thought semantics, search, and adaptive policies build on those three.
 
 ## 01 Baseline Assumptions
 

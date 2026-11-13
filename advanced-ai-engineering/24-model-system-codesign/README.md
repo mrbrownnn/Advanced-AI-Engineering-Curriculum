@@ -20,6 +20,7 @@ The outline for this module asked for the "exact financial impact of switching f
   - Defend an architecture decision with reversal thresholds.
 - **Environment**: Python 3.10+ for the manifest compiler, simulators, and analysis (Labs A–C). Lab D needs a vLLM checkout at the pinned commit for static tracing. Executing it on one GPU is optional but valuable. Multi-node MoE experiments are optional; without them, Lab B uses a labeled synthetic topology model.
 - **Evidence Rule**: Every statement is labeled **O** (source observation), **D** (derivation), or **H** (hypothesis), with the claim ID next to it. Synthetic inputs are labeled. No number in this module is a measurement of your system.
+- **If You Only Have One Week**: Lessons 24.1, 24.3, 24.6 — they compile the resource vector, test whether the bottleneck stays or moves, and defend the decision with switching thresholds; attention variants, dense versus MoE, and matched comparisons build on those three.
 
 ## 01 Baseline Assumptions
 These prerequisites are taught in the cited lessons. They are used here without being re-taught.

@@ -12,6 +12,7 @@ This module builds the hardware/software measurement model needed before KV-cach
 - **What You Will Do**: Implement reference kernels, induce coalescing and divergence failures, prove why unsynchronized timing is invalid, construct qualified Roofline bounds, profile at system and kernel scope, trace a pinned benchmark implementation, and defend a diagnosis against alternatives.
 - **Environment**: Python 3.10+ plus CUDA C++ or a GPU kernel DSL; an NVIDIA GPU and current profiling tools are required for device-counter labs, while analytical exercises can run without them.
 - **Research Cutoff**: evidence registry 2026-09-25; WP-F1 review 2026-09-30 corrected units, rubric, and examples and re-checked pinned symbol presence without re-reading the NVIDIA documentation. Current implementation claims remain pinned to the verified revisions below.
+- **If You Only Have One Week**: Lessons 2.2, 2.3, 2.4 — they cover memory traffic, honest timing, and qualified Roofline bounds, which every bottleneck claim needs; regime transitions, profiling, and source tracing build on those three.
 
 ## 01 Baseline Assumptions
 

@@ -31,6 +31,7 @@ This module owns model-I/O request and response contracts, prompt/template seria
 - **What You Will Do**: Build canonical and effective request models, probe backend capabilities, validate structured output, assemble adversarial streams, bound retries/fallbacks, trace XGrammar, and defend a portable production harness.
 - **Environment**: Python 3.10+, two mock or disposable model adapters, JSON Schema fixtures, a streaming-event replayer, and privacy-safe request/attempt storage.
 - **Evidence Rule**: Distinguish source observations (**O**), derivations (**D**), and telemetry-dependent hypotheses (**H**). Adapter convenience is not evidence of semantic equivalence.
+- **If You Only Have One Week**: Lessons 13.1, 13.3, 13.5 — they separate canonical intent from the effective request, validate structured output, and classify errors before bounded recovery; capability negotiation, streaming, and conformance replay build on those three.
 
 ## 01 Baseline Assumptions
 

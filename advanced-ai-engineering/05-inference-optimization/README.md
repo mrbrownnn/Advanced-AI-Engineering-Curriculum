@@ -22,6 +22,7 @@ The scope is single-node inference mechanisms: IO-aware attention, kernel fusion
 - **What You Will Do**: Compare reference and IO-aware attention; write and profile a fused Triton kernel; build and validate quantized artifacts; instrument speculative cycles; trace a current FlashAttention source path; and diagnose an optimization stack that regresses production goodput.
 - **Environment**: Python 3.10+, PyTorch, Triton or an equivalent kernel environment, and a supported GPU for execution labs; analytical and artifact-manifest work can proceed without every backend.
 - **Evidence Rule**: Distinguish source observation (**O**), assumption-backed derivation (**D**), and telemetry-dependent engineering hypothesis (**H**). Paper speedups do not transfer without their model, hardware, shapes, configuration, baseline, and measurement boundary.
+- **If You Only Have One Week**: Lessons 5.3, 5.5, 5.7 — they cover quantization as a deployment contract, the exact speculative-decoding rule and cost model, and bottleneck-driven composition; IO-aware attention, kernel fusion, and learned drafting build on those three.
 
 ## 01 Baseline Assumptions
 

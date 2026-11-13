@@ -8,7 +8,7 @@ This program has three layers:
 
 ### Layer 1 — Core / Deep Track
 
-**[advanced-ai-engineering/](advanced-ai-engineering/)** — The 26-week professional curriculum developing deep competency across the full AI engineering chain: from scientific experimentation and model internals through inference systems, agents, evaluation, security, and model-system co-design.
+**[advanced-ai-engineering/](advanced-ai-engineering/)** — The 26-week professional curriculum (≈845–860h; [PATHS.md](PATHS.md) lists shorter paths) developing deep competency across the full AI engineering chain: from scientific experimentation and model internals through inference systems, agents, evaluation, security, and model-system co-design.
 
 ### Layer 2 — Satellite / 80-20 Tracks
 
@@ -95,7 +95,8 @@ Intensive AI Engineer/
 ├── ROADMAP.md                      ← 26-week schedule with satellite integration
 ├── COMPETENCY.md                   ← SFIA, Bloom, SOLO, Dreyfus framework
 │
-├── advanced-ai-engineering/        ← CORE: 29 modules (00–24 core, 25–28 expert)
+├── PATHS.md                        ← Application, Inference/Platform, and Full learning paths
+├── advanced-ai-engineering/        ← CORE: 32 modules (00–24 and 37–39 core, 25–28 expert)
 │   ├── DEPTH-CONTRACT.md           ← Defines the standard for mastery vs topic coverage
 │   └── ENGINEERING-LEARNING-PROTOCOL.md ← The rigorous loops used to execute modules
 │
@@ -111,7 +112,7 @@ Intensive AI Engineer/
 
 ## Getting Started
 
-1. Read [ROADMAP.md](ROADMAP.md) for the 26-week schedule
+1. Read [ROADMAP.md](ROADMAP.md) for the 26-week schedule and [PATHS.md](PATHS.md) to choose a path
 2. Read [COMPETENCY.md](COMPETENCY.md) for the competency framework
 3. Read [DEPTH-CONTRACT.md](advanced-ai-engineering/DEPTH-CONTRACT.md) and [ENGINEERING-LEARNING-PROTOCOL.md](advanced-ai-engineering/ENGINEERING-LEARNING-PROTOCOL.md) to understand the required rigor.
 4. Start with [advanced-ai-engineering/](advanced-ai-engineering/) Module 00
@@ -119,7 +120,7 @@ Intensive AI Engineer/
 
 ## Status
 
-29 modules exist: 25 core (00–24) and 4 expert (25–28). Modules 29–36 are scope contracts in [EXPERT-TRACK.md](advanced-ai-engineering/EXPERT-TRACK.md), not content. AUTHORED means the README, research registry, and knowledge model pass `advanced-ai-engineering/tools/validate_curriculum.py`; it does not certify technical correctness. Expert-module lab packages are deferred.
+32 modules exist: 28 core (00–24 and 37–39) and 4 expert (25–28). Modules 37–39 are numbered after the Expert Track reservation but scheduled inside the core weeks (see [ROADMAP.md](ROADMAP.md)). Modules 29–36 are scope contracts in [EXPERT-TRACK.md](advanced-ai-engineering/EXPERT-TRACK.md), not content. AUTHORED means the README, research registry, and knowledge model pass `advanced-ai-engineering/tools/validate_curriculum.py`; it does not certify technical correctness. Expert-module lab packages are deferred.
 
 | Module | Track | Status |
 |---|---|---|
@@ -148,6 +149,9 @@ Intensive AI Engineer/
 | 22 — AI Economics | Core | AUTHORED |
 | 23 — Observability & Reliability | Core | AUTHORED |
 | 24 — Model-System Co-design | Core | AUTHORED |
+| 37 — Multi-Agent Systems | Core | AUTHORED |
+| 38 — Tool Ecosystem & Protocols | Core | AUTHORED |
+| 39 — Feedback Loop & AI Product | Core | AUTHORED |
 | 25 — Pretraining Dynamics & Scaling | Expert | AUTHORED |
 | 26 — Distributed & Low-Precision Training | Expert | AUTHORED |
 | 27 — RL Post-Training Systems | Expert | AUTHORED |

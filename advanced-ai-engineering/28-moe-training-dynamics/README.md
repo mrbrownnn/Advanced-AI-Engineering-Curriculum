@@ -26,6 +26,7 @@ Module 01 introduced MoE parameter accounting (Lesson 1.7). Module 20 covered ex
 - **What You Will Do**: Compute router outputs and gradients by hand, induce and stop router collapse on a toy MoE, compare auxiliary-loss and bias balancing at micro-batch and global scope, quantify dropping, padding, and dropless waste, model expert-parallel all-to-all cost in training, measure specialization separately from balance, decide on upcycling, and trace balancing code at pinned Megatron-LM and MegaBlocks commits.
 - **Environment**: Python 3.10+ and PyTorch on CPU for simulators and toy MoE (LAB A, LAB C); a Colab-class GPU for a small MoE language model (LAB B) and a small fine-tuning arm (LAB D); pinned source checkouts for traces (TRACE). No local GPU is assumed, and no multi-node experiment is required: expert-parallel cost is modeled, not measured.
 - **Evidence Rule**: Keep source observations (**O**), explicit derivations (**D**), and measurement-dependent hypotheses (**H**) separate. All numbers in worked examples are synthetic or derived and labeled. Author-reported results are labeled as such and carry their model, scale, and recipe.
+- **If You Only Have One Week**: Lessons 28.1, 28.2, 28.3 — they cover router mechanics, collapse and the auxiliary loss, and bias balancing with its scope; capacity, stability, specialization, and upcycling build on those three.
 
 ## 01 Baseline Assumptions
 

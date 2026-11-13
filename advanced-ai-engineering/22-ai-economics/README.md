@@ -9,6 +9,7 @@ A cheap call is not necessarily a cheap task. Rejections, retries, fallbacks, ca
 - **What You Will Do**: Build a task/attempt/spend ledger; model retries and failures; compare API and self-hosted capacity; trace a pinned cost calculator and router; test prefix and semantic caches; compare routing with cascades; and defend a sensitivity-tested decision frontier.
 - **Environment**: Python 3.10+ and a spreadsheet or dataframe library. Labs use synthetic fixtures; optional provider or self-hosted measurements must record revision, configuration, workload, and invoice boundary.
 - **Evidence Rule**: Every registry-backed statement carries **O** (source observation), **D** (derivation), or **H** (hypothesis) plus `CLM-###`. Pricing pages are dated commercial snapshots, never source-code traces. Unless explicitly called a dated snapshot, prices are synthetic.
+- **If You Only Have One Week**: Lessons 22.1, 22.2, 22.6 — they set a denominator-safe cost per success, separate marginal from fully loaded cost, and choose among feasible options with flip points; pricing, caching, and routing economics build on those three.
 
 ## 01 Baseline Assumptions
 

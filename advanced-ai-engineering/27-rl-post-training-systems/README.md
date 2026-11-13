@@ -27,6 +27,7 @@ Module 19 (Lesson 19.5) introduced RLHF, DPO, GRPO, the group-normalized advanta
 - **What You Will Do**: Compute advantages, ratios, clips, and aggregations by hand and in code; reproduce entropy dynamics on a toy policy; measure a verifier's false-negative and false-positive rates and plant an exploitable one; detect hacking with an independent audit; build a step-time and staleness simulator; trace a pinned verl commit from rollout to weight sync; and measure sampler/trainer log-probability mismatch and truncated-importance-sampling corrections.
 - **Environment**: Python 3.10+, PyTorch and NumPy on CPU for LAB A and LAB C; a Colab-class GPU for small-model GRPO in LAB B and the optional mismatch measurement in LAB D; a pinned verl checkout for source tracing. No local GPU is assumed.
 - **Evidence Rule**: Keep source observations (**O**), explicit derivations (**D**), and measurement-dependent hypotheses (**H**) separate. Worked-example inputs are labeled synthetic. Author-reported speedups and accuracy numbers are reported with their setup and are not general constants.
+- **If You Only Have One Week**: Lessons 27.1, 27.3, 27.4 — they cover what the estimator computes, whether the verifier reward is real, and how KL and audits catch reward hacking; aggregation, step-time placement, and off-policyness build on those three.
 
 ## 01 Baseline Assumptions
 
