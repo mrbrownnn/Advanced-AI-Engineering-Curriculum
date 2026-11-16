@@ -2,33 +2,60 @@
 
 ## 00 Why This Module Exists
 
-An agent is not a prompt that keeps talking. It is a controller that repeatedly converts an observed state into a proposed action, subjects that action to deterministic validation and authority policy, executes it through an external interface, incorporates the resulting observation, and stops for an explicit reason.
+An agent is not a prompt that keeps talking. It is a controller that repeatedly:
 
-```text
-goal + current state + remaining budget
-                 |
-                 v
-             model proposal
-                 |
-        validate + authorize
-          /              \
-   reject/repair       execute tool
-          |                |
-          +---- observation envelope
-                           |
-                 verify progress/effect
-                     /           \
-             continue/replan   terminal state
+1. converts an observed state into a proposed action;
+2. subjects that action to deterministic validation and authority policy;
+3. executes it through an external interface;
+4. incorporates the resulting observation;
+5. stops for an explicit reason.
+
+```mermaid
+flowchart TD
+    IN["<b>Inputs</b><br/>goal · current state · remaining budget"]
+    PROP["<b>1. Model proposal</b>"]
+    VAL["<b>2. Validate + authorize</b>"]
+    REJ["reject/repair"]
+    EXE["<b>3. Execute tool</b>"]
+    OBS["<b>4. Observation envelope</b>"]
+    VER["<b>5. Verify progress/effect</b>"]
+    CONT["continue/replan"]
+    TERM["terminal state"]
+
+    IN --> PROP --> VAL
+    VAL --> REJ
+    VAL --> EXE
+    REJ --> OBS
+    EXE --> OBS
+    OBS --> VER
+    VER --> CONT
+    VER --> TERM
 ```
 
-This module owns the observe–decide–act loop, tool and observation contracts, budgets and stopping, retry/replanning, progress/stall detection, reflection as a fallible mechanism, authority boundaries, trajectory telemetry, and agent evaluation. Module 11 owns context and memory; Module 13 owns the broader model harness and structured-output reliability; Module 14 owns durable checkpoint/resume and idempotent side-effect execution; Module 18 owns full threat modeling.
+Scope:
+
+- This module owns: the observe–decide–act loop, tool and observation contracts, budgets and stopping, retry/replanning, progress/stall detection, reflection as a fallible mechanism, authority boundaries, trajectory telemetry, and agent evaluation.
+- Elsewhere:
+  - Module 11: context and memory;
+  - Module 13: the broader model harness and structured-output reliability;
+  - Module 14: durable checkpoint/resume and idempotent side-effect execution;
+  - Module 18: full threat modeling.
 
 **Research cutoff:** 2026-09-30. Sources re-opened on that date are marked in the registry; other entries keep their original access dates.
 
 **Module Orientation**
 - **Engineering Problem**: Maximize verified task utility while bounding invalid effects, policy violations, latency, tokens, calls, and cost.
-- **What You Will Do**: Implement and instrument a bounded controller, define tool and observation contracts, inject ambiguous effects and recovery failures, compare progress and reflection mechanisms, trace a pinned LangGraph path, and defend a governed operational-agent design.
-- **Environment**: Python 3.10+ for controller and fault-injection harnesses. Sandboxed mock tools and an append-only trajectory store are required; external side effects are optional and must remain disposable or simulated.
+- **What You Will Do**:
+  - implement and instrument a bounded controller;
+  - define tool and observation contracts;
+  - inject ambiguous effects and recovery failures;
+  - compare progress and reflection mechanisms;
+  - trace a pinned LangGraph path;
+  - defend a governed operational-agent design.
+- **Environment**:
+  - Python 3.10+ for controller and fault-injection harnesses.
+  - Sandboxed mock tools and an append-only trajectory store are required.
+  - External side effects are optional and must remain disposable or simulated.
 - **Evidence Rule**: Label source observations (**O**), explicit derivations (**D**), and telemetry-dependent hypotheses (**H**). Model claims about success, failure, or tool completion are not execution evidence.
 - **If You Only Have One Week**: Lessons 12.1, 12.3, 12.5 — they model the loop as a bounded controller, bound budgets and retries, and verify effects under external authority; tool contracts, progress detection, and trajectory evaluation build on those three.
 
@@ -71,7 +98,17 @@ estimated_effort:
 ```
 Each category is counted once. Lab analysis is not also counted as guided practice, and the source trace is not also counted as assessment time.
 
-The learner must be able to define a loop as an explicit state machine; design typed tool and observation contracts; separate proposal from authorization; enforce independent resource and semantic stops; classify failures before retrying; detect no-progress and oscillation without blocking legitimate iteration; evaluate reflection against grounded feedback; inject tool anomalies; and diagnose complete trajectories rather than final answers alone.
+The learner must be able to:
+
+- define a loop as an explicit state machine;
+- design typed tool and observation contracts;
+- separate proposal from authorization;
+- enforce independent resource and semantic stops;
+- classify failures before retrying;
+- detect no-progress and oscillation without blocking legitimate iteration;
+- evaluate reflection against grounded feedback;
+- inject tool anomalies;
+- diagnose complete trajectories rather than final answers alone.
 
 ---
 
@@ -79,23 +116,35 @@ The learner must be able to define a loop as an explicit state machine; design t
 
 ## 03 Knowledge Map
 
-```text
-                         controller-owned state
-                      /          |             \
-                 goal/plan   budgets/policy   effect ledger
-                      \          |             /
-                           model proposal
-                                 |
-                  schema validation + authorization
-                         /               \
-                    invalid             valid
-                 repair or stop      tool execution
-                                           |
-                              typed observation envelope
-                                           |
-                     progress? error class? postcondition?
-                       /             |               \
-                   continue        replan          terminate
+```mermaid
+flowchart TD
+    subgraph STATE["<b>controller-owned state</b>"]
+        direction LR
+        GP["goal/plan"]
+        BP["budgets/policy"]
+        EL["effect ledger"]
+    end
+
+    PROP["<b>1. Model proposal</b>"]
+    VAL["<b>2. Schema validation + authorization</b>"]
+    INV["repair or stop"]
+    EXE["<b>3. Tool execution</b>"]
+    OBS["<b>4. Typed observation envelope</b>"]
+    CHK["<b>5. Check</b><br/>progress? · error class? · postcondition?"]
+    CONT["continue"]
+    REPL["replan"]
+    TERM["terminate"]
+
+    GP --> PROP
+    BP --> PROP
+    EL --> PROP
+    PROP --> VAL
+    VAL -- invalid --> INV
+    VAL -- valid --> EXE
+    EXE --> OBS --> CHK
+    CHK --> CONT
+    CHK --> REPL
+    CHK --> TERM
 ```
 
 Keep these distinctions explicit:
@@ -136,17 +185,40 @@ where:
 - $T$: the number of steps the episode actually took;
 - $F$: the controller's deterministic transition function.
 
-Read the formula left to right: from $s_0$ the controller dispatches $a_0$, receives $o_1$, and computes $s_1=F(s_0,a_0,o_1)$; then repeats. A 2-step read-only lookup is $\tau=(s_0,a_0,o_1,s_1,a_1,o_2,s_2)$ with $T=2$. Because $F$ is deterministic, replaying the recorded $(a_t,o_{t+1})$ pairs from $s_0$ reproduces every $s_t$; that is what "replayable" means here.
+Reading the formula:
+
+- Left to right: from $s_0$ the controller dispatches $a_0$, receives $o_1$, and computes $s_1=F(s_0,a_0,o_1)$; then repeats.
+- A 2-step read-only lookup is $\tau=(s_0,a_0,o_1,s_1,a_1,o_2,s_2)$ with $T=2$.
+- Because $F$ is deterministic, replaying the recorded $(a_t,o_{t+1})$ pairs from $s_0$ reproduces every $s_t$; that is what "replayable" means here.
 
 This is exact bookkeeping for a declared state schema. It is not automatically a Markov model: if `s_t` omits relevant history, permissions, hidden environment state, or pending effects, it is not sufficient to predict the next transition.
 
 **Mechanism Explanation:**
-The controller—not the model—owns legal states, action validation, authorization, tool dispatch, budget accounting, terminal outcomes, and the trajectory ledger. The model may emit `call_tool`, `respond`, `abstain`, `ask`, or `escalate`; each is a proposal until the controller validates it.
+The controller—not the model—owns:
+
+- legal states;
+- action validation;
+- authorization;
+- tool dispatch;
+- budget accounting;
+- terminal outcomes;
+- the trajectory ledger.
+
+The model may emit `call_tool`, `respond`, `abstain`, `ask`, or `escalate`; each is a proposal until the controller validates it.
 
 ReAct is a reference pattern for interleaving reasoning and environment actions on evaluated tasks. It does not prove that an unbounded reasoning/action transcript is safe or generally reliable (**O**, CLM-002).
 
 **Worked Example:**
 Trace `READY → PROPOSED → AUTHORIZED → DISPATCHED → OBSERVED → VERIFIED → SUCCEEDED` for a read-only lookup. Then replace the result with a timeout after dispatch: the legal next state is `EFFECT_UNKNOWN`, not automatic success or an assumption that nothing happened.
+
+```mermaid
+flowchart LR
+    R["READY"] --> P["PROPOSED"] --> A["AUTHORIZED"] --> D["DISPATCHED"]
+    D -->|result returned| O["OBSERVED"] --> V["VERIFIED"] --> S["SUCCEEDED"]
+    D -->|timeout after dispatch| U["EFFECT_UNKNOWN"]
+```
+
+- The diagram shows only the transitions named in this example; the Guided Practice table adds malformed proposal, denied authorization, cancellation, and the successors of `EFFECT_UNKNOWN`.
 
 **Knowledge Check:**
 1. Why is a model-produced “done” message only a proposal?
@@ -183,19 +255,61 @@ A production tool contract includes:
 - structured result, effect status, postcondition evidence, and provenance.
 
 **Mechanism Explanation:**
-Natural-language descriptions help model selection but are not an execution contract. Toolformer is evidence that a model can learn decisions about whether, when, and how to invoke scoped APIs; it does not supply runtime permission, transaction, timeout, or retry policy (**O**, CLM-003).
+Natural-language descriptions help model selection but are not an execution contract.
 
-Every result becomes an observation envelope containing call ID, tool/version, canonical arguments, timestamps, raw and parsed output, validation result, error class, effect state, truncation, and lineage. Empty, truncated, malformed, stale, or adversarial content must not be observationally equivalent to success (**D**, CLM-009).
+- Toolformer is evidence that a model can learn decisions about whether, when, and how to invoke scoped APIs.
+- It does not supply runtime permission, transaction, timeout, or retry policy (**O**, CLM-003).
+
+Every result becomes an observation envelope containing:
+
+- call ID, tool/version, canonical arguments, timestamps;
+- raw and parsed output, validation result;
+- error class, effect state, truncation;
+- lineage.
+
+Empty, truncated, malformed, stale, or adversarial content must not be observationally equivalent to success (**D**, CLM-009).
 
 **Quantitative Model / Derivation:**
 For validation predicates $V_{schema}$, $V_{policy}$, and $V_{pre}$, dispatch is permitted only when
-$$D=V_{schema}\land V_{policy}\land V_{pre}.$$
-This is an exact controller rule for the declared contract; it says nothing about whether the eventual external effect is correct.
 
-where $V_{schema}$ is true when the arguments match the typed schema, $V_{policy}$ when this caller is authorized for this action now, $V_{pre}$ when the tool's preconditions hold, and $\land$ is logical AND. One false predicate is enough to block dispatch. In the worked example below, the first attempt has $V_{schema}=\text{true}$, $V_{policy}=\text{false}$, so $D=\text{false}$. (Here $D$ is a yes/no dispatch decision; in Lesson 12.3, $D$ denotes the root deadline, a time.)
+$$
+D=V_{schema}\land V_{policy}\land V_{pre}.
+$$
+
+where:
+- $V_{schema}$ (true/false): the arguments match the typed schema;
+- $V_{policy}$ (true/false): this caller is authorized for this action now;
+- $V_{pre}$ (true/false): the tool's preconditions hold;
+- $\land$: logical AND;
+- $D$ (true/false): the dispatch decision. Here $D$ is a yes/no dispatch decision; in Lesson 12.3, $D$ denotes the root deadline, a time.
+
+How to read it:
+
+- This is an exact controller rule for the declared contract; it says nothing about whether the eventual external effect is correct.
+- One false predicate is enough to block dispatch.
+- In the worked example below, the first attempt has $V_{schema}=\text{true}$, $V_{policy}=\text{false}$, so $D=\text{false}$.
 
 **Worked Example:**
-A proposal requests `transfer(amount=100, account=B)`. The schema passes, but the caller lacks account scope, so policy validation rejects before dispatch. A second authorized attempt times out after dispatch; the envelope records `effect=unknown` and requires a postcondition query before retry.
+
+1. A proposal requests `transfer(amount=100, account=B)`.
+2. The schema passes, but the caller lacks account scope, so policy validation rejects before dispatch.
+3. A second authorized attempt times out after dispatch.
+4. The envelope records `effect=unknown` and requires a postcondition query before retry.
+
+```mermaid
+flowchart TD
+    P["Proposal<br/>transfer(amount=100, account=B)"] --> VS{"V_schema?"}
+    VS -->|false| RJ["Reject before dispatch"]
+    VS -->|true| VP{"V_policy?"}
+    VP -->|false| RJ
+    VP -->|true| VR{"V_pre?"}
+    VR -->|false| RJ
+    VR -->|true| DS["Dispatch"]
+    DS -->|timeout after dispatch| UK["effect=unknown"]
+    UK --> PQ["Postcondition query<br/>before any retry"]
+```
+
+- V_schema: arguments match schema; V_policy: caller authorized now; V_pre: preconditions hold.
 
 **Knowledge Check:**
 1. Why does valid JSON not imply authorized execution?
@@ -236,9 +350,26 @@ $$
 B=(B_{steps},B_{model},B_{tool},B_{tokens},B_{time},B_{cost},B_{repeat},B_{errors}).
 $$
 
-Each entry is the limit for one resource: steps, model calls, tool calls, tokens, wall-clock time, cost, repeated actions, and errors. Each is enforced on its own; staying under one limit says nothing about the others.
+where:
+- $B$ is the vector of independent resource limits;
+- $B_{steps}$: steps;
+- $B_{model}$: model calls;
+- $B_{tool}$: tool calls;
+- $B_{tokens}$: tokens;
+- $B_{time}$: wall-clock time (s);
+- $B_{cost}$: cost (USD);
+- $B_{repeat}$: repeated actions;
+- $B_{errors}$: errors.
 
-Checking "consumed < limit" before each step is not enough. Suppose 0.24 of a 0.25 cost budget is spent. The check passes, the next model call costs 0.07, and the episode ends at 0.31. A check on what was *consumed* cannot stop an action whose own cost crosses the limit. The controller therefore keeps a ledger with three numbers per resource $r$ (**D**, CLM-015):
+Each is enforced on its own; staying under one limit says nothing about the others.
+
+Checking "consumed < limit" before each step is not enough:
+
+- Suppose 0.24 of a 0.25 cost budget is spent.
+- The check passes, the next model call costs 0.07, and the episode ends at 0.31.
+- A check on what was *consumed* cannot stop an action whose own cost crosses the limit.
+
+The controller therefore keeps a ledger with three numbers per resource $r$ (**D**, CLM-015):
 
 - $B_r$: the limit;
 - $C_r$: committed — actual charges already reconciled;
@@ -250,11 +381,45 @@ $$
 C_r+R_r\le B_r\quad\text{for every hard resource } r,\text{ at all times.}
 $$
 
-**Admission (before dispatch).** For a proposed action $a$, compute its reservation vector $q(a)$, the worst-case charge under caps the controller enforces. Admit only if $C_r+R_r+q_r(a)\le B_r$ for every $r$, and in that case add $q(a)$ to $R$. The comparison and the addition must be one atomic step. Otherwise reject before dispatch with the reason and the failing resource; the controller may then choose a cheaper action, compact the input, or stop.
+where:
+- $r$ indexes hard resources;
+- $B_r$ is the limit for resource $r$;
+- $C_r$ is the committed amount for resource $r$;
+- $R_r$ is the reserved amount for resource $r$;
+- each amount uses its resource's unit: calls, attempts, tokens, or USD, as defined just above.
 
-Apply this to the opening case, assuming the next call's worst case equals its actual 0.07: $C+R+q=0.24+0+0.07=0.31>0.25$, so the call is rejected *before* dispatch and spend stays at 0.24. The consumed-only check ($0.24<0.25$) would have admitted it.
+```mermaid
+flowchart TD
+    A["Proposed action a"] --> Q["Compute reservation q(a)<br/>(worst-case charge)"]
+    Q --> CK{"C_r + R_r + q_r(a) ≤ B_r<br/>for every r?<br/>(atomic check-and-add)"}
+    CK -->|no| RJ["Reject before dispatch<br/>(reason + failing resource)"]
+    RJ --> ALT["cheaper action / compact input / stop"]
+    CK -->|yes| AD["R ← R + q(a); dispatch"]
+    AD --> KN{"actual charge u(a) known?"}
+    KN -->|yes| RC["Reconcile: C ← C + u(a), R ← R − q(a)<br/>refund q(a) − u(a)"]
+    KN -->|"no (cancel / timeout)"| HD["Hold reservation until usage record;<br/>charge q(a) in full if none arrives"]
+```
 
-**Reconciliation (after the action).** When the actual charge $u(a)$ is known, set $C\leftarrow C+u(a)$ and $R\leftarrow R-q(a)$. The difference $q(a)-u(a)$ returns to the available budget; that is the refund. If the action is cancelled or times out and the charge is not yet known, the reservation stays held. It is released only against a usage record, or charged in full if none arrives.
+- B_r: limit; C_r: committed; R_r: reserved; q(a): reservation for action a; u(a): actual charge.
+
+**Admission (before dispatch).**
+
+1. For a proposed action $a$, compute its reservation vector $q(a)$, the worst-case charge under caps the controller enforces.
+2. Admit only if $C_r+R_r+q_r(a)\le B_r$ for every $r$, and in that case add $q(a)$ to $R$.
+3. The comparison and the addition must be one atomic step.
+4. Otherwise reject before dispatch with the reason and the failing resource; the controller may then choose a cheaper action, compact the input, or stop.
+
+Apply this to the opening case, assuming the next call's worst case equals its actual 0.07:
+
+- $C+R+q=0.24+0+0.07=0.31>0.25$;
+- so the call is rejected *before* dispatch and spend stays at 0.24;
+- the consumed-only check ($0.24<0.25$) would have admitted it.
+
+**Reconciliation (after the action).**
+
+- When the actual charge $u(a)$ is known, set $C\leftarrow C+u(a)$ and $R\leftarrow R-q(a)$.
+- The difference $q(a)-u(a)$ returns to the available budget; that is the refund.
+- If the action is cancelled or times out and the charge is not yet known, the reservation stays held. It is released only against a usage record, or charged in full if none arrives.
 
 Step by step for row 1 of Example B below (cost only), starting from $C=0$, $R=0$, $B=0.25$:
 1. Reserve: $q=12{,}000\times3\times10^{-6}+2{,}000\times15\times10^{-6}=0.036+0.030=0.066$.
@@ -264,13 +429,47 @@ Step by step for row 1 of Example B below (cost only), starting from $C=0$, $R=0
 
 Since $u\le q$ always holds for a correct worst-case reservation, $C$ grows by less than $R$ shrinks, so reconciliation can never break the invariant.
 
-**Remaining deadline.** Time cannot be reserved the way cost can; it passes whether or not the action finishes. The root episode has one absolute deadline $D$. Every child call receives a timeout of at most $D-t_{now}-t_{reserve}$, where $t_{reserve}$ is the time kept back for postcondition verification and the final response. A child never receives a fresh timeout of its own.
+**Remaining deadline.**
 
-where $t_{now}$ is the current time on the same clock as $D$. Example: with $D=10$ s, $t_{now}=7$ s, and $t_{reserve}=0.5$ s, the child may wait at most $10-7-0.5=2.5$ s, even if its SDK default is 5 s; the effective timeout is $\min(\text{SDK timeout},\ D-t_{now}-t_{reserve})$. Example A below walks through exactly this case.
+- Time cannot be reserved the way cost can; it passes whether or not the action finishes.
+- The root episode has one absolute deadline $D$.
+- Every child call receives a timeout of at most $D-t_{now}-t_{reserve}$.
+- A child never receives a fresh timeout of its own.
 
-**Nested retries** (**D**, CLM-016). If the controller allows $k_c$ attempts of a logical call and the SDK or client underneath retries each of them up to $k_s$ more times, the worst case is $k_c\,(1+k_s)$ physical attempts. The reservation for one logical call must cover $(1+k_s)$ physical attempts, or inner retries must be disabled. Counting only controller-level attempts understates the worst case by the factor $(1+k_s)$.
+The effective timeout is
 
-Why the product: each controller attempt is one original physical attempt plus up to $k_s$ inner retries, so $1+k_s$ physical attempts; the controller repeats that up to $k_c$ times. With $k_c=3$ and $k_s=2$: $3\times(1+2)=9$ physical attempts, while a controller that counts only its own attempts records 3, an undercount by the factor $1+k_s=3$.
+$$
+\tau = \min\left(\tau_{\text{SDK}},\ D - t_{now} - t_{reserve}\right)
+$$
+
+where:
+- $\tau$: effective timeout given to the child call (s);
+- $\tau_{\text{SDK}}$: the SDK's or tool's own default timeout (s);
+- $D$: the root episode's absolute deadline (s);
+- $t_{now}$: the current time on the same clock as $D$ (s);
+- $t_{reserve}$: time kept back for postcondition verification and the final response (s).
+
+Example:
+- Inputs: $D=10$ s, $t_{now}=7$ s, $t_{reserve}=0.5$ s, SDK default $\tau_{\text{SDK}}=5$ s.
+- Remaining: $10-7-0.5=2.5$ s.
+- Effective timeout: $\min(5,\ 2.5)=2.5$ s, even though the SDK default is 5 s.
+
+Example A below walks through exactly this case.
+
+**Nested retries** (**D**, CLM-016).
+
+- $k_c$: attempts the controller allows for one logical call.
+- $k_s$: extra retries the SDK or client underneath makes for each of them.
+- Worst case: $k_c\,(1+k_s)$ physical attempts.
+- The reservation for one logical call must cover $(1+k_s)$ physical attempts, or inner retries must be disabled.
+- Counting only controller-level attempts understates the worst case by the factor $(1+k_s)$.
+
+Why the product:
+- Each controller attempt is one original physical attempt plus up to $k_s$ inner retries: $1+k_s$ physical attempts.
+- The controller repeats that up to $k_c$ times.
+- Example with $k_c=3$, $k_s=2$:
+  - Worst case: $3\times(1+2)=9$ physical attempts.
+  - A controller counting only its own attempts records 3, an undercount by the factor $1+k_s=3$.
 
 **Which limits are hard and which are estimates:**
 
@@ -284,7 +483,9 @@ Why the product: each controller attempt is one original physical attempt plus u
 | wall-clock time | a timeout bounds how long the controller *waits*, not how long the remote work continues | estimate with a hard backstop for the wait |
 | side effects | a timeout or cancellation does not undo a commit | not a budget; handled by effect verification |
 
-A step cap bounds one dimension; it neither proves success nor prevents a single expensive or harmful step. Semantic outcomes include verified success, explicit failure, safe abstention, escalation, cancellation, and unknown effect. Module 18 uses this ledger for its cost ceiling under attack; durable storage of the ledger across crashes is a Module 14 concern.
+- A step cap bounds one dimension; it neither proves success nor prevents a single expensive or harmful step.
+- Semantic outcomes include verified success, explicit failure, safe abstention, escalation, cancellation, and unknown effect.
+- Module 18 uses this ledger for its cost ceiling under attack; durable storage of the ledger across crashes is a Module 14 concern.
 
 **Mechanism Explanation:**
 Classify a failed call before choosing a response, because retry and recovery differ by class (**D**, CLM-006):
@@ -303,9 +504,24 @@ Classify a failed call before choosing a response, because retry and recovery di
 ToolMaze's 2026 benchmark crosses explicit/implicit with transient/permanent perturbations and reports that anomaly recovery remains distinct from happy-path execution in its setup. Treat it as a frontier failure-injection design, not a universal production estimate.
 
 **Worked Example A — one root deadline** (exercise assumptions).
-Assume a root deadline of 10 s, a maximum of three tool attempts, and observed attempt durations of 2 s, 3 s, and 4 s with 1 s total backoff. The sequential path consumes the full 10 s ($2+3+4+1=10$); a fourth attempt is illegal even if its local SDK timeout would permit it. If attempt two has unknown effect, verification precedes attempt three.
+Assume:
 
-Now apply the remaining-deadline rule to the unknown-effect case, with 0.5 s backoff before each retry, a 1 s postcondition query, a 5 s SDK default timeout, and $t_{reserve}=0.5$ s:
+- a root deadline of 10 s;
+- a maximum of three tool attempts;
+- observed attempt durations of 2 s, 3 s, and 4 s with 1 s total backoff.
+
+Then:
+
+- the sequential path consumes the full 10 s ($2+3+4+1=10$);
+- a fourth attempt is illegal even if its local SDK timeout would permit it;
+- if attempt two has unknown effect, verification precedes attempt three.
+
+Now apply the remaining-deadline rule to the unknown-effect case, with:
+
+- 0.5 s backoff before each retry;
+- a 1 s postcondition query;
+- a 5 s SDK default timeout;
+- $t_{reserve}=0.5$ s.
 
 | Time (s) | Event | Remaining deadline |
 |---:|---|---:|
@@ -316,19 +532,38 @@ Now apply the remaining-deadline rule to the unknown-effect case, with 0.5 s bac
 | 6.5–7.0 | backoff | 3.0 |
 | 7.0 | attempt 3 dispatched with timeout $\min(5,\ 3.0-0.5)=2.5$ s | — |
 
-Each "Remaining deadline" value is $10$ minus the time at the end of that row (for example $10-5.5=4.5$). Attempt 3 starts at 7.0 s with 3.0 s left; keeping $t_{reserve}=0.5$ s back gives $2.5$ s, which is smaller than the SDK's 5 s, so 2.5 s is used. It is cut at $7.0+2.5=9.5$ s, leaving $10-9.5=0.5$ s.
+How the table is computed:
+- Each "Remaining deadline" value is $10$ minus the time at the end of that row, e.g. $10-5.5=4.5$.
+- Attempt 3 starts at 7.0 s with 3.0 s left.
+- Keeping $t_{reserve}=0.5$ s back: $3.0-0.5=2.5$ s, smaller than the SDK's 5 s, so 2.5 s is used.
+- It is cut at $7.0+2.5=9.5$ s, leaving $10-9.5=0.5$ s.
 
-Result: attempt 3 gets 2.5 s, not the SDK's 5 s. An attempt that needs 4 s is cut at 9.5 s. If it is a write, the state is again `EFFECT_UNKNOWN`, and only 0.5 s remains, which is less than the 1 s query. The episode ends as *escalated with unknown effect*. It does not end as success, and it does not retry. Interpretation: verification consumed time that the original 2 + 3 + 4 + 1 schedule did not budget for, so the same three attempts no longer fit. The deadline, not the attempt count, was the binding limit.
+Result:
+
+- Attempt 3 gets 2.5 s, not the SDK's 5 s.
+- An attempt that needs 4 s is cut at 9.5 s.
+- If it is a write, the state is again `EFFECT_UNKNOWN`, and only 0.5 s remains, which is less than the 1 s query.
+- The episode ends as *escalated with unknown effect*. It does not end as success, and it does not retry.
+
+Interpretation: verification consumed time that the original 2 + 3 + 4 + 1 schedule did not budget for, so the same three attempts no longer fit. The deadline, not the attempt count, was the binding limit.
 
 **Worked Example B — reservation ledger with fan-out, rejection, and retries** (synthetic prices and counts, registry CLM-017; not any provider's price list).
 
 Inputs:
 
 - Limits: 6 model calls, 8 physical tool attempts, 0.25 USD.
-- Prices: input 3 USD and output 15 USD per million tokens. The search tool costs 0.01 USD per physical attempt and its SDK retries up to 2 times, so one logical search can make 3 attempts. Write tools have inner retries disabled.
+- Prices: input 3 USD and output 15 USD per million tokens.
+- Search tool: 0.01 USD per physical attempt; its SDK retries up to 2 times, so one logical search can make 3 attempts.
+- Write tools have inner retries disabled.
 - Model-call reservation: exact input tokens × input price + maximum output tokens × output price.
 
-Per-token prices are $3\times10^{-6}$ and $15\times10^{-6}$ USD. So 12,000 input tokens cost $12{,}000\times3\times10^{-6}=0.036$, and a 2,000-token output cap reserves $2{,}000\times15\times10^{-6}=0.030$. The "Actual $u$" column uses the same formula with the real output count. In the Check column, each sum is $C+R+q$ for the resource named (cost unless stated). For example, row 3a: $C=0.0765$, $R=0$, $q=0.210$, sum $0.2865>0.25$.
+Reading the table:
+- Per-token prices: $3\times10^{-6}$ USD input, $15\times10^{-6}$ USD output.
+  - 12,000 input tokens: $12{,}000\times3\times10^{-6}=0.036$.
+  - 2,000-token output cap reserves: $2{,}000\times15\times10^{-6}=0.030$.
+- The "Actual $u$" column uses the same formula with the real output count.
+- In the Check column, each sum is $C+R+q$ for the resource named (cost unless stated).
+  - Example, row 3a: $C=0.0765$, $R=0$, $q=0.210$, sum $0.2865>0.25$.
 
 | # | Action | Reservation $q$ | Check $C+R+q\le B$ | Decision | Actual $u$ | After: $C$ (calls / attempts / USD), $R$ |
 |---|---|---|---|---|---|---|
@@ -345,13 +580,24 @@ Per-token prices are $3\times10^{-6}$ and $15\times10^{-6}$ USD. So 12,000 input
 
 Reading the trace:
 
-- **Rows 2a–2c need an atomic ledger.** If the three parallel branches each read "0 attempts used" and then each add 3, all three are admitted and the worst case is 9 attempts against a limit of 8. With an atomic compare-and-add (or a single ledger owner), the third sees 6 already reserved and is rejected. After row 2d the refund makes room: a later request for branch 3 would pass ($3+0+3\le8$).
+- **Rows 2a–2c need an atomic ledger.**
+  - If the three parallel branches each read "0 attempts used" and then each add 3, all three are admitted and the worst case is 9 attempts against a limit of 8.
+  - With an atomic compare-and-add (or a single ledger owner), the third sees 6 already reserved and is rejected.
+  - After row 2d the refund makes room: a later request for branch 3 would pass ($3+0+3\le8$).
 - **Row 3a is the case a "consumed < limit" check misses.** Consumed cost is 0.0765, well under 0.25, yet the action's own worst case would cross the limit. It is refused before any token is sent.
 - **Row 4 is a retry decision, not only a budget entry.** The write is not retried. Row 5 verifies first, as in Example A.
-- **Cancellation.** Suppose the user cancels while the row 3b call is in flight. The controller admits nothing new. The 0.090 reservation stays held, because the provider may bill tokens already generated. It is reconciled when a usage record arrives and charged in full if none does. A cancelled write keeps the effect state `EFFECT_UNKNOWN` until verified.
+- **Cancellation.** Suppose the user cancels while the row 3b call is in flight.
+  - The controller admits nothing new.
+  - The 0.090 reservation stays held, because the provider may bill tokens already generated.
+  - It is reconciled when a usage record arrives and charged in full if none does.
+  - A cancelled write keeps the effect state `EFFECT_UNKNOWN` until verified.
 - **Nested retries.** With controller-level retries of 3 and the search SDK's 2 inner retries, one logical search could make $3\times(1+2)=9$ physical attempts, more than the whole attempt budget. Reserving 3 per controller attempt keeps that visible.
 
-Limits: the final 0.2235 USD is below 0.25 because every cost in this fixture is bounded by a controller-set parameter. If the provider billed tokens that the maximum-output parameter does not cover, the cost column would be an estimate and the invariant would hold only for the reserved amounts. The ledger in this example lives in memory; surviving a controller crash needs the durable ledger of Module 14.
+Limits:
+
+- The final 0.2235 USD is below 0.25 because every cost in this fixture is bounded by a controller-set parameter.
+- If the provider billed tokens that the maximum-output parameter does not cover, the cost column would be an estimate and the invariant would hold only for the reserved amounts.
+- The ledger in this example lives in memory; surviving a controller crash needs the durable ledger of Module 14.
 
 **Knowledge Check:**
 1. Why is retrying a deterministic authorization failure unchanged futile?
@@ -359,12 +605,24 @@ Limits: the final 0.2235 USD is below 0.25 because every cost in this fixture is
 3. After row 2d, the model proposes two parallel searches and one model call with 30,000 input tokens and a 2,000-token output cap. Which are admitted?
 
 **Guided Practice:**
-Map each failure-table row to `repair`, `retry`, `verify`, `replan`, `alternative`, `escalate`, or `stop`, including the evidence required to leave `effect=unknown`. Then recompute Example B with the cost limit lowered to 0.20 USD and say where the trace first changes.
+1. Map each failure-table row to `repair`, `retry`, `verify`, `replan`, `alternative`, `escalate`, or `stop`, including the evidence required to leave `effect=unknown`.
+2. Recompute Example B with the cost limit lowered to 0.20 USD and say where the trace first changes.
 
 **Feedback Contract:**
-- *Expected Output*: The decision uses error class, effect certainty, remaining deadline, and all budget dimensions. Knowledge Check 3, admitting in the order listed: after row 2d, $C$ is 1 call, 3 attempts, 0.0765 USD. The two searches reserve 6 attempts and 0.06: $3+6=9>8$, so only the first is admitted (3 attempts, 0.03). The model call reserves $0.090+0.030=0.120$: $0.0765+0.03+0.120=0.2265\le0.25$, admitted. Guided Practice: with a 0.20 limit, rows 1–3b are unchanged ($0.1665\le0.20$ at 3b). Row 6 is the first difference: $0.1545+0.078=0.2325>0.20$, so the final call is rejected before dispatch and the controller must shrink the input, lower the output cap, or stop with a budget terminal reason.
+- *Expected Output*: The decision uses error class, effect certainty, remaining deadline, and all budget dimensions.
+  - Knowledge Check 3, admitting in the order listed:
+    - After row 2d, $C$ is 1 call, 3 attempts, 0.0765 USD.
+    - The two searches reserve 6 attempts and 0.06: $3+6=9>8$, so only the first is admitted (3 attempts, 0.03).
+    - The model call reserves $0.090+0.030=0.120$.
+    - Check: $0.0765+0.03+0.120=0.2265\le0.25$, admitted.
+  - Guided Practice, with a 0.20 limit:
+    - Rows 1–3b are unchanged ($0.1665\le0.20$ at 3b).
+    - Row 6 is the first difference: $0.1545+0.078=0.2325>0.20$.
+    - The final call is rejected before dispatch; the controller must shrink the input, lower the output cap, or stop with a budget terminal reason.
 - *Common Failure*: Resetting deadline or attempt count at each layer; checking only consumed budget; refunding a cancelled call before its usage is known.
-- *Diagnostic Hint*: Is the next action reducing uncertainty or merely repeating work? For the ledger: at every row, does $C+R$ stay at or below $B$ for each resource, and can two concurrent admissions both read the same $R$?
+- *Diagnostic Hint*:
+  - Is the next action reducing uncertainty or merely repeating work?
+  - For the ledger: at every row, does $C+R$ stay at or below $B$ for each resource, and can two concurrent admissions both read the same $R$?
 - *Concept to Revisit*: Root Budget and Effect Certainty; reservation, reconciliation, and refund.
 
 **Learning Outcome:**
@@ -380,12 +638,30 @@ Map error class and effect certainty to retry, repair, verify, replan, alternati
 How can a controller stop genuine no-progress without terminating legitimate polling or iterative refinement?
 
 **Concepts & Definitions:**
-Step count is not progress. Instrument verified subgoals, state hashes/deltas, action signatures, repeated error classes, tool-result novelty, plan similarity, and remaining budget. Repeated actions, alternating states, or nearly identical plans are useful stall signals, but legitimate polling and iterative refinement can look similar (**H**, CLM-010).
+Step count is not progress. Instrument:
+
+- verified subgoals;
+- state hashes/deltas;
+- action signatures;
+- repeated error classes;
+- tool-result novelty;
+- plan similarity;
+- remaining budget.
+
+Repeated actions, alternating states, or nearly identical plans are useful stall signals, but legitimate polling and iterative refinement can look similar (**H**, CLM-010).
 
 **Mechanism Explanation:**
-Treat online stall detection as a hypothesis. Compare a preregistered detector with a step-cap baseline and report early-stop savings, false stops, recovered success, effect errors, and cost. A detector that merely stops hard tasks sooner may reduce spend while destroying utility.
+Treat online stall detection as a hypothesis.
 
-Reflexion is a reference mechanism that stores verbal feedback for later trials. Reflection is not independent evidence: a fluent explanation can preserve a wrong diagnosis (**O**, CLM-008). Admit a reflection into state or memory only with its source, outcome, confidence, validity window, and evidence; compare self-reflection with no-reflection, external-feedback, and oracle-feedback baselines.
+- Compare a preregistered detector with a step-cap baseline.
+- Report early-stop savings, false stops, recovered success, effect errors, and cost.
+- A detector that merely stops hard tasks sooner may reduce spend while destroying utility.
+
+Reflexion is a reference mechanism that stores verbal feedback for later trials.
+
+- Reflection is not independent evidence: a fluent explanation can preserve a wrong diagnosis (**O**, CLM-008).
+- Admit a reflection into state or memory only with its source, outcome, confidence, validity window, and evidence.
+- Compare self-reflection with no-reflection, external-feedback, and oracle-feedback baselines.
 
 **Quantitative Model / Trade-off Comparison:**
 For a detector, report false-stop rate among episodes that the baseline later solves, saved calls among genuinely stalled episodes, and net verified utility after cost. No single count is sufficient because aggressive stopping can improve cost while reducing success.
@@ -419,22 +695,59 @@ Detect genuine no-progress and use feedback without turning self-critique into t
 Where must authorization and postcondition checks sit so that model text cannot widen authority or fabricate completion?
 
 **Concepts & Definitions:**
-The model is not an authorization oracle. Enforce least-privilege credentials, tenant and object scope, rate and value limits, preconditions, previews, required approvals, and prohibited transitions outside the prompt. Untrusted observations cannot grant new authority.
+The model is not an authorization oracle. Enforce outside the prompt:
+
+- least-privilege credentials;
+- tenant and object scope;
+- rate and value limits;
+- preconditions;
+- previews;
+- required approvals;
+- prohibited transitions.
+
+Untrusted observations cannot grant new authority.
 
 **Mechanism Explanation:**
 For high-impact actions, separate:
 
-```text
-proposed intent -> policy decision -> approved command -> execution
-        -> effect receipt -> independent postcondition -> user-visible claim
+```mermaid
+flowchart TD
+    S1["<b>1.</b> proposed intent"]
+    S2["<b>2.</b> policy decision"]
+    S3["<b>3.</b> approved command"]
+    S4["<b>4.</b> execution"]
+    S5["<b>5.</b> effect receipt"]
+    S6["<b>6.</b> independent postcondition"]
+    S7["<b>7.</b> user-visible claim"]
+
+    S1 --> S2 --> S3 --> S4 --> S5 --> S6 --> S7
 ```
 
-If a timeout occurs after dispatch, the effect may be unknown. Do not equate an absent response with no effect or retry automatically. Module 12 owns the decision to verify, stop, or escalate; Module 14 develops durable idempotency, checkpoint, and compensation mechanics; Module 18 develops adversarial security controls.
+If a timeout occurs after dispatch, the effect may be unknown.
+
+- Do not equate an absent response with no effect or retry automatically.
+- Module 12 owns the decision to verify, stop, or escalate.
+- Module 14 develops durable idempotency, checkpoint, and compensation mechanics.
+- Module 18 develops adversarial security controls.
 
 **Quantitative Model / Derivation:**
-Let $A(c,o,v)$ be the controller policy for caller $c$, object $o$, and proposed value $v$, and let $P(e)$ be an independent postcondition for effect $e$. A success claim is permitted only when dispatch was authorized and $P(e)$ is observed; model confidence is not an input to either predicate.
+A success claim is permitted only when dispatch was authorized and the independent postcondition is observed:
 
-In symbols: $\text{claim success}\iff A(c,o,v)\land P(e)$, where both are true/false values computed outside the model. Lost response on an authorized deployment: $A=\text{true}$, $P$ not yet observed, so no success claim; after a versioned read-back matches the approved artifact, $P=\text{true}$ and the claim is allowed.
+$$
+\text{claim success}\iff A(c,o,v)\land P(e)
+$$
+
+where:
+- $A(c,o,v)$: the controller policy for caller $c$, object $o$, and proposed value $v$ (true/false);
+- $c$: caller identity; $o$: target object; $v$: proposed value (contract-specific unit);
+- $P(e)$: an independent postcondition for effect $e$ (true/false);
+- $e$: external effect being verified;
+- $\land$: logical AND. Both predicates are computed outside the model; model confidence is not an input to either.
+
+Lost response on an authorized deployment:
+
+1. $A=\text{true}$, $P$ not yet observed, so no success claim.
+2. After a versioned read-back matches the approved artifact, $P=\text{true}$ and the claim is allowed.
 
 **Worked Example:**
 A deployment proposal passes schema validation but exceeds the caller's environment scope. The controller denies it without sending credentials. For an authorized deployment whose response is lost, a versioned read-back must match the approved artifact before the episode can claim success.
@@ -480,15 +793,31 @@ Report by workload and failure slice:
 
 Success-only scores can reward wasteful or unsafe paths, so these outcomes are reported together (**D**, CLM-013).
 
-Define episode goodput under a declared SLO as verified, policy-compliant successes per wall-clock time. Define cost of success with all included episode spend and an explicit zero-success policy. Never drop aborted, rejected, timed-out, or failed episodes merely because they lack a final answer.
+Definitions and accounting rules:
+
+- **Episode goodput under a declared SLO:** verified, policy-compliant successes per wall-clock time.
+- **Cost of success:** include all episode spend and an explicit zero-success policy.
+- Never drop aborted, rejected, timed-out, or failed episodes merely because they lack a final answer.
 
 **Mechanism Explanation:**
 Join controller, model, validation, tool, effect, queue, and client spans with stable episode/call/effect identities. Slice by workload, failure injection, authorization class, terminal reason, and recovery opportunity before interpreting an aggregate.
 
 **Worked Example:**
-In a 60 s observation window, assume 20 offered episodes, 12 verified policy-compliant successes within the SLO, three failures, two abstentions, one rejection, and two unfinished episodes. Declared episode goodput is $12/60=0.2$ successful episodes/s; it is not $12/15$ and unfinished work remains visible.
+In a 60 s observation window, assume 20 offered episodes:
 
-Check the accounting: $12+3+2+1+2=20$, so every offered episode lands in exactly one class. Goodput divides verified successes by *time* (60 s), giving a rate. Dividing by a subset of episodes instead, such as the 15 that ended in success or failure ($12+3$), gives a ratio ($0.8$) with different units that silently drops abstentions, rejections, and unfinished work. Over all 20 offered episodes the verified success fraction is $12/20=0.6$.
+- 12 verified policy-compliant successes within the SLO;
+- three failures;
+- two abstentions;
+- one rejection;
+- two unfinished episodes.
+
+Accounting:
+
+- $12+3+2+1+2=20$, so every offered episode lands in exactly one class.
+- Declared episode goodput divides verified successes by *time*: $12/60=0.2$ successful episodes/s.
+- It is not $12/15$: dividing by the 15 that ended in success or failure ($12+3$) gives a ratio ($0.8$) with different units that silently drops abstentions, rejections, and unfinished work.
+- Over all 20 offered episodes the verified success fraction is $12/20=0.6$.
+- Unfinished work remains visible.
 
 **Knowledge Check:**
 1. Why can final-answer accuracy hide duplicate effects?
@@ -504,7 +833,12 @@ Build a trajectory report that preserves all terminal classes and compare a retr
 - *Concept to Revisit*: Trajectory-Level Goodput.
 
 **Learning Outcome:**
-Diagnose `SYMPTOM → COMPETING HYPOTHESES → MISSING EVIDENCE → DISCRIMINATING MEASUREMENT → RANKED EXPLANATION → INTERVENTION → REMEASUREMENT` from full trajectories.
+Diagnose from full trajectories:
+
+```mermaid
+flowchart LR
+    S["SYMPTOM"] --> H["COMPETING<br/>HYPOTHESES"] --> E["MISSING<br/>EVIDENCE"] --> M["DISCRIMINATING<br/>MEASUREMENT"] --> R["RANKED<br/>EXPLANATION"] --> I["INTERVENTION"] --> RM["REMEASUREMENT"]
+```
 
 *(Effort: 40m instruction, 35m practice)*
 
@@ -519,13 +853,42 @@ Diagnose `SYMPTOM → COMPETING HYPOTHESES → MISSING EVIDENCE → DISCRIMINATI
 
 *Scope:* each paper supports only its evaluated tasks, models, and environments. These four entries were not re-read in this revision and keep their earlier access dates.
 
-**RECOMMENDED BASELINE (course position, not a surveyed industry default):** controller-owned transitions; schema validation before dispatch; least-privilege authorization outside the model; independent call/time/token/cost limits enforced by pre-dispatch reservation; structured errors; trajectory telemetry; explicit terminal reasons. These follow from the derivations in Lessons 12.1–12.3 and 12.5 (**D**, CLM-001, CLM-004, CLM-005, CLM-011, CLM-015). This module has no survey of how many frameworks implement them; registry entries labelled "CURRENT DEFAULT" mean this recommended baseline. The one implementation inspected below enforces a step limit and, in the files read, no cost, token, or time budget.
+**RECOMMENDED BASELINE (course position, not a surveyed industry default):**
+
+- controller-owned transitions;
+- schema validation before dispatch;
+- least-privilege authorization outside the model;
+- independent call/time/token/cost limits enforced by pre-dispatch reservation;
+- structured errors;
+- trajectory telemetry;
+- explicit terminal reasons.
+
+Scope:
+
+- These follow from the derivations in Lessons 12.1–12.3 and 12.5 (**D**, CLM-001, CLM-004, CLM-005, CLM-011, CLM-015).
+- This module has no survey of how many frameworks implement them; registry entries labelled "CURRENT DEFAULT" mean this recommended baseline.
+- The one implementation inspected below enforces a step limit and, in the files read, no cost, token, or time budget.
 
 **WORKLOAD-DEPENDENT:** planner shape, reflection, retry count/backoff, progress metric, verifier, approval placement, degree of autonomy, parallelism, and utility weights.
 
-**FRONTIER:** [ToolMaze](https://arxiv.org/abs/2606.05806) (Zhu et al., arXiv v1, 2026-06-04): a benchmark that crosses DAG-shaped task topology with explicit/implicit and transient/permanent tool perturbations. Its abstract reports that perturbations degrade performance across nearly all evaluated models, most sharply under implicit semantic failures, and that complex topologies lead to futile trial-and-error (**O**, CLM-007). Only the abstract was read on 2026-09-30, so the paper's rates are not quoted and its methods were not audited. Benchmark transfer to real side effects remains open.
+**FRONTIER:** [ToolMaze](https://arxiv.org/abs/2606.05806) (Zhu et al., arXiv v1, 2026-06-04).
 
-**LEGACY / INSUFFICIENT:** parse free-form action text and execute it directly; retry every exception; stop only when the model says “done”; trust reflection as verification; hide failed trajectories; report only final success; use one framework's loop as the definition of agents.
+- Benchmark crosses DAG-shaped task topology with explicit/implicit and transient/permanent tool perturbations.
+- Its abstract reports:
+  - perturbations degrade performance across nearly all evaluated models, most sharply under implicit semantic failures;
+  - complex topologies lead to futile trial-and-error (**O**, CLM-007).
+- Only the abstract was read on 2026-09-30, so the paper's rates are not quoted and its methods were not audited.
+- Benchmark transfer to real side effects remains open.
+
+**LEGACY / INSUFFICIENT:**
+
+- parse free-form action text and execute it directly;
+- retry every exception;
+- stop only when the model says “done”;
+- trust reflection as verification;
+- hide failed trajectories;
+- report only final success;
+- use one framework's loop as the definition of agents.
 
 **PRODUCTION SOURCE TRACE**
 
@@ -533,21 +896,48 @@ Diagnose `SYMPTOM → COMPETING HYPOTHESES → MISSING EVIDENCE → DISCRIMINATI
 - Revision: `7daa3ab49d678a5da75edb08baa87db4a2be52c3`
 - Verified: 2026-09-30 (all three files re-read at this revision), static inspection only; nothing was executed.
 - Files/symbols: `libs/prebuilt/langgraph/prebuilt/chat_agent_executor.py::create_react_agent`, `libs/langgraph/langgraph/pregel/main.py::Pregel.stream`, and `libs/langgraph/langgraph/errors.py::GraphRecursionError`.
-- Entry path: compiled graph invocation/stream → model node → `AIMessage.tool_calls` → tool node → `ToolMessage` observations → model until no tool calls or another terminal path; Pregel stream checks a configurable recursion limit and raises `GraphRecursionError` when exhausted without a stop.
+- Entry path:
+
+```mermaid
+flowchart TD
+    I["Compiled graph invocation / stream"] --> M["Model node"] --> TC{"AIMessage.tool_calls present?"}
+    TC -->|yes| T["Tool node"] --> O["ToolMessage observations"] --> M
+    TC -->|no| END["End / post-model /<br/>structured-response node"]
+    I -.-> LIM["Pregel stream checks<br/>configurable recursion limit"]
+    LIM -->|exhausted without stop| ERR["GraphRecursionError"]
+```
+
+- `AIMessage`: model message; `ToolMessage`: tool observation message; `GraphRecursionError`: the named step-limit failure.
 - Observed (**O**, CLM-014):
   - `create_react_agent` carries a `@deprecated` decorator whose message says it has moved to `langchain.agents` and to import `create_agent` from there.
   - The inner `should_continue` returns the end of the graph (or a post-model/structured-response node) when the last message is not an `AIMessage` with tool calls, and routes to the tools node otherwise.
   - `_are_more_steps_needed` reads `remaining_steps` from state and returns true when it is below 2 and the response has tool calls; the model node then returns a fixed "need more steps" message instead of the tool-calling response.
   - In `Pregel.stream`, a loop status of `"out_of_steps"` raises `GraphRecursionError` with a message naming the `recursion_limit` config key. `GraphRecursionError` subclasses `RecursionError`.
-- Relation to Lesson 12.3: both guards count *steps*. A text search of `chat_agent_executor.py` for token, cost, or budget handling found none, so the reservation ledger of Lesson 12.3 is something the learner adds around this loop. That is a statement about the file read, not about the whole library or about hooks a user can attach.
+- Relation to Lesson 12.3:
+  - both guards count *steps*;
+  - a text search of `chat_agent_executor.py` for token, cost, or budget handling found none, so the reservation ledger of Lesson 12.3 is something the learner adds around this loop;
+  - that is a statement about the file read, not about the whole library or about hooks a user can attach.
 - Scope: an implementation example. The recursion limit is a guardrail, not a semantic-success verifier and not a cost bound.
-- **Trace practice (the 2h `source_trace` effort, together with the Section 09 artifact):** at the pinned revision, follow one tool-calling turn from `should_continue` to the tools node and back, and find where `"out_of_steps"` is checked. Answer in writing: (1) which condition ends the loop normally, and who produces the value it tests? (2) a model emits one tool call per turn forever; which guard stops it, and what has been spent by then? Expected answers: (1) the last message has no tool calls; that value comes from the model, so normal termination is a model proposal, not a verified outcome; (2) the step/recursion limit; every model and tool call up to that limit has already been dispatched and paid for, because a step count does not bound cost per step. A common error is to call the recursion limit a budget.
+- **Trace practice (the 2h `source_trace` effort, together with the Section 09 artifact):**
+  - At the pinned revision, follow one tool-calling turn from `should_continue` to the tools node and back, and find where `"out_of_steps"` is checked.
+  - Answer in writing:
+    1. Which condition ends the loop normally, and who produces the value it tests?
+    2. A model emits one tool call per turn forever; which guard stops it, and what has been spent by then?
+  - Expected answers:
+    1. The last message has no tool calls; that value comes from the model, so normal termination is a model proposal, not a verified outcome.
+    2. The step/recursion limit; every model and tool call up to that limit has already been dispatched and paid for, because a step count does not bound cost per step.
+  - A common error is to call the recursion limit a budget.
 
 ### LAYER 2: ENGINEERING PRACTICE LAYER
 
 ## 06 Engineering Labs
 
-All labs follow `PREDICT → BUILD → MEASURE → EXPLAIN → BREAK → IMPROVE → FALSIFY`.
+All labs follow:
+
+```mermaid
+flowchart LR
+    P["PREDICT"] --> B["BUILD"] --> M["MEASURE"] --> E["EXPLAIN"] --> BR["BREAK"] --> I["IMPROVE"] --> F["FALSIFY"]
+```
 
 ### LAB A — Deterministic Loop and Budget Guard
 
@@ -555,7 +945,16 @@ All labs follow `PREDICT → BUILD → MEASURE → EXPLAIN → BREAK → IMPROVE
 - **Pre-Registered Hypothesis**: A state-delta/cycle detector will reduce calls on injected no-progress episodes relative to a step-cap baseline without exceeding a declared false-stop tolerance on solvable episodes.
 - **Independent Variables**: Stop policy, task topology, progress signal, polling behavior, and budget vector.
 - **Dependent Variables**: Verified success, false-stop rate, calls/tokens/time/cost, terminal reason, and replay agreement.
-- **Break & Falsify**: Inject endless calls, alternating plans, identical actions, one expensive step, false `done`, and legitimate polling. A detector that saves work only by stopping recoverable episodes falsifies the claimed benefit. For the budget guard, replay Lesson 12.3 Example B as an executed test: an action whose reservation exceeds the remaining budget must be rejected before dispatch; three concurrent fan-out admissions must not exceed the attempt limit; a cancelled in-flight call must keep its reservation until usage is known; inner SDK retries must be counted. Any run where $C+R>B$ for a hard resource, or where a rejected action was dispatched, falsifies the guard. Prices and counts are synthetic.
+- **Break & Falsify**:
+  - Inject endless calls, alternating plans, identical actions, one expensive step, false `done`, and legitimate polling.
+  - A detector that saves work only by stopping recoverable episodes falsifies the claimed benefit.
+  - For the budget guard, replay Lesson 12.3 Example B as an executed test:
+    - an action whose reservation exceeds the remaining budget must be rejected before dispatch;
+    - three concurrent fan-out admissions must not exceed the attempt limit;
+    - a cancelled in-flight call must keep its reservation until usage is known;
+    - inner SDK retries must be counted.
+  - Any run where $C+R>B$ for a hard resource, or where a rejected action was dispatched, falsifies the guard.
+  - Prices and counts are synthetic.
 - **Alignment**: Lessons 12.1, 12.3, and 12.4.
 - **Effort Estimate**: 2.5h implementation, 0.5h analysis (3h total).
 
@@ -593,9 +992,32 @@ All labs follow `PREDICT → BUILD → MEASURE → EXPLAIN → BREAK → IMPROVE
 
 ### Incident 12.1 — The Agent Repeats a High-Impact Action
 
-- **Incident Symptoms**: After a release, an agent calls a payment/message/deployment tool, times out, retries, alternates between `verify` and `execute`, exhausts its budget, and reports success. Some effects are duplicated while some recoverable episodes stop early.
+- **Incident Symptoms**: After a release:
+  - an agent calls a payment/message/deployment tool, times out, retries, alternates between `verify` and `execute`, exhausts its budget, and reports success;
+  - some effects are duplicated while some recoverable episodes stop early.
+
+```mermaid
+flowchart LR
+    C["High-impact tool call"] --> T["Timeout"] --> R["Retry"] --> V["Alternate verify / execute"] --> B["Budget exhausted"] --> S["Reports success"]
+    R -.-> D["Some effects duplicated"]
+    V -.-> E["Some recoverable episodes stop early"]
+```
+
+- This diagram orders the reported symptoms; dashed links show co-occurring outcomes, not proven causes.
+
 - **Diagnostic Protocol (Task)**:
-  1. *Formulate Competing Hypotheses*: Include timeout before dispatch, commit before lost acknowledgement, missing idempotency/effect receipt, malformed observation, authorization drift, deterministic error mislabeled transient, stale read-back, progress-detector error, model/planner regression, queue delay, and unavailable alternative path.
+  1. *Formulate Competing Hypotheses*: Include:
+     - timeout before dispatch;
+     - commit before lost acknowledgement;
+     - missing idempotency/effect receipt;
+     - malformed observation;
+     - authorization drift;
+     - deterministic error mislabeled transient;
+     - stale read-back;
+     - progress-detector error;
+     - model/planner regression;
+     - queue delay;
+     - unavailable alternative path.
   2. *Rank Initial Plausibility*: Use the duplicate-effect audit and timeout location without treating either as conclusive.
   3. *Identify Missing Evidence*: Recover call/effect IDs, canonical arguments, authorization decisions, dispatch/receipt times, raw and parsed outputs, postconditions, state deltas, budgets, retries, versions, spans, terminal reasons, and external audit records.
   4. *Design Discriminating Tests*: Reconcile each effect ID before replay, disable automatic retry, and replay captured observations through old/new controllers. State which result falsifies each leading hypothesis.
@@ -609,7 +1031,15 @@ All labs follow `PREDICT → BUILD → MEASURE → EXPLAIN → BREAK → IMPROVE
 
 ### Enterprise Transfer Problem: Governed Operations Assistant
 
-Design an agent controller that reads operational state, proposes changes, performs approved writes, tolerates changing tool behavior, and stops safely under a shared latency/cost budget. The workload includes read-only investigation, reversible configuration edits, an irreversible notification, concurrent episodes, and injected unknown-effect timeouts.
+Design an agent controller that reads operational state, proposes changes, performs approved writes, tolerates changing tool behavior, and stops safely under a shared latency/cost budget.
+
+The workload includes:
+
+- read-only investigation;
+- reversible configuration edits;
+- an irreversible notification;
+- concurrent episodes;
+- injected unknown-effect timeouts.
 
 **Transfer fixture (SYNTHETIC — exercise inputs, not measurements or real prices).** Every submission is run or reasoned against the same fixture, so two reviewers grade the same thing. A submission may add assumptions if it lists them.
 
@@ -635,7 +1065,12 @@ Design an agent controller that reads operational state, proposes changes, perfo
 | `rollback_config(service, to_version, key)` | compensating write | 0 | 0 | 10 s | same scheme | same read |
 | `send_notification(channel, text, client_msg_id)` | irreversible | 0.002 USD | 0 | 5 s | none | success receipt with a message ID; without a receipt, `list_notifications(client_msg_id)`, which is complete only 60 s after the send |
 
-*Effect-state fixture:* service `checkout` is at config version v12 with `timeout_ms=30000`. The approved change sets `timeout_ms=45000`. The approval record binds service, patch hash `p-7c1`, base version v12, approver, and an expiry at $t=90$ s. After a verified apply, exactly one notification goes to `#ops`.
+*Effect-state fixture:*
+
+- Service `checkout` is at config version v12 with `timeout_ms=30000`.
+- The approved change sets `timeout_ms=45000`.
+- The approval record binds service, patch hash `p-7c1`, base version v12, approver, and an expiry at $t=90$ s.
+- After a verified apply, exactly one notification goes to `#ops`.
 
 *Fault script (identical for every submission):*
 
@@ -672,7 +1107,11 @@ Design an agent controller that reads operational state, proposes changes, perfo
 
 ### Required Artifact: Production Source Trace
 
-Submit a pinned trace of a production agent-loop implementation. For the reference LangGraph revision, map compiled invocation through model and tool nodes, observation return, stop behavior, and recursion-limit failure. Separate static source observation from controller requirements and note the inspected API's deprecation status.
+Submit a pinned trace of a production agent-loop implementation.
+
+- For the reference LangGraph revision, map compiled invocation through model and tool nodes, observation return, stop behavior, and recursion-limit failure.
+- Separate static source observation from controller requirements.
+- Note the inspected API's deprecation status.
 
 The trace must record, for each finding: repository, exact commit, file, symbol, entry path, what was observed, whether the code was executed or only read, and whether the finding generalizes beyond this implementation.
 
@@ -680,22 +1119,53 @@ The trace must record, for each finding: repository, exact commit, file, symbol,
 
 Reviewers use these to check arithmetic and decisions. Timelines differ between submissions; the decisions below do not.
 
-- **Reservation arithmetic:** the worst-case model call reserves $24{,}000\times3\times10^{-6}+1{,}500\times15\times10^{-6}=0.072+0.0225=0.0945$ USD. Four such calls reserve 0.378 USD; a fifth would bring the total to 0.4725 and is rejected ($0.378+0.0945=0.4725>0.40$). The 10-call limit is therefore reachable only with smaller exact inputs, and the ledger must use the exact input count per call. One logical `search_logs` reserves 3 physical attempts and 0.015 USD. Four parallel searches reserve 12 of the 16 attempts and 0.06 USD. (One search: $1+2=3$ attempts, $3\times0.005=0.015$ USD; four searches: $4\times3=12$ attempts, $4\times0.015=0.06$ USD.)
-- **Deadline:** a child call dispatched at time $t$ gets a timeout of at most $\min(\text{tool timeout},\ 120-t-5)$ s. (This is Lesson 12.3's $D-t_{now}-t_{reserve}$ with $D=120$, $t_{reserve}=5$. Example: `search_logs` dispatched at $t=110$ s gets $\min(8,\ 5)=5$ s.)
+- **Reservation arithmetic:**
+  - Worst-case model call: $24{,}000\times3\times10^{-6}+1{,}500\times15\times10^{-6}=0.072+0.0225=0.0945$ USD.
+  - Four such calls: $4\times0.0945=0.378$ USD.
+  - A fifth is rejected: $0.378+0.0945=0.4725>0.40$.
+  - The 10-call limit is therefore reachable only with smaller exact inputs; the ledger must use the exact input count per call.
+  - One logical `search_logs`: $1+2=3$ physical attempts, $3\times0.005=0.015$ USD.
+  - Four parallel searches: $4\times3=12$ of the 16 attempts, $4\times0.015=0.06$ USD.
+- **Deadline:** a child call dispatched at time $t$ gets a timeout of at most $\min(\tau_{\text{tool}},\ 120-t-5)$ s.
+  - This is Lesson 12.3's $D-t_{now}-t_{reserve}$ with $D=120$, $t_{reserve}=5$.
+  - Example: `search_logs` dispatched at $t=110$ s gets $\min(8,\ 5)=5$ s.
 - **F1:** a 503 before dispatch means the effect is known absent; the inner retry is allowed. Two attempts are consumed and one is refunded.
 - **F2:** a truncated result is not complete evidence. Accepted responses are a narrower query or recording the evidence as partial. Treating it as complete is an observation-contract failure.
-- **F3 and F4:** after the timeout the state is `EFFECT_UNKNOWN` and the next action is a *primary* read. Seed A: v13 with `p-7c1`, so the apply is verified and not repeated. Seed B: v12, so the effect is known absent, and one retry with the same key and base v12 is legal while $t<90$ s. A submission that verifies through the replica sees v12 in seed A and retries; the receiver's stored outcome prevents a duplicate effect, but the trace must show the wasted attempt, and the choice of read is marked as a contract error.
-- **F5:** no receipt means `EFFECT_UNKNOWN`. Resending before the 60 s listing window has passed duplicates the message in seed A and fails predicate 2. Accepted paths: wait, list, then report success (seed A) or resend once with the same `client_msg_id` and take the receipt (seed B); or, if the wait does not fit in the remaining deadline, end as escalated with unknown notification effect.
+- **F3 and F4:** after the timeout the state is `EFFECT_UNKNOWN` and the next action is a *primary* read.
+  - Seed A: v13 with `p-7c1`, so the apply is verified and not repeated.
+  - Seed B: v12, so the effect is known absent, and one retry with the same key and base v12 is legal while $t<90$ s.
+  - A submission that verifies through the replica sees v12 in seed A and retries. The receiver's stored outcome prevents a duplicate effect, but the trace must show the wasted attempt, and the choice of read is marked as a contract error.
+- **F5:** no receipt means `EFFECT_UNKNOWN`.
+  - Resending before the 60 s listing window has passed duplicates the message in seed A and fails predicate 2.
+  - Accepted paths:
+    - wait, list, then report success (seed A);
+    - wait, list, then resend once with the same `client_msg_id` and take the receipt (seed B);
+    - if the wait does not fit in the remaining deadline, end as escalated with unknown notification effect.
 - **F6:** on cancellation the controller admits no new work except recovery reads, keeps the in-flight reservation, verifies through the primary (v13, committed), and ends as cancelled with a committed effect. A rollback needs its own approval.
 - **Ledger rows:** in every seed, each row satisfies $C+R\le B$ for calls, attempts, and cost.
 
 ### Rubric Dimensions
 
-- **Control Model**: *Insufficient* relies on transcript/model intent. *Competent* defines legal states, transitions, owners, and terminal reasons. *Strong* proves replay/guard invariants under injected faults.
-- **Contracts and Authority**: *Insufficient* validates syntax only, or verifies a write through a read that can be stale. *Competent* enforces typed contracts and external authorization, and uses the listed postcondition for each fixture tool. *Strong* demonstrates preview binding, unknown-effect handling, and independent postconditions under all three seeds.
-- **Bounds and Recovery**: *Insufficient* uses one step cap, checks only consumed budget, or retries every error. *Competent* enforces independent budgets by pre-dispatch reservation with atomic admission, propagates the remaining deadline, and gives the reference decisions for F1–F6. *Strong* measures attempt amplification, false recovery, and deadline propagation, and states which fixture limits are hard and which are estimates.
-- **Progress and Reflection**: *Insufficient* treats repetition or self-critique as truth. *Competent* evaluates grounded progress and reflection baselines. *Strong* quantifies false stops, saved work, and slice-dependent utility.
-- **Evaluation and Diagnosis**: *Insufficient* scores final answers only. *Competent* preserves complete trajectories and competing hypotheses. *Strong* uses discriminating tests, external effect evidence, and remeasurement.
+- **Control Model**:
+  - *Insufficient* relies on transcript/model intent.
+  - *Competent* defines legal states, transitions, owners, and terminal reasons.
+  - *Strong* proves replay/guard invariants under injected faults.
+- **Contracts and Authority**:
+  - *Insufficient* validates syntax only, or verifies a write through a read that can be stale.
+  - *Competent* enforces typed contracts and external authorization, and uses the listed postcondition for each fixture tool.
+  - *Strong* demonstrates preview binding, unknown-effect handling, and independent postconditions under all three seeds.
+- **Bounds and Recovery**:
+  - *Insufficient* uses one step cap, checks only consumed budget, or retries every error.
+  - *Competent* enforces independent budgets by pre-dispatch reservation with atomic admission, propagates the remaining deadline, and gives the reference decisions for F1–F6.
+  - *Strong* measures attempt amplification, false recovery, and deadline propagation, and states which fixture limits are hard and which are estimates.
+- **Progress and Reflection**:
+  - *Insufficient* treats repetition or self-critique as truth.
+  - *Competent* evaluates grounded progress and reflection baselines.
+  - *Strong* quantifies false stops, saved work, and slice-dependent utility.
+- **Evaluation and Diagnosis**:
+  - *Insufficient* scores final answers only.
+  - *Competent* preserves complete trajectories and competing hypotheses.
+  - *Strong* uses discriminating tests, external effect evidence, and remeasurement.
 
 ## 10 Capability Traceability Matrix
 

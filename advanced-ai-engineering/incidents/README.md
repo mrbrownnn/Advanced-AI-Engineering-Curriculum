@@ -1,6 +1,9 @@
 # Incident Exercises
 
-Incidents are diagnostic scenarios that test engineering reasoning under realistic constraints. They are not puzzles with a single correct answer — they require judgment, measurement, and trade-off analysis.
+Incidents are diagnostic scenarios that test engineering reasoning under realistic constraints.
+
+- They are not puzzles with a single correct answer.
+- They require judgment, measurement, and trade-off analysis.
 
 ## Structure
 

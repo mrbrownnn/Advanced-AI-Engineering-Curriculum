@@ -6,23 +6,20 @@ The capstone is a progressively built AI Runtime Platform — not merely a chatb
 
 ## Conceptual Architecture
 
+```mermaid
+flowchart TD
+    A["API / Gateway"] --> B["Admission / Queue"]
+    B --> C["Durable Agent Runtime"]
+    C --> D["Context Manager"]
+    D --> E["Retrieval"]
+    D --> F["Tools"]
+    E --> G["Inference Runtime"]
+    F --> G
+    G --> H["Verification"]
+    H --> I["Response"]
 ```
-API / Gateway
-      ↓
-Admission / Queue
-      ↓
-Durable Agent Runtime
-      ↓
-Context Manager
-   ↙       ↘
-Retrieval   Tools
-      ↓
-Inference Runtime
-      ↓
-Verification
-      ↓
-Response
-```
+
+- API: application programming interface.
 
 ### Cross-Cutting Concerns
 

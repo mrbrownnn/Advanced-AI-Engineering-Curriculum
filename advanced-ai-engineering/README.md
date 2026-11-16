@@ -4,26 +4,67 @@ A competency-driven, 26-week advanced AI engineering program.
 
 ## What This Is
 
-A structured curriculum for engineers at Junior+ / SFIA Level 4 targeting strong Middle / SFIA Level 5 technical capability, with selected SFIA Level 6 stretch exercises.
+A structured curriculum for engineers:
+
+- Entry: Junior+ / SFIA Level 4.
+- Target: strong Middle / SFIA Level 5 technical capability.
+- Stretch: selected SFIA Level 6 exercises.
 
 The program covers the complete chain from scientific experimentation through production AI systems:
 
+```mermaid
+flowchart TD
+    subgraph Foundations["Experimentation and inference"]
+        A["Scientific Experimentation"] --> B["Foundation Model Internals"]
+        B --> C["Inference GPU Fundamentals"]
+        C --> D["KV Cache Engineering"]
+        D --> E["Serving / Scheduling / Capacity"]
+        E --> F["Inference Optimization"]
+    end
+    subgraph Knowledge["Reasoning, data, and context"]
+        G["Reasoning / Test-Time Compute"] --> H["Model Behavior / Uncertainty"]
+        H --> I["AI Data Engineering"]
+        I --> J["Retrieval"]
+        J --> K["Advanced RAG"]
+        K --> L["Context / Memory"]
+    end
+    subgraph Runtime["Agents and validation"]
+        M["Agent Loops"] --> N["Harnesses"]
+        N --> O["Durable Agent Runtime"]
+        O --> P["Evaluation"]
+        P --> Q["Falsification"]
+        Q --> R["Harness Evolution"]
+    end
+    subgraph Production["Production systems"]
+        S["AI Security"] --> T["Model Adaptation"]
+        T --> U["Distributed Inference"]
+        U --> V["Multimodal Systems"]
+        V --> W["AI Economics"]
+        W --> X["Observability / Reliability"]
+        X --> Y["Model-System Co-design"]
+        Y --> Z["Capstone"]
+    end
+    F --> G
+    L --> M
+    R --> S
 ```
-Scientific Experimentation → Foundation Model Internals → Inference GPU Fundamentals
-→ KV Cache Engineering → Serving / Scheduling / Capacity → Inference Optimization
-→ Reasoning / Test-Time Compute → Model Behavior / Uncertainty → AI Data Engineering
-→ Retrieval → Advanced RAG → Context / Memory → Agent Loops → Harnesses
-→ Durable Agent Runtime → Evaluation → Falsification → Harness Evolution
-→ AI Security → Model Adaptation → Distributed Inference → Multimodal Systems
-→ AI Economics → Observability / Reliability → Model-System Co-design → Capstone
-```
+
+- AI: artificial intelligence; GPU: graphics processing unit.
+- KV: key/value; RAG: retrieval-augmented generation.
+
+**Reading diagrams:** GitHub renders fenced `mermaid` blocks directly; local editor preview needs Mermaid support.
 
 Multi-Agent Systems (37) and Tool Ecosystem & Protocols (38) follow the Durable Agent Runtime; Feedback Loop & AI Product (39) follows Model Adaptation.
 
 ### Central Principle
 
-```
-BUILD → MEASURE → BREAK → EXPLAIN → IMPROVE → DEFEND
+```mermaid
+flowchart TD
+    A["BUILD"] --> B["MEASURE"]
+    B --> C["BREAK"]
+    C --> D["EXPLAIN"]
+    D --> E["IMPROVE"]
+    E --> F["DEFEND"]
 ```
 
 A system merely "working" is **not** considered completion.
@@ -40,10 +81,25 @@ A system merely "working" is **not** considered completion.
 
 Every module follows this default loop:
 
-```
-Concept → Paper / Official Documentation → Source Reading → Small Implementation
-→ Instrument → Benchmark → Break → Diagnose → Optimize → Benchmark Again
-→ Engineering Decision → Engineering Report
+```mermaid
+flowchart TD
+    subgraph Study["Understand and build"]
+        A["Concept"] --> B["Paper / Official Documentation"]
+        B --> C["Source Reading"]
+        C --> D["Small Implementation"]
+    end
+    subgraph Test["Measure and challenge"]
+        E["Instrument"] --> F["Benchmark"]
+        F --> G["Break"]
+        G --> H["Diagnose"]
+    end
+    subgraph Decide["Improve and document"]
+        I["Optimize"] --> J["Benchmark Again"]
+        J --> K["Engineering Decision"]
+        K --> L["Engineering Report"]
+    end
+    D --> E
+    H --> I
 ```
 
 The learner should repeatedly answer:
@@ -127,4 +183,8 @@ Repository-level material outside this folder: [paper library](../paper-library/
 
 ## Status
 
-Modules 00–24 and 37–39 (core) and 25–28 (expert) are authored against the [instructional schema](INSTRUCTIONAL_SCHEMA.md), each with a research registry and knowledge model. Modules 29–36 are proposed in [EXPERT-TRACK.md](EXPERT-TRACK.md). Run `python tools/validate_curriculum.py` for the static checks; passing them does not certify technical correctness.
+- Modules 00–24 and 37–39 (core) and 25–28 (expert) are authored against the [instructional schema](INSTRUCTIONAL_SCHEMA.md).
+  - Each has a research registry and knowledge model.
+- Modules 29–36 are proposed in [EXPERT-TRACK.md](EXPERT-TRACK.md).
+- Run `python tools/validate_curriculum.py` for the static checks.
+  - Passing them does not certify technical correctness.

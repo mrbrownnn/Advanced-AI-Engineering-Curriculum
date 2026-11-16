@@ -2,7 +2,11 @@
 
 ## Purpose
 
-Source reading builds the ability to navigate unfamiliar production codebases, trace execution paths, and form accurate mental models of system behavior from code rather than documentation alone.
+Source reading builds the ability to:
+
+- Navigate unfamiliar production codebases.
+- Trace execution paths.
+- Form accurate mental models of system behavior from code rather than documentation alone.
 
 ## Primary Systems
 
@@ -31,9 +35,12 @@ entry_point: _
 
 Trace the code path from entry point through the key operations:
 
+```mermaid
+flowchart LR
+    A["A"] --> B["B"] --> C["C"] --> D["D"]
 ```
-A → B → C → D
-```
+
+- A–D: placeholder components along the execution path, starting at the entry point.
 
 For each node:
 - File and line number (pinned to commit)

@@ -3,7 +3,9 @@
 This directory contains the FACTUAL PROVENANCE SYSTEM for the Advanced AI Engineering Curriculum.
 
 **IMPORTANT:**
-This is NOT the learner-facing literature system. This registry exists to ensure curriculum writers and compilers do not hallucinate technical facts. Research is strictly **module-scoped**.
+- This is NOT the learner-facing literature system.
+- This registry exists to ensure curriculum writers and compilers do not hallucinate technical facts.
+- Research is strictly **module-scoped**.
 
 ## Provenance Classes
 Every substantive technical statement must belong to one of these classes:
@@ -20,7 +22,20 @@ Every substantive technical statement must belong to one of these classes:
 - **TIER 4 (Do Not Use)**: SEO content, AI summaries.
 
 ## Source Code Pinning
-Production source claims must include: repository, commit/tag, verification date, file, symbol, and execution path. Without a pinned revision, they are `TODO_VERIFY`.
+Production source claims must include:
+
+- Repository.
+- Commit/tag.
+- Verification date.
+- File.
+- Symbol.
+- Execution path.
+
+Without a pinned revision, they are `TODO_VERIFY`.
 
 ## Versioning & Freshness
-Evidence must include `research_cutoff` and `registry_version`. When a module is updated, do not silently overwrite old evidence. Make clear what changed and which curriculum claims depend on it.
+- Evidence must include `research_cutoff` and `registry_version`.
+- When a module is updated, do not silently overwrite old evidence.
+- Make clear:
+  - What changed.
+  - Which curriculum claims depend on it.

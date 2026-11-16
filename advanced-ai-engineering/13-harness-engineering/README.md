@@ -2,29 +2,54 @@
 
 ## 00 Why This Module Exists
 
-A model API is not an application contract. The harness is the typed boundary that converts application intent, context, tools, and output requirements into an effective model request, then converts provider events into a validated application outcome. A weak harness makes incompatible targets look interchangeable, treats valid JSON as truth, loses streaming state, retries permanent errors, and cannot explain which request actually ran.
+A model API is not an application contract.
 
-```text
-application request + policy + context + schemas
-                         |
-                  canonical manifest
-                         |
-               capability negotiation
-                  /              \
-          unsupported         provider adapter
-                                  |
-                    effective serialized request
-                                  |
-                    raw response/event stream
-                                  |
-        assembly -> normalization -> validation ladder
-                                  |
-              accepted | repair/retry | fallback | fail
+- The harness is the typed boundary that converts application intent, context, tools, and output requirements into an effective model request, then converts provider events into a validated application outcome.
+- A weak harness makes incompatible targets look interchangeable, treats valid JSON as truth, loses streaming state, retries permanent errors, and cannot explain which request actually ran.
+
+```mermaid
+flowchart TD
+    IN["<b>Inputs</b><br/>application request · policy · context · schemas"]
+    MAN["<b>1. Canonical manifest</b>"]
+    CAP["<b>2. Capability negotiation</b>"]
+    UNS["unsupported"]
+    ADP["<b>3. Provider adapter</b>"]
+    REQ["<b>4. Effective serialized request</b>"]
+    RAW["<b>5. Raw response/event stream</b>"]
+
+    subgraph POST["<b>6. Post-processing</b>"]
+        direction LR
+        ASM["assembly"] --> NORM["normalization"] --> LAD["validation ladder"]
+    end
+
+    ACC["accepted"]
+    RR["repair/retry"]
+    FB["fallback"]
+    FAIL["fail"]
+
+    IN --> MAN --> CAP
+    CAP --> UNS
+    CAP --> ADP
+    ADP --> REQ --> RAW --> POST
+    POST --> ACC
+    POST --> RR
+    POST --> FB
+    POST --> FAIL
 ```
 
-This module owns model-I/O request and response contracts, prompt/template serialization, target capability negotiation, provider adapters, structured outputs, constrained decoding, streaming assembly, error normalization, bounded retry/fallback, attempt lineage, and replay/conformance evidence. Module 12 owns the agent loop and tool-action policy; Module 14 owns durable checkpointing and side-effect execution; Module 15 owns the full evaluation program; Module 17 owns compatibility and rollout as the harness evolves; Module 23 owns platform-wide observability.
+Scope:
+- **This module owns:** model-I/O request and response contracts, prompt/template serialization, target capability negotiation, provider adapters, structured outputs, constrained decoding, streaming assembly, error normalization, bounded retry/fallback, attempt lineage, and replay/conformance evidence.
+- **Owned elsewhere:**
+  - Module 12: agent loop and tool-action policy.
+  - Module 14: durable checkpointing and side-effect execution.
+  - Module 15: full evaluation program.
+  - Module 17: compatibility and rollout as the harness evolves.
+  - Module 23: platform-wide observability.
 
-**Research cutoff:** 2026-09-26 for the original claim set. Entries marked *opened 2026-10-01* in Section 05 were read on that date for registry revision 1.1.0; where a publication or revision date is shown, it is on or before 2026-09-30. Claims not marked that way were not re-verified.
+**Research cutoff:** 2026-09-26 for the original claim set.
+- Entries marked *opened 2026-10-01* in Section 05 were read on that date for registry revision 1.1.0.
+- Where a publication or revision date is shown, it is on or before 2026-09-30.
+- Claims not marked that way were not re-verified.
 
 **Module Orientation**
 - **Engineering Problem**: Preserve required semantics across changing model endpoints while producing typed, observable, bounded outcomes.
@@ -73,35 +98,46 @@ estimated_effort:
 ```
 Each category is counted once. The source trace is not also counted inside Lesson 13.3 or LAB B, and lab analysis is not counted again as lesson practice.
 
-The learner must be able to define canonical and effective requests; reject silent capability loss; version prompts and serializers; separate parse, schema, semantic, authority, and effect checks; implement structured and streaming outputs; classify errors before retry/fallback; account for every attempt; pin and trace a structured-decoding implementation; and diagnose raw-versus-normalized protocol drift.
+The learner must be able to:
+- define canonical and effective requests;
+- reject silent capability loss;
+- version prompts and serializers;
+- separate parse, schema, semantic, authority, and effect checks;
+- implement structured and streaming outputs;
+- classify errors before retry/fallback;
+- account for every attempt;
+- pin and trace a structured-decoding implementation;
+- diagnose raw-versus-normalized protocol drift.
 
 ### LAYER 1: KNOWLEDGE / INSTRUCTIONAL LAYER
 
 ## 03 Knowledge Map
 
-```text
-                       application contract
-                 task | content | tools | output
-                              |
-                    canonical request manifest
-                              |
-                  required capability set C_req
-                              |
-                 target capability set C_verified
-                    /                       \
-               reject/degrade          adapter compile
-                                              |
-                                  effective request bytes
-                                              |
-                                 provider/runtime/model
-                                              |
-                                    ordered raw events
-                                              |
-                         stream assembler + normalizer
-                                              |
-             parse -> schema -> invariants -> task/evidence
-                         -> authority -> postcondition
+```mermaid
+flowchart TD
+    APP["<b>Application contract</b><br/>task · content · tools · output"]
+    MANI["<b>1. Canonical request manifest</b>"]
+    CREQ["<b>2. Required capability set</b> C_req"]
+    CVER["<b>3. Target capability set</b> C_verified"]
+    REJ["reject/degrade"]
+    COMP["<b>4. Adapter compile</b>"]
+    BYTES["<b>5. Effective request bytes</b>"]
+    PROV["<b>6. Provider/runtime/model</b>"]
+    EV["<b>7. Ordered raw events</b>"]
+    ASM["<b>8. Stream assembler + normalizer</b>"]
+
+    subgraph LADDER["<b>9. Validation ladder</b>"]
+        direction LR
+        L1["parse"] --> L2["schema"] --> L3["invariants"] --> L4["task/evidence"] --> L5["authority"] --> L6["postcondition"]
+    end
+
+    APP --> MANI --> CREQ --> CVER
+    CVER --> REJ
+    CVER --> COMP
+    COMP --> BYTES --> PROV --> EV --> ASM --> LADDER
 ```
+
+- `C_req`: capabilities the request requires (Lesson 13.2); `C_verified`: capabilities probes demonstrated on the target.
 
 Keep three representations:
 
@@ -123,9 +159,21 @@ Which representations must be retained to explain what the application intended,
 
 **Mechanism Explanation:**
 
-A canonical request manifest includes task/version, prompt template and rendered messages, typed content blocks, context and memory selections, tool and output schemas, model alias and resolved target, sampling/stopping parameters, timeout, metadata, and adapter policy. The adapter compiles it into an effective request; record both where policy permits (**D**, CLM-001, CLM-002).
+A canonical request manifest includes:
+- task/version;
+- prompt template and rendered messages;
+- typed content blocks;
+- context and memory selections;
+- tool and output schemas;
+- model alias and resolved target;
+- sampling/stopping parameters, timeout, metadata;
+- adapter policy.
 
-Prompts and serializers are executable dependencies. A 2025 controlled study reports sensitivity to subtle phrasing and formatting changes across its evaluated tasks and models (**O**, CLM-003). Do not universalize its effect sizes; use it to justify versioning delimiters, ordering, examples, escaping, chat templates, and schema renderers and testing them on your workload.
+The adapter compiles it into an effective request; record both where policy permits (**D**, CLM-001, CLM-002).
+
+Prompts and serializers are executable dependencies.
+- A 2025 controlled study reports sensitivity to subtle phrasing and formatting changes across its evaluated tasks and models (**O**, CLM-003).
+- Do not universalize its effect sizes. Use it to justify versioning delimiters, ordering, examples, escaping, chat templates, and schema renderers, and testing them on your workload.
 
 The normalized response must not destroy the raw response. Stable application fields need provenance back to raw events and an explicit `missing`, `unsupported`, or `not reported` state rather than fabricated defaults.
 
@@ -137,7 +185,9 @@ where:
 - $p$ — one provider/target; $A_p$ — the adapter (a function) that translates for that target.
 - $R_e$ — the effective request: the output of $A_p$, i.e. what is actually sent.
 
-In plain terms, the adapter is a translator. "Not required" means $R_e$ may use different names or shapes (row 6 below renames a field and still preserves meaning). "Not sufficient" means two payloads that look alike can still differ in meaning (rows 1–2 below). The check therefore asks, field by required field, "does the target still do what $R_c$ asked?", not "are the bytes the same?".
+In plain terms, the adapter is a translator. "Not required" means $R_e$ may use different names or shapes (row 6 below renames a field and still preserves meaning). "Not sufficient" means two payloads that look alike can still differ in meaning (rows 1–2 below).
+
+- The check therefore asks, field by required field, "does the target still do what $R_c$ asked?", not "are the bytes the same?".
 
 **Worked Example (synthetic fixture):**
 
@@ -163,19 +213,37 @@ In plain terms, the adapter is a translator. "Not required" means $R_e$ may use 
    - *Fabricated* is the worst case: zero is a value. The correct normalized state is `usage: not_reported`.
 3. Apply the dispatch rule from Lesson 13.2. $C_{req}$ = {forced tool choice, strict schema, stop sequence, usage reporting}. $C_{verified}(B)$ = {stop sequence, by declared emulation}. Three required capabilities are missing.
 
-*Result.* Seven fields: one preserved, one renamed, one transformed, one emulated, one weakened, one dropped, one fabricated. Dispatch through B is rejected with `unsupported: forced_tool_choice, strict_schema, usage_reporting`, or returned as an explicitly degraded outcome if policy authorizes that.
+*Result.* Seven fields: one preserved, one renamed, one transformed, one emulated, one weakened, one dropped, one fabricated.
 
-*Interpretation and limits.* The classification is a derivation on a synthetic fixture (**D**, CLM-001, CLM-002). It does not describe any real adapter. A byte-level diff alone would have flagged rows 6–7 and could have missed row 4, which only appears when the raw response is compared with the normalized one.
+- Dispatch through B is rejected with `unsupported: forced_tool_choice, strict_schema, usage_reporting`, or returned as an explicitly degraded outcome if policy authorizes that.
+
+*Interpretation and limits.* The classification is a derivation on a synthetic fixture (**D**, CLM-001, CLM-002).
+
+- It does not describe any real adapter.
+- A byte-level diff alone would have flagged rows 6–7 and could have missed row 4, which only appears when the raw response is compared with the normalized one.
 
 **Knowledge Check:**
 1. Why must raw provider events survive normalization?
 2. Which version identifiers are needed to reproduce prompt serialization?
 
 **Guided Practice:**
-(a) Classify adapter "C" for the same canonical request (synthetic): it sends the forced tool choice unchanged; sends the schema with `strict: true` but removes the `pattern` keyword it does not support; sends the stop sequence; and returns usage as `{"total_tokens": 412}` only. (b) Then create canonical and effective manifests for one task of your own through two adapters and explain every semantic difference.
+(a) Classify adapter "C" for the same canonical request (synthetic). Adapter C:
+- sends the forced tool choice unchanged;
+- sends the schema with `strict: true` but removes the `pattern` keyword it does not support;
+- sends the stop sequence;
+- returns usage as `{"total_tokens": 412}` only.
+
+(b) Then create canonical and effective manifests for one task of your own through two adapters and explain every semantic difference.
 
 **Feedback Contract:**
-- *Expected Evidence*: For (a): tool choice preserved; schema **dropped keyword** (`strict` survives, `pattern` does not, so the sent schema accepts more than the canonical one); stop preserved; usage **partially reported** (`total_tokens` known, the input/output split is `not_reported`, not zero). Decision: reject, or degrade explicitly, because the effective schema is weaker. For (b): exact target, prompt/schema/serializer versions, a per-field status table, the raw response, and explicit missing/unsupported states.
+- *Expected Evidence*:
+  - For (a):
+    - Tool choice: preserved.
+    - Schema: **dropped keyword** (`strict` survives, `pattern` does not, so the sent schema accepts more than the canonical one).
+    - Stop: preserved.
+    - Usage: **partially reported** (`total_tokens` known, the input/output split is `not_reported`, not zero).
+    - Decision: reject, or degrade explicitly, because the effective schema is weaker.
+  - For (b): exact target, prompt/schema/serializer versions, a per-field status table, the raw response, and explicit missing/unsupported states.
 - *Common Failure*: Recording only the friendly SDK object, or marking adapter C "compatible" because `strict: true` is present.
 - *Diagnostic Hint*: Can the exact outbound payload be reconstructed? Diff the schema that was sent, not the schema that was requested.
 - *Concept to Revisit*: Canonical vs. Effective Request.
@@ -205,11 +273,54 @@ $$
 C_{req}(r)\subseteq C_{verified}(p),
 $$
 
-after recording any deliberate emulation. This is an exact policy rule; discovering capabilities is empirical and must be refreshed (**D**, CLM-004).
+after recording any deliberate emulation.
 
-Probe at least content roles/types, context and output limits, tool-call semantics, schema dialect/subset, streaming event types, log probabilities, seeds, stop behavior, usage, cancellation, refusals, and errors. The same field name or “compatible API” label does not prove identical behavior.
+where:
+- $r$ — one request; $C_{req}(r)$ — capabilities it cannot do without.
+- $p$ — one pinned target + adapter; $C_{verified}(p)$ — capabilities demonstrated on it by probes.
+- $\subseteq$ — "is a subset of".
 
-A fallback is compatible only if it satisfies required capabilities and passes task-specific prompt/schema/serializer fixtures. If emergency policy relaxes a requirement, return an explicit degraded outcome (**D**, CLM-011). Routing for price/quality optimization belongs to Module 22; here the question is whether a call remains contract-compatible.
+This is an exact policy rule; discovering capabilities is empirical and must be refreshed (**D**, CLM-004).
+
+Probe at least:
+- content roles/types;
+- context and output limits;
+- tool-call semantics;
+- schema dialect/subset;
+- streaming event types;
+- log probabilities, seeds, stop behavior, usage;
+- cancellation, refusals, and errors.
+
+The same field name or “compatible API” label does not prove identical behavior.
+
+A fallback is compatible only if it satisfies required capabilities and passes task-specific prompt/schema/serializer fixtures.
+- If emergency policy relaxes a requirement, return an explicit degraded outcome (**D**, CLM-011).
+- Routing for price/quality optimization belongs to Module 22; here the question is whether a call remains contract-compatible.
+
+```mermaid
+flowchart TD
+    R["request r → C_req(r)"]
+    P["target p → C_verified(p)<br/>(probes + declared emulation)"]
+    M["M = C_req(r) ∖ C_verified(p)"]
+    Q{"M empty?"}
+    FX{"task fixtures pass?<br/>(prompt · schema · serializer)"}
+    OK["dispatch"]
+    POL{"policy authorizes<br/>relaxing requirement?"}
+    DEG["explicit degraded outcome"]
+    REJ["reject: unsupported + elements of M"]
+
+    R --> M
+    P --> M
+    M --> Q
+    Q -->|yes| FX
+    FX -->|yes| OK
+    FX -->|no| REJ
+    Q -->|no| POL
+    POL -->|yes| DEG
+    POL -->|no| REJ
+```
+
+- `C_req(r)`: capabilities request r cannot do without; `C_verified(p)`: capabilities a probe demonstrated on target p; `M`: missing set (defined below).
 
 **Quantitative Model / Derivation:**
 Dispatch is allowed only when $C_{req}(r)\subseteq C_{verified}(p)$ after declared emulation. This set rule is exact for a manifest; the membership evidence is empirical and can expire.
@@ -238,10 +349,20 @@ Extra verified capabilities on the target do not matter; only missing required o
 2. Which capability probes must rerun after a provider/model revision?
 
 **Independent Practice:**
-(a) Synthetic check: $C_{req}$ = {tool calling, strict schema, seed, usage}. Target P verified {tool calling, strict schema, usage}; target Q verified {tool calling, seed, usage} and accepts a `strict` field without enforcing it. Decide dispatch for each. (b) Build a two-target capability matrix of your own and a fixture that catches one silent default and one unsupported feature.
+(a) Synthetic check. Decide dispatch for each target:
+- $C_{req}$ = {tool calling, strict schema, seed, usage}.
+- Target P verified {tool calling, strict schema, usage}.
+- Target Q verified {tool calling, seed, usage} and accepts a `strict` field without enforcing it.
+
+(b) Build a two-target capability matrix of your own and a fixture that catches one silent default and one unsupported feature.
 
 **Feedback Contract:**
-- *Expected Evidence*: For (a): P is missing {seed}; Q is missing {strict schema}, because accepting a field is not enforcing it. Neither satisfies the subset rule, so both are rejected or explicitly degraded. For (b): each required capability maps to a current probe, version, and failure policy.
+- *Expected Evidence*:
+  - For (a):
+    - P is missing {seed}.
+    - Q is missing {strict schema}, because accepting a field is not enforcing it.
+    - Neither satisfies the subset rule, so both are rejected or explicitly degraded.
+  - For (b): each required capability maps to a current probe, version, and failure policy.
 - *Common Failure*: Treating successful HTTP transport, or an accepted parameter name, as portability.
 - *Diagnostic Hint*: Which required semantic was actually exercised by a probe that would fail if the feature were ignored?
 - *Concept to Revisit*: Evidence-Backed Capability Negotiation.
@@ -265,26 +386,60 @@ What does constrained decoding guarantee, and which semantic, authority, and eff
 
 **Mechanism Explanation:**
 
-Pin the schema dialect and vocabulary. JSON Schema Draft 2020-12 separates Core and Validation vocabularies; `format` is annotation by default unless assertion behavior is enabled (**O**, CLM-005; Validation specification §7.2). Hosted APIs and decoding libraries may implement different subsets, strictness, recursion, ordering, and extensions.
+Pin the schema dialect and vocabulary.
+- JSON Schema Draft 2020-12 separates Core and Validation vocabularies.
+- `format` is annotation by default unless assertion behavior is enabled (**O**, CLM-005; Validation specification §7.2).
+- Hosted APIs and decoding libraries may implement different subsets, strictness, recursion, ordering, and extensions.
 
 Use a validation ladder:
 
-```text
-bytes/text parse?
-  -> declared schema valid?
-    -> application invariants valid?
-      -> task/factual/evidence checks pass?
-        -> action authorized?
-          -> external postcondition observed?
+```mermaid
+flowchart TD
+    V1["<b>1.</b> bytes/text parse?"]
+    V2["<b>2.</b> declared schema valid?"]
+    V3["<b>3.</b> application invariants valid?"]
+    V4["<b>4.</b> task/factual/evidence checks pass?"]
+    V5["<b>5.</b> action authorized?"]
+    V6["<b>6.</b> external postcondition observed?"]
+
+    V1 --> V2 --> V3 --> V4 --> V5 --> V6
 ```
 
-Read the ladder top to bottom: each stage assumes the previous one passed and reads one more input. Parse reads only the text; schema adds the schema; invariants add application rules; task/evidence adds the user's request and sources; authority adds who is calling; the postcondition adds the outside world after execution. A failure is reported at the first stage that fails, so its name says which input was violated.
+Read the ladder top to bottom: each stage assumes the previous one passed and reads one more input.
+- Parse reads only the text.
+- Schema adds the schema.
+- Invariants add application rules.
+- Task/evidence adds the user's request and sources.
+- Authority adds who is calling.
+- Postcondition adds the outside world after execution.
 
-These predicates are not equivalent (**D**, CLM-007). Constrained decoding can keep generation inside an implemented formal language by masking invalid continuations (**O**, CLM-006); it cannot prove facts, business invariants absent from the grammar, permission, or side effects.
+A failure is reported at the first stage that fails, so its name says which input was violated.
 
-JSONSchemaBench evaluates schema-feature coverage, efficiency, and output quality separately across real-world schemas and the official test suite (**O**, CLM-008; abstract-level reading). Use the same dimensions for backend selection; valid-JSON rate alone hides unsupported keywords and semantic failure.
+These predicates are not equivalent (**D**, CLM-007).
+- Constrained decoding can keep generation inside an implemented formal language by masking invalid continuations (**O**, CLM-006).
+- It cannot prove facts, business invariants absent from the grammar, permission, or side effects.
 
-**Production source trace:** at XGrammar revision `4221346f3d26b8306b46de19cb40c8a525c4871c`, `GrammarCompiler.compile_json_schema` produces a tokenizer-aware compiled grammar, `GrammarMatcher.fill_next_token_bitmask` and `accept_token` expose stateful validity, and the Transformers `LogitsProcessor.__call__` accepts the last token, fills the next mask, and applies it to logits (**O**, CLM-015). Static inspection only, re-read at this commit on 2026-10-01; native code and benchmarks were not executed.
+JSONSchemaBench evaluates schema-feature coverage, efficiency, and output quality separately across real-world schemas and the official test suite (**O**, CLM-008
+
+- abstract-level reading).
+- Use the same dimensions for backend selection
+- valid-JSON rate alone hides unsupported keywords and semantic failure.
+
+**Production source trace** at XGrammar revision `4221346f3d26b8306b46de19cb40c8a525c4871c` (**O**, CLM-015):
+- `GrammarCompiler.compile_json_schema` produces a tokenizer-aware compiled grammar.
+- `GrammarMatcher.fill_next_token_bitmask` and `accept_token` expose stateful validity.
+- The Transformers `LogitsProcessor.__call__` accepts the last token, fills the next mask, and applies it to logits.
+- Static inspection only, re-read at this commit on 2026-10-01; native code and benchmarks were not executed.
+
+```mermaid
+flowchart LR
+    S["JSON schema + tokenizer info"] -->|compile_json_schema| G["compiled grammar"]
+    G --> MS["matcher state<br/>(GrammarMatcher)"]
+    MS -->|fill_next_token_bitmask| BM["valid-next-token bitmask"]
+    BM -->|"LogitsProcessor.__call__"| LG["masked logits"]
+    LG --> T["sampled token"]
+    T -->|accept_token| MS
+```
 
 Three details from that reading matter for the ladder. They are one library's behavior at one commit, not a property of constrained decoding in general:
 
@@ -292,7 +447,10 @@ Three details from that reading matter for the ladder. They are one library's be
 - With `any_order=True`, the docstring states that required keys may be missing and keys may repeat. A grammar-valid output can then fail post-hoc schema validation, so stage 2 still has to run.
 - `accept_token` returns `False` when a token does not match, and the Transformers processor asserts on it and is documented as single-use per `generate()` call.
 
-XGrammar-2's 2026 maintainer material extends the family with composable structural tags and batching/speculative-decoding integration, and states that the library is for enforcing format rather than changing response semantics (**O**, CLM-016). Treat it as frontier, implementation-specific evidence; do not transfer its performance or adoption claims without reproduction.
+XGrammar-2's 2026 maintainer material extends the family with composable structural tags and batching/speculative-decoding integration, and states that the library is for enforcing format rather than changing response semantics (**O**, CLM-016).
+
+- Treat it as frontier, implementation-specific evidence
+- do not transfer its performance or adoption claims without reproduction.
 
 **Quantitative Model / Trade-off Comparison:**
 Report schema-feature coverage, compile/cache time, decode latency, structural validity, semantic validity, and task success separately. A structurally valid rate cannot be substituted for semantic accuracy.
@@ -349,13 +507,23 @@ Report schema-feature coverage, compile/cache time, decode latency, structural v
 | `{"amount": -10, "account": "A"}` | pass | pass | fail | pass |
 | `{"amount": 10, "account": "A"}` | pass | pass | pass | pass |
 
-*Encoding layer.* The text `{\"amount\": -10, \"account\": \"B\"}` is **not** a JSON document. A standard parser rejects it at offset 1, because a backslash cannot start a member name. That text is how the document appears *inside a JSON string literal*, for example when a tool call carries its arguments as a string:
+*Encoding layer.* The text `{\"amount\": -10, \"account\": \"B\"}` is **not** a JSON document.
+- A standard parser rejects it at offset 1, because a backslash cannot start a member name.
+- That text is how the document appears *inside a JSON string literal*, for example when a tool call carries its arguments as a string:
 
 ```json
 {"arguments": "{\"amount\": -10, \"account\": \"B\"}"}
 ```
 
-Parsing this envelope yields a *string* for `arguments`. Validating that string against the schema fails at stage 2 with "is not of type 'object'", which is a harness error, not a model error. Decode one layer first: parse the envelope, take the string value, parse that string as its own JSON document, and only then start the ladder. Record which layer each failure belongs to.
+Parsing this envelope yields a *string* for `arguments`. Validating that string against the schema fails at stage 2 with "is not of type 'object'", which is a harness error, not a model error.
+
+Decode one layer first:
+1. Parse the envelope.
+2. Take the string value.
+3. Parse that string as its own JSON document.
+4. Only then start the ladder.
+
+Record which layer each failure belongs to.
 
 *Interpretation and limits.*
 - Where a constraint is declared decides which stage catches it. Adding `"exclusiveMinimum": 0` to `amount` makes the same document fail at stage 2 instead of stage 3.
@@ -368,10 +536,22 @@ Parsing this envelope yields a *string* for `arguments`. Validating that string 
 2. Can a grammar verify that a cited fact is true?
 
 **Guided Practice:**
-(a) With the same schema, invariant, and permissions, name the first failing stage for each input: (i) `{"amount": "10", "account": "A"}`; (ii) `{"amount": 10, "account": "A", "memo": "x"}`; (iii) `{"amount": 0, "account": "A"}`; (iv) the envelope `{"arguments": "{\"amount\": 5, \"account\": \"A\"}"}` handed to the ladder without decoding. (b) Test nested unions, references, optional fields, impossible domains, and unsupported keywords across post-hoc validation and one constrained backend.
+(a) With the same schema, invariant, and permissions, name the first failing stage for each input:
+- (i) `{"amount": "10", "account": "A"}`;
+- (ii) `{"amount": 10, "account": "A", "memo": "x"}`;
+- (iii) `{"amount": 0, "account": "A"}`;
+- (iv) the envelope `{"arguments": "{\"amount\": 5, \"account\": \"A\"}"}` handed to the ladder without decoding.
+
+(b) Test nested unions, references, optional fields, impossible domains, and unsupported keywords across post-hoc validation and one constrained backend.
 
 **Feedback Contract:**
-- *Expected Evidence*: For (a): (i) stage 2, a string is not a number; (ii) stage 2, `additionalProperties` is false; (iii) stage 3, zero is not strictly positive, and the schema passes; (iv) stage 2 for the wrong reason, the envelope has no `amount` or `account`; after decoding one layer the inner document passes every evaluated stage. For (b): pinned dialect/subset, feature tests, structural and semantic metrics, and unsupported cases.
+- *Expected Evidence*:
+  - For (a):
+    - (i) stage 2, a string is not a number;
+    - (ii) stage 2, `additionalProperties` is false;
+    - (iii) stage 3, zero is not strictly positive, and the schema passes;
+    - (iv) stage 2 for the wrong reason, the envelope has no `amount` or `account`; after decoding one layer the inner document passes every evaluated stage.
+  - For (b): pinned dialect/subset, feature tests, structural and semantic metrics, and unsupported cases.
 - *Common Failure*: Reporting valid JSON as task correctness; reporting (iv) as a model failure; reporting (iii) as a schema failure.
 - *Diagnostic Hint*: At which validation stage did the candidate first fail, and which of the four artifacts did that stage read?
 - *Concept to Revisit*: Validation Ladder.
@@ -396,11 +576,46 @@ How can arbitrary legal event boundaries yield one stable logical response witho
 
 **Mechanism Explanation:**
 
-Provider chunks are not complete JSON objects or messages (**D**, CLM-009). Two boundaries must not be confused: a *transport read* can end anywhere, including inside a multibyte character, while a *decoded provider event* ends where the wire format says it ends. Preserve sequence/event IDs, choice index, tool-call ID, event type, raw bytes/text, timestamps, and terminal/error/cancel signals. Assemble fragmented Unicode, content, reasoning channels where exposed, and tool arguments by stable identity.
+Provider chunks are not complete JSON objects or messages (**D**, CLM-009). Two boundaries must not be confused:
+- a *transport read* can end anywhere, including inside a multibyte character;
+- a *decoded provider event* ends where the wire format says it ends.
 
-Do not parse every partial JSON fragment as though it were complete. Track states such as `started`, `partial`, `complete`, `truncated`, `cancelled`, `refused`, and `failed`; validate a logical object when its protocol says it is complete. Client disconnect does not prove provider cancellation, and a finish reason must remain distinct from application acceptance.
+Preserve sequence/event IDs, choice index, tool-call ID, event type, raw bytes/text, timestamps, and terminal/error/cancel signals. Assemble fragmented Unicode, content, reasoning channels where exposed, and tool arguments by stable identity.
 
-Test boundary splits, duplicated/out-of-order events where transport allows them, parallel choices/calls, missing terminators, early disconnect, content after a terminal marker, and backpressure from a slow consumer.
+Do not parse every partial JSON fragment as though it were complete.
+- Track states such as `started`, `partial`, `complete`, `truncated`, `cancelled`, `refused`, and `failed`.
+- Validate a logical object when its protocol says it is complete.
+- Client disconnect does not prove provider cancellation.
+- A finish reason must remain distinct from application acceptance.
+
+```mermaid
+stateDiagram-v2
+    [*] --> started: start event
+    started --> partial: delta
+    partial --> partial: delta (same key)
+    partial --> complete: done event
+    started --> truncated: stream ends, no done
+    partial --> truncated: stream ends, no done
+    partial --> cancelled: cancel signal
+    partial --> refused: refusal event
+    partial --> failed: error
+    complete --> failed: delta after done · event after terminal
+    complete --> [*]: hand to validation ladder
+    truncated --> [*]
+    cancelled --> [*]
+    refused --> [*]
+    failed --> [*]
+```
+
+- Per logical object (keyed by index + call ID). Only `complete` reaches the validation ladder; every other terminal state is non-success. Transitions from `started` to cancelled/refused/failed omitted for brevity.
+
+Test:
+- boundary splits;
+- duplicated/out-of-order events where transport allows them;
+- parallel choices/calls;
+- missing terminators and early disconnect;
+- content after a terminal marker;
+- backpressure from a slow consumer.
 
 **Quantitative Model / Derivation:**
 Assembly is two folds. A decoder $D$ turns the byte stream $B$ into decoded events $E=D(B)$. An assembler folds events into state, $S_n=F(S_0,E)$.
@@ -408,9 +623,20 @@ Assembly is two folds. A decoder $D$ turns the byte stream $B$ into decoded even
 - **Chunk-boundary invariance** is a property of $D$: every partition of $B$ into contiguous non-empty chunks must yield the same event sequence. A byte string of $n$ bytes has $2^{n-1}$ such partitions (**D**, CLM-021).
 - **Delta-boundary invariance** is a property of $F$: a provider may cut the same arguments into different deltas, such as `{"un` then `it":"C"}`. The event sequences differ; the completed objects and terminal state must not.
 
-where: $B$ is the raw byte stream; $D$ the decoder (framer); $E$ the resulting sequence of decoded events; $F$ the assembler; $S_0$ the empty initial state; $S_n$ the state after all events are applied. Note the symbol reuse: the $n$ in $S_n$ counts *events*, while the $n$ in $2^{n-1}$ counts *bytes*. They are different numbers.
+where:
+- $B$: raw byte stream
+- $D$: decoder (framer)
+- $E$: resulting sequence of decoded events
+- $F$: assembler
+- $S_0$: empty initial state; $S_n$: state after all events are applied
 
-*Why $2^{n-1}$.* A string of $n$ bytes has $n-1$ internal gaps (between bytes 1 and 2, 2 and 3, and so on). A partition into contiguous non-empty chunks is fully described by which gaps get a cut. Each gap is independently "cut" or "no cut", so there are $2\times2\times\cdots\times2=2^{n-1}$ choices. Example with $n=3$ bytes `abc`: 2 gaps, $2^2=4$ partitions: `abc`, `a|bc`, `ab|c`, `a|b|c`.
+Note the symbol reuse: the $n$ in $S_n$ counts *events*, while the $n$ in $2^{n-1}$ counts *bytes*. They are different numbers.
+
+*Why $2^{n-1}$:*
+- A string of $n$ bytes has $n-1$ internal gaps (between bytes 1 and 2, 2 and 3, and so on).
+- A partition into contiguous non-empty chunks is fully described by which gaps get a cut.
+- Each gap is independently "cut" or "no cut": $2\times2\times\cdots\times2=2^{n-1}$ choices.
+- Example, $n=3$ bytes `abc`: 2 gaps, $2^2=4$ partitions: `abc`, `a|bc`, `ab|c`, `a|b|c`.
 
 The count decides the test method:
 
@@ -419,9 +645,23 @@ The count decides the test method:
 | `data: "Đ"` plus a blank line | 12 | 2,048 | **exhaustive**: run all of them |
 | Input B below, as serialized | 580 | $2^{579}$ | **generated**: all 579 single cuts, all $\binom{579}{2}=167{,}331$ double cuts, one byte per chunk, plus seeded random partitions |
 
-In the 12-byte fixture, 1,024 of the 2,048 partitions cut between the two bytes of `Đ` (that one gap is forced to "cut" and the other 10 gaps are free: $2^{10}=1{,}024$, exactly half); a decoder that converts each chunk to text independently raises on exactly those. For large inputs a passing run means "no counterexample in the tested set", and the report must state the seed, the number of partitions, and which families were exhaustive. It is not a proof over all partitions.
+In the 12-byte fixture, 1,024 of the 2,048 partitions cut between the two bytes of `Đ`:
+- That one gap is forced to "cut"; the other 10 gaps are free.
+- Count: $2^{10}=1{,}024$, exactly half of $2{,}048$.
 
-*Sizing the generated families for $n=580$.* There are $n-1=579$ gaps. Single cuts choose 1 gap: 579 tests. Double cuts choose 2 distinct gaps: $\binom{579}{2}=\frac{579\times578}{2}=167{,}331$ tests. With the one-byte-per-chunk case that is under 170,000 deterministic runs, which is affordable, whereas $2^{579}$ is not. The "about 16 bytes" limit in LAB C corresponds to $2^{15}=32{,}768$ partitions.
+A decoder that converts each chunk to text independently raises on exactly those.
+
+For large inputs a passing run means "no counterexample in the tested set". It is not a proof over all partitions. The report must state:
+- the seed;
+- the number of partitions;
+- which families were exhaustive.
+
+*Sizing the generated families for $n=580$:*
+- Gaps: $n-1=579$.
+- Single cuts choose 1 gap: 579 tests.
+- Double cuts choose 2 distinct gaps: $\binom{579}{2}=\frac{579\times578}{2}=167{,}331$ tests.
+- With the one-byte-per-chunk case: under 170,000 deterministic runs, which is affordable, whereas $2^{579}$ is not.
+- The "about 16 bytes" limit in LAB C corresponds to $2^{15}=32{,}768$ partitions.
 
 **Worked Example (synthetic protocol fixture):**
 
@@ -433,7 +673,23 @@ Three layers are kept apart throughout:
 | Decoded provider event | one framed event | the wire format's terminator | event ID, type |
 | Logical object | one tool call or message | protocol completion events | call ID and index |
 
-The fixture uses server-sent-event framing: UTF-8 text, one field per line, a blank line dispatches the event, and an event that is still incomplete when the stream ends is discarded rather than dispatched (**O**, CLM-018). The event names below are invented for the exercise. Hosted APIs define their own; one provider documents `response.output_item.added`, `response.function_call_arguments.delta`, and `response.function_call_arguments.done`, with `item_id`, `output_index`, and `call_id` identifying the call (**O**, CLM-019).
+```mermaid
+flowchart LR
+    B["byte stream B<br/>(transport reads, arbitrary cuts)"] -->|"decoder D (framer)"| E["decoded events E = D(B)<br/>(event ID, type)"]
+    E -->|"assembler F, keyed by index + call ID"| O["logical objects S_n = F(S_0, E)"]
+    O -->|"after done + terminal event"| V["validation ladder"]
+```
+
+- `B`: byte stream; `D`: decoder; `E`: decoded event sequence; `F`: assembler; `S_0`: initial state; `S_n`: assembled state. Chunk-boundary invariance is tested at `D`; delta-boundary invariance at `F`.
+
+The fixture uses server-sent-event framing (**O**, CLM-018):
+- UTF-8 text, one field per line;
+- a blank line dispatches the event;
+- an event that is still incomplete when the stream ends is discarded rather than dispatched.
+
+The event names below are invented for the exercise.
+
+- Hosted APIs define their own: one provider documents `response.output_item.added`, `response.function_call_arguments.delta`, and `response.function_call_arguments.done`, with `item_id`, `output_index`, and `call_id` identifying the call (**O**, CLM-019).
 
 *Input A: transport fragmentation of one event.* Event 3 is 75 bytes on the wire:
 
@@ -468,7 +724,11 @@ Three reads produce exactly one decoded event. Decoding r1 by itself as UTF-8 fa
 | 8 | `tool_call.done` | 1 | none | 1: complete | parse buffer 1 |
 | 9 | `response.completed` | none | none | terminal: complete | hand both objects to the validation ladder |
 
-*Result.* Terminal state `complete`, and two logical objects: `call_a = lookup_city({"city": "Đà Nẵng"})` and `call_b = get_weather({"unit": "C"})`. Each fragment went to the buffer named by its key. Arguments were parsed at events 7 and 8, not earlier, although both buffers already parse as JSON after event 6.
+*Result.* Terminal state `complete`, and two logical objects:
+- `call_a = lookup_city({"city": "Đà Nẵng"})`;
+- `call_b = get_weather({"unit": "C"})`.
+
+Each fragment went to the buffer named by its key. Arguments were parsed at events 7 and 8, not earlier, although both buffers already parse as JSON after event 6.
 
 *Rejection cases on the same fixture.*
 
@@ -481,17 +741,27 @@ Three reads produce exactly one decoded event. Decoding r1 by itself as UTF-8 fa
 | A delta for index 0 arrives after event 7 | unchanged | `failed` | fragment after `done` for that call |
 | Any event arrives after event 9 | unchanged | `failed` | content after the terminal marker |
 
-*Interpretation and limits.* The trace is a derivation on a synthetic protocol (**D**, CLM-009, CLM-021). Real event taxonomies, and whether duplicates or reordering can occur at all, depend on the provider and transport. The second rejection row is the one most often missed: a buffer such as `12` also parses, and the next delta could have made it `120`.
+*Interpretation and limits.*
+- The trace is a derivation on a synthetic protocol (**D**, CLM-009, CLM-021).
+- Real event taxonomies, and whether duplicates or reordering can occur at all, depend on the provider and transport.
+- The second rejection row is the one most often missed: a buffer such as `12` also parses, and the next delta could have made it `120`.
 
 **Knowledge Check:**
 1. Why is parsing each JSON fragment independently incorrect?
 2. Does client disconnect prove provider-side cancellation?
 
 **Guided Practice:**
-(a) How many chunk partitions does the 9-byte stream `data: 1` plus a blank line have, and should the test be exhaustive? (b) A stream delivers `tool_call.start` for index 0, then one delta `12`, then the connection closes. State the terminal state and whether the arguments are validated. (c) The same stream instead continues with a delta `0`, `tool_call.done`, and `response.completed`. State the completed arguments. (d) Replay one response of your own over generated chunkings, duplicate/out-of-order cases permitted by the transport, missing terminators, and slow-consumer backpressure.
+- (a) How many chunk partitions does the 9-byte stream `data: 1` plus a blank line have, and should the test be exhaustive?
+- (b) A stream delivers `tool_call.start` for index 0, then one delta `12`, then the connection closes. State the terminal state and whether the arguments are validated.
+- (c) The same stream instead continues with a delta `0`, `tool_call.done`, and `response.completed`. State the completed arguments.
+- (d) Replay one response of your own over generated chunkings, duplicate/out-of-order cases permitted by the transport, missing terminators, and slow-consumer backpressure.
 
 **Feedback Contract:**
-- *Expected Evidence*: (a) $2^{8}=256$; exhaustive. (b) `truncated`; not validated, although `12` parses as JSON. (c) `120`, which shows why (b) must not be accepted as `12`. (d) Raw ordered events, stable IDs, an explicit terminal state, the same completed output across the tested splits, and a statement of which split families were exhaustive and which were sampled, with seed and count.
+- *Expected Evidence*:
+  - (a) $2^{8}=256$; exhaustive.
+  - (b) `truncated`; not validated, although `12` parses as JSON.
+  - (c) `120`, which shows why (b) must not be accepted as `12`.
+  - (d) Raw ordered events, stable IDs, an explicit terminal state, the same completed output across the tested splits, and a statement of which split families were exhaustive and which were sampled, with seed and count.
 - *Common Failure*: Treating end-of-connection as successful completion; validating a buffer because it happens to parse; writing "all chunkings tested" for a sampled run.
 - *Diagnostic Hint*: Which protocol event authorizes final validation? Which key did each fragment carry?
 - *Concept to Revisit*: Streaming State Machine.
@@ -529,16 +799,49 @@ Normalize both stage and class:
 | Refusal/content policy | preserve as typed outcome, not transport error |
 | Semantic/evidence failure | new sample, validator-guided repair, abstain, or escalate |
 
-All attempts share root request ID, absolute deadline, maximum attempts, token/cost budget, and cancellation. A semantic retry is another stochastic sample, not restoration of a failed network exchange. Never allow nested SDK, gateway, harness, and application retries to multiply invisibly (**D**, CLM-010).
+All attempts share:
+- root request ID;
+- absolute deadline;
+- maximum attempts;
+- token/cost budget;
+- cancellation.
+
+A semantic retry is another stochastic sample, not restoration of a failed network exchange. Never allow nested SDK, gateway, harness, and application retries to multiply invisibly (**D**, CLM-010).
+
+```mermaid
+flowchart LR
+    subgraph NEST["Uncoordinated: 3 × 3 × 3 = 27 dispatches"]
+        direction TB
+        A1["application<br/>3 attempts"] --> G1["gateway<br/>3 attempts each"] --> S1["SDK<br/>3 attempts each"]
+    end
+    subgraph ROOT["Root budget: bound = 3"]
+        direction TB
+        L["shared ledger<br/>root ID · absolute deadline · max attempts · token/cost budget · cancellation"]
+        A2["application"] --> L
+        G2["gateway"] --> L
+        S2["SDK"] --> L
+    end
+```
+
+- Numbers are the worked example below.
 
 **Quantitative Model / Derivation:**
 If layer $j$ independently permits $r_j$ attempts, hidden nesting can allow up to $\prod_j r_j$ dispatches. A root attempt budget converts this multiplication into one explicit bound.
 
-where: $j$ indexes the retry layers (for example SDK, gateway, application); $r_j$ is the attempt limit of layer $j$, counting the first attempt; $\prod_j r_j$ is the product of all the $r_j$.
+where:
+- $j$ — index of the retry layers (for example SDK, gateway, application).
+- $r_j$ — attempt limit of layer $j$, counting the first attempt.
+- $\prod_j r_j$ — product of all the $r_j$.
+- $R$ — root maximum attempts (below).
 
-*Why multiply, not add.* Each attempt of an outer layer starts a fresh run of the next inner layer, which can again use all of its own attempts. So the counts nest: $r_1$ outer attempts, each with up to $r_2$ inner ones, gives $r_1 r_2$, and a third layer multiplies again. With one shared ledger, every physical dispatch decrements the same counter, so the bound is the root maximum $R$ (precisely $\min(R,\prod_j r_j)$).
+*Why multiply, not add.*
+- Each attempt of an outer layer starts a fresh run of the next inner layer, which can again use all of its own attempts.
+- So the counts nest: $r_1$ outer attempts, each with up to $r_2$ inner ones, gives $r_1 r_2$; a third layer multiplies again.
+- With one shared ledger, every physical dispatch decrements the same counter, so the bound is the root maximum $R$ (precisely $\min(R,\prod_j r_j)$).
 
-The same idea applies to time. With an absolute deadline $T_{dl}$ and elapsed time $t$, an attempt may use at most $\min(\text{configured timeout},\,T_{dl}-t)$. A fresh per-layer timeout ignores $t$ and can overrun the root deadline (Guided Practice (b)).
+The same idea applies to time.
+- With an absolute deadline $T_{dl}$ (seconds) and elapsed time $t$ (seconds), an attempt may use at most $\min(\text{configured timeout},\,T_{dl}-t)$.
+- A fresh per-layer timeout ignores $t$ and can overrun the root deadline (Guided Practice (b)).
 
 **Worked Example (synthetic fixture):**
 *Input.* An SDK, a gateway, and the application each allow three attempts.
@@ -551,10 +854,15 @@ The same idea applies to time. With an absolute deadline $T_{dl}$ and elapsed ti
 2. When is a fallback incompatible even if it returns parseable output?
 
 **Guided Practice:**
-(a) Layers allow 2, 3, and 2 attempts. Give the uncoordinated worst case and the bound under a root budget of 4. (b) A request with a 10 s absolute deadline has used 7 s; the next attempt's timeout is configured as 5 s. What timeout may the attempt use? (c) Map each error-table row to a decision, evidence requirement, deadline behavior, and terminal outcome.
+- (a) Layers allow 2, 3, and 2 attempts. Give the uncoordinated worst case and the bound under a root budget of 4.
+- (b) A request with a 10 s absolute deadline has used 7 s; the next attempt's timeout is configured as 5 s. What timeout may the attempt use?
+- (c) Map each error-table row to a decision, evidence requirement, deadline behavior, and terminal outcome.
 
 **Feedback Contract:**
-- *Expected Evidence*: (a) $2\times3\times2=12$ dispatches uncoordinated; 4 under the root budget. (b) At most 3 s, the remaining deadline; a fresh 5 s would end at 12 s. (c) Stage/class, effect certainty, shared deadline/attempt ledger, and fallback capability proof for every row.
+- *Expected Evidence*:
+  - (a) $2\times3\times2=12$ dispatches uncoordinated; 4 under the root budget.
+  - (b) At most 3 s, the remaining deadline; a fresh 5 s would end at 12 s.
+  - (c) Stage/class, effect certainty, shared deadline/attempt ledger, and fallback capability proof for every row.
 - *Common Failure*: Nested retries, adding the layer limits (7) instead of multiplying them, or a fresh deadline at every layer.
 - *Diagnostic Hint*: How many physical dispatches can one root request create, and which clock does each attempt read?
 - *Concept to Revisit*: Attempt Amplification.
@@ -578,48 +886,95 @@ What evidence localizes drift to request construction, backend behavior, streami
 
 **Mechanism Explanation:**
 
-A replay manifest records resolved endpoint/model, harness/adapter versions, canonical and effective requests, prompt/tool/schema IDs, sampling/stopping settings, seed if supported, timestamps, raw events, normalized output, validation results, attempts, usage, and terminal status. This supports diagnosis but cannot guarantee bitwise replay when kernels are stochastic, providers revise hidden components, or state is unavailable (**D**, CLM-012).
+A replay manifest records:
+- resolved endpoint/model and harness/adapter versions;
+- canonical and effective requests;
+- prompt/tool/schema IDs;
+- sampling/stopping settings, seed if supported;
+- timestamps and raw events;
+- normalized output and validation results;
+- attempts, usage, and terminal status.
+
+This supports diagnosis but cannot guarantee bitwise replay when (**D**, CLM-012):
+- kernels are stochastic;
+- providers revise hidden components;
+- state is unavailable.
 
 **Quantitative Model / Derivation:**
 For sequential attempts:
 
 $$
 L_{e2e}=L_{pre}+\sum_{i=1}^{N}
-(L_{serialize,i}+L_{queue/connect,i}+L_{stream,i}+L_{validate/repair,i}+L_{backoff,i}).
+\left(L_{ser,i}+L_{q,i}+L_{str,i}+L_{val,i}+L_{bo,i}\right).
 $$
 
-where: $L_{e2e}$ is the end-to-end latency of one root request; $L_{pre}$ is the one-time work before the first attempt; $N$ is the number of attempts for this root request, indexed by $i$; each $L_{\ldots,i}$ term is the time attempt $i$ spends serializing, waiting for queue/connection, streaming, validating or repairing, and backing off before the next attempt. The plain sum is valid only because the attempts run one after another.
+where:
+- $L_{e2e}$ — end-to-end latency of one root request (ms).
+- $L_{pre}$ — one-time work before the first attempt (ms).
+- $N$ — number of attempts for this root request, indexed by $i$.
+- $L_{ser,i}$ — time attempt $i$ spends serializing (ms).
+- $L_{q,i}$ — time waiting for queue/connection (ms).
+- $L_{str,i}$ — time streaming (ms).
+- $L_{val,i}$ — time validating or repairing (ms).
+- $L_{bo,i}$ — backoff before the next attempt (ms).
 
-Use the critical path for overlapping work. For example, if two fallback probes run concurrently and take 300 ms and 500 ms, the caller waits about 500 ms (the longer branch), not 800 ms. Tokens and cost, by contrast, are paid on every branch. Sum tokens and cost across every attempt. Track:
+The plain sum is valid only because the attempts run one after another.
+
+Use the critical path for overlapping work.
+- Example: two fallback probes run concurrently and take 300 ms and 500 ms; the caller waits about 500 ms (the longer branch), not 800 ms.
+- Tokens and cost, by contrast, are paid on every branch. Sum tokens and cost across every attempt.
+
+Track:
 
 $$
-A=\frac{N_{attempts}}{N_{root\ requests}},\qquad
-A_{tok}=\frac{T_{all\ attempts}}{T_{final\ accepted}}.
+A=\frac{N_{att}}{N_{root}},\qquad
+A_{tok}=\frac{T_{all}}{T_{acc}}.
 $$
 
 State denominator policy when no output is accepted. These ratios measure amplification, not quality (**D**, CLM-013).
 
-where: $N_{attempts}$ is the total number of attempts across all root requests in the window; $N_{root\ requests}$ is the number of root (user-level) requests, successful or not; $T_{all\ attempts}$ is tokens summed over every attempt; $T_{final\ accepted}$ is tokens of only the attempts whose output was accepted. $A=1$ and $A_{tok}=1$ mean no amplification. This $A$ is unrelated to the adapter $A_p$ of Lesson 13.1, and $N_{attempts}$ is a window total, while $N$ in $L_{e2e}$ is one request's count.
+where:
+- $N_{att}$ — total number of attempts across all root requests in the window.
+- $N_{root}$ — number of root (user-level) requests, successful or not.
+- $T_{all}$ — tokens summed over every attempt.
+- $T_{acc}$ — tokens of only the final attempts whose output was accepted.
+- $A=1$ and $A_{tok}=1$ mean no amplification (both dimensionless).
+- This $A$ is unrelated to the adapter $A_p$ of Lesson 13.1. $N_{att}$ is a window total, while $N$ in $L_{e2e}$ is one request's count.
 
-The wasted share of tokens follows directly: $1-T_{final\ accepted}/T_{all\ attempts}=1-1/A_{tok}$.
+The wasted share of tokens follows directly: $1-T_{acc}/T_{all}=1-1/A_{tok}$.
 
-Run conformance fixtures for canonical requests, schema vocabulary, stream splitting, errors, cancellation, usage, and raw-versus-normalized preservation. The claim that such probes catch adapter drift earlier is a hypothesis (**H**, CLM-017): compare time-to-detection and user-impacting failures against outcome-only monitoring.
+Run conformance fixtures for canonical requests, schema vocabulary, stream splitting, errors, cancellation, usage, and raw-versus-normalized preservation.
+
+- The claim that such probes catch adapter drift earlier is a hypothesis (**H**, CLM-017): compare time-to-detection and user-impacting failures against outcome-only monitoring.
 
 **Worked Example (synthetic fixture):**
 *Input.* Two root requests with one and three attempts. All attempts together consume 2,400 tokens; the final accepted attempts consume 800.
-*Steps.* $A=(1+3)/2$. $A_{tok}=2{,}400/800$.
+*Steps.*
+- $A=(1+3)/2$.
+- $A_{tok}=2{,}400/800$.
+
 *Result.* $A=2$ attempts per root request and $A_{tok}=3$.
-*Interpretation and limits.* Two thirds of the tokens bought nothing that was accepted: $1-1/A_{tok}=1-1/3=2/3$, i.e. 1,600 of 2,400 tokens. If a root request has no accepted output, its tokens stay in the numerator and the report must say how the denominator was handled; dropping the request hides the worst cases.
+
+*Interpretation and limits.*
+- Two thirds of the tokens bought nothing that was accepted: $1-1/A_{tok}=1-1/3=2/3$, i.e. 1,600 of 2,400 tokens.
+- If a root request has no accepted output, its tokens stay in the numerator and the report must say how the denominator was handled; dropping the request hides the worst cases.
 
 **Knowledge Check:**
 1. Why can a complete manifest still fail to reproduce identical tokens?
 2. Which latency formula applies to overlapping fallback probes?
 
 **Independent Practice:**
-(a) Three root requests use 1, 2, and 4 attempts and 5,600 tokens in total. Two requests end with an accepted output, and those accepted attempts used 1,400 tokens; the third exhausts its budget with nothing accepted. Report $A$, $A_{tok}$, and the zero-accepted count. (b) Change one serializer, adapter, schema subset, endpoint, and event shape at a time; use raw/effective diffs and fixtures to rank the failing boundary.
+(a) Report $A$, $A_{tok}$, and the zero-accepted count for:
+- three root requests using 1, 2, and 4 attempts and 5,600 tokens in total;
+- two requests ending with an accepted output, those accepted attempts using 1,400 tokens;
+- the third exhausting its budget with nothing accepted.
+
+(b) Change one serializer, adapter, schema subset, endpoint, and event shape at a time; use raw/effective diffs and fixtures to rank the failing boundary.
 
 **Feedback Contract:**
-- *Expected Evidence*: (a) $A=7/3\approx2.33$; $A_{tok}=5{,}600/1{,}400=4$; one of three root requests has no accepted output and is reported, not dropped. (b) Complete attempts, raw and normalized data, critical-path timing, all-attempt usage/cost, and a bounded reproducibility claim.
+- *Expected Evidence*:
+  - (a) $A=7/3\approx2.33$; $A_{tok}=5{,}600/1{,}400=4$; one of three root requests has no accepted output and is reported, not dropped.
+  - (b) Complete attempts, raw and normalized data, critical-path timing, all-attempt usage/cost, and a bounded reproducibility claim.
 - *Common Failure*: Keeping only the final accepted response, or computing $A$ over the two successful requests only ($3/2$).
 - *Diagnostic Hint*: What is the earliest representation that differs? Which requests left the denominator?
 - *Concept to Revisit*: Replay Manifest and Attempt Ledger.
@@ -664,13 +1019,33 @@ These items follow from stated assumptions (**D**, CLM-001, CLM-002, CLM-004, CL
 
 **FRONTIER** (each scoped to what was read)
 
-- [JSONSchemaBench](https://arxiv.org/abs/2501.10868) — arXiv v3, 2025-02-27. Abstract-level, opened 2026-10-01. It evaluates efficiency, coverage of constraint types, and output quality on about 10K real-world schemas plus the official JSON Schema Test Suite, across six constrained-decoding frameworks (**O**, CLM-008). No result figure from it is used in this module.
-- [XGrammar-2](https://blog.mlc.ai/2026/05/04/xgrammar-2-fast-customizable-structured-generation) — maintainer blog, 2026-05-04. Opened 2026-10-01. Structural tags for mixed free-form/structured protocols, batch APIs, and speculative-decoding integration (**O**, CLM-016). Maintainer-reported; not reproduced; its adoption is unknown.
-- [When Punctuation Matters](https://aclanthology.org/2025.findings-emnlp.1109/) — Seleznyov et al., Findings of EMNLP 2025. Abstract-level, opened 2026-10-01. A comparison of prompt-robustness methods on eight models from three open model families over 52 Natural Instructions tasks (**O**, CLM-003). This is the only prompt-robustness source behind the earlier phrase "2025–2026 prompt-robustness methods"; no 2026 source on that topic was opened (`TODO_VERIFY`, CLM-020).
+- [JSONSchemaBench](https://arxiv.org/abs/2501.10868) — arXiv v3, 2025-02-27.
+  - Abstract-level, opened 2026-10-01.
+  - It evaluates efficiency, coverage of constraint types, and output quality on about 10K real-world schemas plus the official JSON Schema Test Suite, across six constrained-decoding frameworks (**O**, CLM-008).
+  - No result figure from it is used in this module.
+- [XGrammar-2](https://blog.mlc.ai/2026/05/04/xgrammar-2-fast-customizable-structured-generation) — maintainer blog, 2026-05-04.
+  - Opened 2026-10-01.
+  - Structural tags for mixed free-form/structured protocols, batch APIs, and speculative-decoding integration (**O**, CLM-016).
+  - Maintainer-reported
+  - not reproduced
+  - its adoption is unknown.
+- [When Punctuation Matters](https://aclanthology.org/2025.findings-emnlp.1109/) — Seleznyov et al., Findings of EMNLP 2025.
+  - Abstract-level, opened 2026-10-01.
+  - A comparison of prompt-robustness methods on eight models from three open model families over 52 Natural Instructions tasks (**O**, CLM-003).
+  - This is the only prompt-robustness source behind the earlier phrase "2025–2026 prompt-robustness methods"
+  - no 2026 source on that topic was opened (`TODO_VERIFY`, CLM-020).
 
 None of these establishes universal portability or zero overhead.
 
-**LEGACY / INSUFFICIENT:** concatenate strings into a prompt; parse JSON with regex; trust “JSON mode” as schema or semantic correctness; assume OpenAI-shaped endpoints are semantically identical; parse every stream chunk independently; retry all exceptions; record only the final accepted response; treat a seed as deterministic replay.
+**LEGACY / INSUFFICIENT:**
+- concatenate strings into a prompt;
+- parse JSON with regex;
+- trust “JSON mode” as schema or semantic correctness;
+- assume OpenAI-shaped endpoints are semantically identical;
+- parse every stream chunk independently;
+- retry all exceptions;
+- record only the final accepted response;
+- treat a seed as deterministic replay.
 
 **PRODUCTION SOURCE TRACE**
 
@@ -679,7 +1054,10 @@ None of these establishes universal portability or zero overhead.
 - Verified: 2026-09-26; the three files and the symbols below were re-read at this revision on 2026-10-01. Static inspection only on both dates.
 - Files/symbols: `python/xgrammar/compiler.py::GrammarCompiler.compile_json_schema`, `python/xgrammar/matcher.py::{GrammarMatcher.fill_next_token_bitmask,GrammarMatcher.accept_token}`, and `python/xgrammar/contrib/hf.py::LogitsProcessor.__call__`.
 - Execution path: schema + tokenizer information → compiled grammar → matcher state → valid-next-token bitmask → logits masking → sampled token → matcher advance.
-- Observed in the re-read: each of the three Python methods delegates to a native handle (`self._handle.…`); `fill_next_token_bitmask` is documented as not changing matcher state; `LogitsProcessor.__call__` creates one matcher per batch row on first use, skips acceptance on the first call, and moves scores to CPU for masking when the device is not CUDA.
+- Observed in the re-read:
+  - each of the three Python methods delegates to a native handle (`self._handle.…`);
+  - `fill_next_token_bitmask` is documented as not changing matcher state;
+  - `LogitsProcessor.__call__` creates one matcher per batch row on first use, skips acceptance on the first call, and moves scores to CPU for masking when the device is not CUDA.
 - Scope: one pinned implementation (**O**, CLM-015). It is not proof of every schema feature, of any hosted provider, of semantic output, or of any benchmark speed. The native compiler and matcher behind the handles were not read.
 
 ### LAYER 2: ENGINEERING PRACTICE LAYER
@@ -726,7 +1104,9 @@ All labs follow `PREDICT → BUILD → MEASURE → EXPLAIN → BREAK → IMPROVE
 - **Independent Variables**: Chunking/order, event fault, error class, timeout, retry/fallback policy, and consumer speed.
 - **Dependent Variables**: Assembly agreement, terminal-state correctness, attempts, latency, tokens/cost, and unsafe success.
 
-- Replay identical logical responses under chunk splits, including fragmented Unicode and parallel tool arguments. Enumerate all $2^{n-1}$ partitions only for fixtures of about 16 bytes or fewer. For larger streams run all single cuts, all double cuts where affordable, one byte per chunk, and seeded random partitions.
+- Replay identical logical responses under chunk splits, including fragmented Unicode and parallel tool arguments.
+  - Enumerate all $2^{n-1}$ partitions only for fixtures of about 16 bytes or fewer.
+  - For larger streams run all single cuts, all double cuts where affordable, one byte per chunk, and seeded random partitions.
 - Separately vary how the same arguments are cut into deltas (delta-boundary invariance), and interleave two tool calls to show that fragments are never merged across keys.
 - Inject missing terminal events, duplicate/out-of-order events, disconnect, cancellation race, 429/5xx, timeout, truncation, refusal, invalid schema, and semantic failure.
 - Verify typed terminal states, stable assembly, absolute deadlines, shared attempt budgets, no nested retry multiplication, and compatible fallback only.
@@ -754,7 +1134,27 @@ All labs follow `PREDICT → BUILD → MEASURE → EXPLAIN → BREAK → IMPROVE
 
 ### Incident 13.1 — A “Compatible” Provider Migration Corrupts Tool Calls
 
-- **Incident Symptoms**: A new endpoint passes smoke tests and lowers median latency, but streamed tool arguments intermittently fail parsing; retries amplify cost; fallback changes semantics; refusals become empty successes; usage disappears; and dashboards retain only final successes.
+- **Incident Symptoms**: A new endpoint passes smoke tests and lowers median latency, but:
+  - streamed tool arguments intermittently fail parsing;
+  - retries amplify cost;
+  - fallback changes semantics;
+  - refusals become empty successes;
+  - usage disappears;
+  - dashboards retain only final successes.
+
+```mermaid
+flowchart LR
+    MIG["migration to<br/>compatible endpoint"] --> AS["stream assembly /<br/>schema / serializer drift"]
+    AS --> PF["tool-argument<br/>parse failures"]
+    PF --> RT["nested retries"] --> COST["cost amplification"]
+    PF --> FB["fallback"] --> SEM["changed semantics"]
+    MIG --> NORM["error normalization"] --> EMPTY["refusal → empty success<br/>usage missing"]
+    COST --> DASH["dashboards keep<br/>only final successes"]
+    SEM --> DASH
+    EMPTY --> DASH
+```
+
+- Candidate causal paths only, drawn from the symptom list and hypotheses below; the diagnosis must confirm or reject each edge.
 - **Diagnostic Protocol (Task)**:
   1. *Formulate Competing Hypotheses*: Serializer drift, unsupported schema features, strictness/`format` differences, chunk assembly, tool-call identity, truncation, error normalization, nested retries, incompatible fallback, model drift, or survivorship bias.
   2. *Rank Initial Plausibility*: Use raw-event and effective-request differences without assuming the provider alone is causal.
@@ -796,10 +1196,22 @@ Submit a pinned trace of a constrained-decoding implementation. The reference tr
 
 ### Rubric Dimensions
 
-- **Boundary and Portability**: *Insufficient* records one SDK object. *Competent* separates canonical/effective/raw/normalized forms and probes capabilities. *Strong* demonstrates drift localization and explicit degradation.
-- **Structure and Streaming**: *Insufficient* equates JSON with correctness, validates a buffer because it parses, or merges fragments of different tool calls. *Competent* pins dialect/subset, names the first failing stage for each fixture, and implements terminal-aware assembly keyed by call identity. *Strong* shows chunk invariance exhaustively on small fixtures, reports sampled coverage honestly on large ones, and keeps layered validation correct under faults.
-- **Recovery and Accounting**: *Insufficient* retries errors independently. *Competent* shares deadlines/budgets and records every attempt. *Strong* quantifies amplification and rejects incompatible fallback.
-- **Diagnosis and Source Trace**: *Insufficient* blames a provider from symptoms. *Competent* traces a pinned path and compares raw/effective evidence. *Strong* uses discriminating replays, oracle stages, and remeasurement.
+- **Boundary and Portability**:
+  - *Insufficient* records one SDK object.
+  - *Competent* separates canonical/effective/raw/normalized forms and probes capabilities.
+  - *Strong* demonstrates drift localization and explicit degradation.
+- **Structure and Streaming**:
+  - *Insufficient* equates JSON with correctness, validates a buffer because it parses, or merges fragments of different tool calls.
+  - *Competent* pins dialect/subset, names the first failing stage for each fixture, and implements terminal-aware assembly keyed by call identity.
+  - *Strong* shows chunk invariance exhaustively on small fixtures, reports sampled coverage honestly on large ones, and keeps layered validation correct under faults.
+- **Recovery and Accounting**:
+  - *Insufficient* retries errors independently.
+  - *Competent* shares deadlines/budgets and records every attempt.
+  - *Strong* quantifies amplification and rejects incompatible fallback.
+- **Diagnosis and Source Trace**:
+  - *Insufficient* blames a provider from symptoms.
+  - *Competent* traces a pinned path and compares raw/effective evidence.
+  - *Strong* uses discriminating replays, oracle stages, and remeasurement.
 
 ## 10 Capability Traceability Matrix
 

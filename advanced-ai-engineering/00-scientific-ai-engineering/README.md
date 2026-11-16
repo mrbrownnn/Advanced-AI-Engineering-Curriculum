@@ -11,7 +11,10 @@ The goal is not to turn every engineer into a statistician. The goal is to make 
 - **Engineering Problem**: Decide whether a measured change is real, practically important, and likely to transfer to the intended workload.
 - **What You Will Do**: Build a timestamped benchmark harness, expose warmup and order bias, compare randomized paired treatments, quantify uncertainty without overstating it, break a load generator with coordinated omission, trace MLPerf LoadGen, and package a repeatable artifact.
 - **Environment**: Python 3.10+ for harness and analysis work; a GPU is optional. Hardware-specific experiments must record the accelerator, driver, runtime, clocks/power policy, and isolation state.
-- **Research Cutoff**: evidence registry 2026-09-25; WP-F1 review 2026-09-30 re-read the pinned LoadGen completion and percentile code (CLM-014) and re-checked the presence of the other pinned symbols. Canonical statistical methods remain relevant; implementation claims remain pinned to the revisions in §05.
+- **Research Cutoff**:
+  - Evidence registry: 2026-09-25.
+  - WP-F1 review 2026-09-30: re-read the pinned LoadGen completion and percentile code (CLM-014); re-checked presence of the other pinned symbols.
+  - Canonical statistical methods remain relevant; implementation claims remain pinned to the revisions in §05.
 - **If You Only Have One Week**: Lessons 0.1, 0.3, 0.5 — they define what is being claimed, what the true experimental unit is, and whether a measured difference is real and practically important; harness mechanics, distributions, provenance, and falsification build on those three.
 
 ## 01 Baseline Assumptions
@@ -62,27 +65,36 @@ estimated_effort:
 
 ## 03 Knowledge Map
 
-```text
-Decision and target population
-        ↓
-Atomic claim + practical threshold
-        ↓
-Measurand, unit, boundary, success/failure semantics
-        ↓
-Workload + treatment + controls + experimental unit
-        ↓
-Randomized/blocked execution with state and provenance capture
-        ↓
-Raw event-level observations, failures, censoring, and metadata
-        ↓
-Estimator + uncertainty model + assumption checks
-        ↓
-Competing explanations + discriminating intervention
-        ↓
-Decision, rollback rule, and same-boundary remeasurement
+```mermaid
+flowchart TD
+    S1["<b>1. Decision and target population</b>"]
+    S2["<b>2. Atomic claim</b><br/>+ practical threshold"]
+    S3["<b>3. Measurand</b><br/>unit · boundary · success/failure semantics"]
+    S4["<b>4. Workload</b><br/>+ treatment + controls + experimental unit"]
+    S5["<b>5. Randomized/blocked execution</b><br/>with state and provenance capture"]
+    S6["<b>6. Raw event-level observations</b><br/>failures · censoring · metadata"]
+    S7["<b>7. Estimator</b><br/>+ uncertainty model + assumption checks"]
+    S8["<b>8. Competing explanations</b><br/>+ discriminating intervention"]
+    S9["<b>9. Decision</b><br/>rollback rule · same-boundary remeasurement"]
+    S1 --> S2 --> S3 --> S4 --> S5 --> S6 --> S7 --> S8 --> S9
 ```
 
-Feedback paths matter. A slow trial can heat the device, change frequency, grow a queue, alter caching, or cause a response-coupled load generator to issue fewer requests. The measurement process can therefore change the state it intends to observe. Treat those paths as hypotheses and instrument them.
+Feedback paths matter: the measurement process can change the state it intends to observe. Treat those paths as hypotheses and instrument them.
+
+```mermaid
+flowchart LR
+    T["Slow trial"] --> H["Device heats"]
+    T --> F["Frequency changes"]
+    H --> M["Measured state ≠ intended state"]
+    F --> M
+    T --> Q["Queue grows"]
+    T --> C["Caching altered"]
+    T --> G["Response-coupled generator<br/>issues fewer requests"]
+    F --> M
+    Q --> M
+    C --> M
+    G --> M
+```
 
 ## 04 Lessons
 
@@ -105,11 +117,23 @@ Define:
 - success, timeout, cancellation, retry, and exclusion semantics;
 - practical threshold that would change the decision.
 
-Keep O, D, and H separate (**D**, CLM-013). A paper's measured speedup is O. A FLOP or memory equation is D. “The speedup came from higher cache hit rate” is H until aligned telemetry and an intervention support it. A statistically detectable effect is not yet a decision: it must be compared with a practical threshold (**O**, CLM-012).
+Keep O, D, and H separate (**D**, CLM-013):
+
+- A paper's measured speedup is O.
+- A FLOP or memory equation is D.
+- “The speedup came from higher cache hit rate” is H until aligned telemetry and an intervention support it.
+
+A statistically detectable effect is not yet a decision: it must be compared with a practical threshold (**O**, CLM-012).
 
 **Worked Example (synthetic instantiation):**
 - *Input*: the vague claim “runtime B is faster than A.”
-- *Steps*: (1) population: requests replayed from support-chat trace version W3; (2) load: open-loop arrivals at 8 requests/s; (3) boundary: client send to last byte received; (4) estimand: difference in P95 end-to-end latency over all issued requests, nearest-rank convention, timeouts counted at the 10 s timeout value; (5) guard conditions: failure rate not higher by more than 0.2 percentage points and the declared quality check unchanged; (6) practical threshold: adopt B only if P95 falls by at least 10%.
+- *Steps*:
+  1. Population: requests replayed from support-chat trace version W3.
+  2. Load: open-loop arrivals at 8 requests/s.
+  3. Boundary: client send to last byte received.
+  4. Estimand: difference in P95 end-to-end latency over all issued requests, nearest-rank convention, timeouts counted at the 10 s timeout value.
+  5. Guard conditions: failure rate not higher by more than 0.2 percentage points and the declared quality check unchanged.
+  6. Practical threshold: adopt B only if P95 falls by at least 10%.
 - *Result*: “For W3 at 8 requests/s open-loop, B changes client-observed P95 end-to-end latency relative to A by at least −10% with failure and quality guards satisfied” is one atomic, falsifiable claim. Its status is H until measured, and it becomes O for this setup only.
 - *Interpretation / limits*: none of the six choices is universal. A different load model or timeout treatment defines a different estimand, and a result for W3 says nothing about other workloads without new evidence.
 
@@ -145,39 +169,79 @@ Keep O, D, and H separate (**D**, CLM-013). A paper's measured speedup is O. A F
 
 A harness should make its lifecycle observable:
 
-1. pin code, data, configuration, dependencies, and hardware identity;
-2. initialize the system and record initialization separately;
-3. warm to a declared state or intentionally measure cold start;
-4. schedule work according to a declared arrival model;
-5. synchronize asynchronous execution at the observation boundary;
-6. record intended issue, actual issue, start, completion, failure, and cancellation events;
-7. preserve raw event data before aggregation.
+```mermaid
+flowchart LR
+    P["1. Pin<br/>code · data · config<br/>dependencies · hardware identity"] --> I["2. Initialize<br/>(recorded separately)"]
+    I --> W["3. Warm to declared state<br/>or measure cold start"]
+    W --> S["4. Schedule per<br/>declared arrival model"]
+    S --> Y["5. Synchronize async work<br/>at observation boundary"]
+    Y --> R["6. Record events"]
+    R --> K["7. Preserve raw events<br/>before aggregation"]
+```
+
+- Step 6 events: intended issue, actual issue, start, completion, failure, cancellation.
 
 **Quantitative Model / Derivation:**
 For one observation, the measured interval is
 
 $$Y_i=t_{end,i}-t_{start,i}.$$
 
-where: $i$ indexes one observation (e.g., one request); $t_{start,i}$ and $t_{end,i}$ are the timestamps of the two declared boundary events, read from the *same* clock; $Y_i$ is the measured interval in that clock's units. Changing which events $t_{start,i}$ and $t_{end,i}$ denote changes the measurand, as the worked example below shows.
+where:
+- $i$ indexes one observation (e.g., one request);
+- $t_{start,i}$, $t_{end,i}$ are timestamps of the two declared boundary events, read from the *same* clock (clock units, e.g. ms);
+- $Y_i$ is the measured interval, in that clock's units.
 
-This identity is exact only for the declared clocks and boundaries. It does not prove that $Y_i$ is GPU execution time, user-visible latency, or service time. Timer resolution, clock domain, asynchronous queues, batching, buffering, and instrumentation overhead can change the meaning.
+Changing which events $t_{start,i}$ and $t_{end,i}$ denote changes the measurand, as the worked example below shows.
 
-**Warmup is part of the question.** Cold-start and steady-state performance are different estimands. Do not discard early samples merely because they are slower; declare which state matters and report transition behavior when it matters operationally.
+This identity is exact only for the declared clocks and boundaries:
+
+- It does not prove that $Y_i$ is GPU execution time, user-visible latency, or service time.
+- Timer resolution, clock domain, asynchronous queues, batching, buffering, and instrumentation overhead can change the meaning.
+
+**Warmup is part of the question.**
+
+- Cold-start and steady-state performance are different estimands.
+- Do not discard early samples merely because they are slower.
+- Declare which state matters; report transition behavior when it matters operationally.
 
 **Coordinated omission:** If the generator waits for a response before issuing the next intended request, a long stall suppresses arrivals and therefore suppresses latency samples (**O**, CLM-009). Record an independent intended-arrival schedule when the production question assumes arrivals independent of completions.
 
+```mermaid
+sequenceDiagram
+    participant G as Response-coupled generator
+    participant S as System
+    G->>S: request 1
+    Note over S: long stall
+    S-->>G: response 1 (slow)
+    Note over G: intended requests during stall<br/>never issued → no latency samples
+    G->>S: request 2 (issued late)
+```
+
 **Worked Example (synthetic timestamps, one synchronized clock):**
 - *Input*: intended issue 0 ms; actual issue 20 ms; server receives 22 ms; device work 35–45 ms; server sends 55 ms; client receives 60 ms.
-- *Steps*: issue lag $=20-0=20$ ms; latency from intended arrival $=60-0=60$ ms; latency from actual issue $=60-20=40$ ms; server residence $=55-22=33$ ms; device time $=45-35=10$ ms.
+- *Steps*:
+  - Issue lag: $20 - 0 = 20$ ms.
+  - Latency from intended arrival: $60 - 0 = 60$ ms.
+  - Latency from actual issue: $60 - 20 = 40$ ms.
+  - Server residence: $55 - 22 = 33$ ms.
+  - Device time: $45 - 35 = 10$ ms.
 - *Result*: five different numbers from one request: 20, 60, 40, 33, and 10 ms.
-- *Interpretation / limits*: a response-coupled generator would report 40 ms and hide the 20 ms the request waited to be issued. Reporting the 10 ms device interval as “latency” omits 50 ms of what the user experienced. If client and server clocks are not synchronized, the 33 ms and 10 ms intervals remain valid within their own clocks, but cross-clock differences do not.
+- *Interpretation / limits*:
+  - A response-coupled generator would report 40 ms and hide the 20 ms the request waited to be issued.
+  - Reporting the 10 ms device interval as “latency” omits 50 ms of what the user experienced.
+  - If client and server clocks are not synchronized, the 33 ms and 10 ms intervals remain valid within their own clocks, but cross-clock differences do not.
 
 **Knowledge Check:** Why can a host timer around an asynchronous launch understate execution time, and which event reveals coordinated omission?
 
 **Guided Practice:** Draw timestamp boundaries for client-observed latency, server residence, device execution, and post-processing. Identify which pairs of timestamps share a clock.
 
 **Feedback Contract:**
-- *Expected Evidence*: a timeline with every event, its clock, and the four named intervals; which timestamp pairs share a clock; the inclusion rule for failures and cancellations; intended and actual issue recorded separately. Knowledge check: an asynchronous launch returns before completion, and a growing intended-minus-actual issue lag reveals coordinated omission.
+- *Expected Evidence*:
+  - a timeline with every event, its clock, and the four named intervals;
+  - which timestamp pairs share a clock;
+  - the inclusion rule for failures and cancellations;
+  - intended and actual issue recorded separately.
+  - Knowledge check: an asynchronous launch returns before completion, and a growing intended-minus-actual issue lag reveals coordinated omission.
 - *Common Failure*: subtracting timestamps from different clocks, or measuring from actual issue in a response-coupled loop.
 - *Diagnostic Hint*: during an injected 2-second stall, how many requests did your generator intend to issue, and how many latency samples did it record?
 - *Concept to Revisit*: measurement boundaries and coordinated omission.
@@ -194,7 +258,12 @@ This identity is exact only for the declared clocks and boundaries. It does not 
 
 **Concepts & Definitions:**
 
-The **experimental unit** is the smallest unit independently assigned to a treatment. Ten thousand requests inside one process are not ten thousand independent process-level replications (**O**, CLM-004). Setup details that look irrelevant can bias or even reverse a comparison (**O**, CLM-002), which is why treatments are randomized within blocks of comparable nuisance conditions (**O**, CLM-003). Generalization across seeds, model loads, machines, or days requires repetition at those levels.
+The **experimental unit** is the smallest unit independently assigned to a treatment.
+
+- Ten thousand requests inside one process are not ten thousand independent process-level replications (**O**, CLM-004).
+- Setup details that look irrelevant can bias or even reverse a comparison (**O**, CLM-002).
+- Hence treatments are randomized within blocks of comparable nuisance conditions (**O**, CLM-003).
+- Generalization across seeds, model loads, machines, or days requires repetition at those levels.
 
 Use:
 
@@ -208,34 +277,59 @@ For paired block differences $d_i=Y_{B,i}-Y_{A,i}$:
 
 $$\bar d=\frac{1}{n}\sum_i d_i,\qquad SE(\bar d)=\frac{s_d}{\sqrt n}.$$
 
+where:
+- $i$ indexes independent blocks; $n$ is their number (count);
+- $d_i=Y_{B,i}-Y_{A,i}$ is the paired difference in block $i$ (measurement units, e.g. ms);
+- $Y_{A,i}$, $Y_{B,i}$ are baseline A and treatment B block-level results (same units);
+- $\bar d$ is the mean paired difference (same units);
+- $s_d$ is the sample standard deviation of paired differences (same units);
+- $SE(\bar d)$ is the standard error of $\bar d$ (same units).
+
 An approximate classical interval is
 
 $$\bar d\pm t_{1-\alpha/2,n-1}\frac{s_d}{\sqrt n},$$
 
-under the stated independence and distribution assumptions for the block-level differences.
-
 where:
-- $i=1,\dots,n$ indexes blocks, and $n$ is the number of independent blocks (not requests);
+- $i=1,\dots,n$ indexes blocks; $n$ is their number (count, not requests).
+- $d_i=Y_{B,i}-Y_{A,i}$ is the paired difference (measurement units, e.g. ms);
 - $Y_{A,i}$, $Y_{B,i}$ are the block-level results (e.g., block mean latency) for baseline A and treatment B in block $i$;
 - $\bar d$ is the mean paired difference; a positive $\bar d$ means B is larger (slower, for latency);
 - $s_d=\sqrt{\frac{1}{n-1}\sum_i (d_i-\bar d)^2}$ is the sample standard deviation of the differences ($n-1$ in the denominator);
 - $SE(\bar d)$ is the standard error of $\bar d$;
-- $\alpha$ is one minus the confidence level ($\alpha=0.05$ for 95%), and $t_{1-\alpha/2,n-1}$ is the $1-\alpha/2$ quantile of Student's t distribution with $n-1$ degrees of freedom.
+- $\alpha$ is one minus the confidence level ($\alpha=0.05$ for 95%), and $t_{1-\alpha/2,n-1}$ is the $1-\alpha/2$ quantile of Student's t distribution with $n-1$ degrees of freedom (both $\alpha$ and the quantile are dimensionless).
+
+The interval assumes independence and the stated distribution model for block-level differences.
 
 Why pairing helps: the nuisance level shared by A and B inside block $i$ appears in both $Y_{A,i}$ and $Y_{B,i}$, so it cancels in $d_i$. The interval is then built from the spread of the differences, $s_d$, rather than from the larger block-to-block spread of the raw results.
 
 **Worked Example (synthetic differences):**
 - *Input*: four independent fresh-process blocks, each running A and B in random order, give paired differences $d=[1.2,0.9,1.1,0.8]$ ms.
-- *Steps*: $\bar d=4.0/4=1.0$ ms; squared deviations $0.04+0.01+0.01+0.04=0.10$, so $s_d=\sqrt{0.10/3}\approx0.183$ ms; $SE=0.183/\sqrt4\approx0.091$ ms; $t_{0.975,3}=3.182$.
+- *Steps*:
+  - Mean: $\bar d = 4.0/4 = 1.0$ ms.
+  - Squared deviations: $0.04 + 0.01 + 0.01 + 0.04 = 0.10$.
+  - Standard deviation: $s_d = \sqrt{0.10/3} \approx 0.183$ ms.
+  - Standard error: $SE = 0.183/\sqrt{4} \approx 0.091$ ms.
+  - Critical value: $t_{0.975,3} = 3.182$.
 - *Result*: $1.0\pm3.182\times0.091=[0.71,1.29]$ ms.
-- *Interpretation / limits*: the interval excludes zero under the model, but $n=4$ is the number of blocks, not the number of requests inside them, and four blocks on one machine on one day say little about other machines or days. If each block had instead been 10,000 requests from a single process, using $n=40{,}000$ would shrink the interval by more than 100-fold without adding any process-level evidence.
+- *Interpretation / limits*:
+  - The interval excludes zero under the model.
+  - $n=4$ is the number of blocks, not the number of requests inside them.
+  - Four blocks on one machine on one day say little about other machines or days.
+  - If each block had instead been 10,000 requests from a single process, using $n=40{,}000$ would shrink the interval by more than 100-fold without adding any process-level evidence.
 
 **Knowledge Check:** Why are many requests in one process not necessarily independent process replications, and when is pairing invalid?
 
 **Independent Practice:** Run A then B repeatedly without randomized order; then randomize order within fresh-process blocks and compare conclusions. CPU/GPU temperature, frequency, caches, allocator state, and background work can become treatment labels.
 
 **Feedback Contract:**
-- *Expected Evidence*: the assignment unit and why it is independent; the block factor; the randomization record (seed and realized order); paired differences; a carryover check (A-then-B versus B-then-A); and the population the result can transfer to. In the fixed-order run, the learner shows how drift is attributed to the treatment.
+- *Expected Evidence*:
+  - the assignment unit and why it is independent;
+  - the block factor;
+  - the randomization record (seed and realized order);
+  - paired differences;
+  - a carryover check (A-then-B versus B-then-A);
+  - the population the result can transfer to.
+  - In the fixed-order run, the learner shows how drift is attributed to the treatment.
 - *Common Failure*: computing $s/\sqrt n$ with $n$ equal to the number of requests when treatments were assigned per process.
 - *Diagnostic Hint*: what was randomly assigned—requests, processes, or machines? That is your $n$.
 - *Concept to Revisit*: experimental unit and pseudoreplication.
@@ -265,13 +359,22 @@ For an independent event with probability $q$, the chance of observing it at lea
 
 $$P(\text{at least one})=1-(1-q)^n.$$
 
+where:
+- $P$ is probability of observing at least one event (dimensionless);
+- $q$ is per-trial event probability (dimensionless);
+- $n$ is number of independent trials (count).
+
 If $q=0.01$, achieving a 95% chance of seeing at least one such event requires
 
 $$n\ge\frac{\ln(0.05)}{\ln(0.99)},$$
 
-so $n=299$ after rounding upward ($\ln0.05/\ln0.99=298.07$).
+where:
+- $q$ is the per-trial probability of the event (here, landing in the slowest 1%; dimensionless);
+- $n$ is the number of independent trials (count);
+- $(1-q)^n$ is the probability that all $n$ trials miss the event;
+- $\ln$ is the natural logarithm.
 
-where: $q$ is the per-trial probability of the event (here, landing in the slowest 1%); $n$ is the number of independent trials; $(1-q)^n$ is the probability that all $n$ trials miss the event.
+Thus $n=299$ after rounding upward ($\ln0.05/\ln0.99=298.07$).
 
 *Step-by-step*:
 1. Require $1-(1-q)^n\ge0.95$, i.e. $(1-q)^n\le0.05$.
@@ -285,18 +388,31 @@ This is only an exposure check (**D**, CLM-007). It does not produce a precise c
 **Worked Example (synthetic run; nearest-rank quantile, rank $=\lceil qn\rceil$):**
 - *Convention*: sort the $n$ observations ascending; the nearest-rank $q$-quantile is the observation at 1-based rank $\lceil qn\rceil$ (round $qn$ up to an integer). Here $q$ is the quantile level (0.95 for P95), not the event probability of the previous formula.
 - *Input*: 100 issued requests: 94 successes and 6 timeouts at a 2,000 ms timeout. Among the successes, the 90th smallest latency is 240 ms.
-- *Steps*: success-only P95 uses $n=94$: rank $\lceil0.95\times94\rceil=90$, so 240 ms. All-issued P95 uses $n=100$ with timeouts ordered last: rank 95 falls among the 6 timeouts (ranks 95–100).
+- *Steps*:
+  - Success-only P95: $n = 94$, rank $\lceil 0.95 \times 94 \rceil = 90$, so 240 ms.
+  - All-issued P95: $n = 100$ with timeouts ordered last; rank 95 falls among the 6 timeouts (ranks 95–100).
 - *Result*: success-only P95 $=240$ ms; all-issued P95 $\ge2{,}000$ ms (censored at the timeout); failure rate $=6\%$.
-- *Interpretation / limits*: both numbers are correct for their populations and they answer different questions. Reporting 240 ms without the 6% and the population silently removes the slowest experiences. With only 100 requests, either P95 is also unstable across runs.
+- *Interpretation / limits*:
+  - Both numbers are correct for their populations; they answer different questions.
+  - Reporting 240 ms without the 6% and the population silently removes the slowest experiences.
+  - With only 100 requests, either P95 is also unstable across runs.
 
-**Outliers are evidence until explained** (**O**, CLM-008). A slow observation may be clock corruption, a GC pause, thermal throttling, a retry, a real failure mode, or a valid heavy-tail sample. Keep raw data. Apply only predeclared rules, record reasons, and report sensitivity with and without exclusions or with robust estimators.
+**Outliers are evidence until explained** (**O**, CLM-008).
+
+- A slow observation may be clock corruption, a GC pause, thermal throttling, a retry, a real failure mode, or a valid heavy-tail sample.
+- Keep raw data.
+- Apply only predeclared rules and record reasons.
+- Report sensitivity with and without exclusions, or with robust estimators.
 
 **Knowledge Check:** Why can a mean improve while P99 worsens, and what changes when timeouts disappear from the denominator?
 
 **Guided Practice:** Given a run with 2,000 successes, 40 timeouts, and 10 client cancellations, define two defensible metrics for different decisions. Explain why silently dropping the 50 incomplete requests changes the population.
 
 **Feedback Contract:**
-- *Expected Evidence*: two metrics with populations, e.g. (a) latency quantiles over all 2,050 issued requests with the 40 timeouts censored at the timeout and the 10 cancellations reported separately, for a user-experience decision; (b) success-only latency over 2,000 requests *together with* the 2.4% incomplete rate (50/2,050), for a capacity decision. Dropping the 50 changes the population from “issued” to “succeeded” and removes exactly the slowest outcomes.
+- *Expected Evidence*: two metrics with populations, e.g.:
+  - (a) user-experience decision: latency quantiles over all 2,050 issued requests, the 40 timeouts censored at the timeout, the 10 cancellations reported separately;
+  - (b) capacity decision: success-only latency over 2,000 requests *together with* the 2.4% incomplete rate (50/2,050).
+  - Dropping the 50 changes the population from “issued” to “succeeded” and removes exactly the slowest outcomes.
 - *Common Failure*: a single “P99” with no denominator, quantile convention, or failure treatment.
 - *Diagnostic Hint*: what is $n$ in your quantile, and where do timeouts sit in the sorted list?
 - *Concept to Revisit*: population, censoring, and quantile conventions.
@@ -319,25 +435,55 @@ For independent observations from a normal population with unknown variance, the
 
 $$\bar x\pm t_{1-\alpha/2,n-1}\frac{s}{\sqrt n}.$$
 
-where: $n$ is the number of independent observations; $\bar x$ is their sample mean; $s$ is their sample standard deviation (denominator $n-1$); $s/\sqrt n$ is the standard error of $\bar x$; $\alpha$ and $t_{1-\alpha/2,n-1}$ are as in Lesson 0.3. The term $t\cdot s/\sqrt n$ is the **half-width**: the interval extends that far on each side of $\bar x$.
+where:
+- $n$ is the number of independent observations (count);
+- $\bar x$ is their sample mean (measurement units, e.g. ms);
+- $s$ is their sample standard deviation (denominator $n-1$; same units);
+- $s/\sqrt n$ is the standard error of $\bar x$;
+- $\alpha$ and $t_{1-\alpha/2,n-1}$ are as in Lesson 0.3;
+- $t\cdot s/\sqrt n$ is the **half-width**: the interval extends that far on each side of $\bar x$.
 
 A 95% confidence procedure has approximately 95% long-run coverage under its assumptions. It does not mean there is a 95% posterior probability that the fixed parameter lies inside this realized interval (**O**, CLM-005).
 
 **Worked Example (synthetic summary statistics):**
 - *Input*: $n=25$ independent process-level means, $\bar x=10$ ms, $s=2$ ms, $t_{0.975,24}\approx2.064$.
-- *Steps*: $SE=2/\sqrt{25}=0.4$ ms; half-width $=2.064\times0.4=0.826$ ms.
+- *Steps*:
+  - Standard error: $SE = 2/\sqrt{25} = 0.4$ ms.
+  - Half-width: $2.064 \times 0.4 = 0.826$ ms.
 - *Result*: approximately $[9.17,10.83]$ ms, a half-width of 8.3% of the mean.
-- *Interpretation / limits*: conditional on independence and the t model. If the practical threshold is a 0.5 ms change, this interval is too wide to decide; if it is 3 ms, it is ample. It says nothing about P99.
+- *Interpretation / limits*:
+  - Conditional on independence and the t model.
+  - Practical threshold 0.5 ms: interval too wide to decide.
+  - Practical threshold 3 ms: interval ample.
+  - It says nothing about P99.
 
 For known $\sigma$ and target absolute half-width $E$:
 
 $$n\ge\left(\frac{z_{1-\alpha/2}\sigma}{E}\right)^2.$$
 
-where: $\sigma$ is the (assumed known) population standard deviation; $E$ is the largest acceptable half-width, in the same units as $\sigma$; $z_{1-\alpha/2}$ is the standard normal quantile ($1.96$ for 95%).
+where:
+- $n$ is the required number of independent observations (count);
+- $\sigma$ is the (assumed known) population standard deviation (measurement units, e.g. ms);
+- $E$ is the largest acceptable half-width, in the same units as $\sigma$;
+- $z_{1-\alpha/2}$ is the standard normal quantile ($1.96$ for 95%; dimensionless).
 
-*Step-by-step*: with known $\sigma$ the half-width is $z_{1-\alpha/2}\,\sigma/\sqrt n$. Require it to be at most $E$: $z\sigma/\sqrt n\le E \iff \sqrt n\ge z\sigma/E \iff n\ge(z\sigma/E)^2$ (both sides are positive, so squaring keeps the direction). Round up, because $n$ is an integer and rounding down would make the half-width exceed $E$. Note that halving $E$ multiplies $n$ by 4.
+*Step-by-step*:
+- With known $\sigma$ the half-width is $z_{1-\alpha/2}\,\sigma/\sqrt n$.
+- Require it to be at most $E$:
 
-With $\sigma=2$ ms, $E=0.5$ ms, and 95% confidence, the normal approximation gives $n\ge(1.96\times2/0.5)^2=61.47$, hence 62 (**D**, CLM-006). If $\sigma$ came from a small pilot, 62 is a planning approximation. This formula does not size P99, ratios, clustered data, multiple comparisons, or statistical power for a minimum effect.
+  - $z\sigma/\sqrt n\le E$.
+  - Rearrange: $\sqrt n\ge z\sigma/E$.
+  - Square: $n\ge(z\sigma/E)^2$ (both sides positive, so direction stays unchanged).
+  - Here $z$ abbreviates $z_{1-\alpha/2}$; other symbols and units defined above.
+- Round up, because $n$ is an integer and rounding down would make the half-width exceed $E$.
+- Halving $E$ multiplies $n$ by 4.
+
+Example with $\sigma=2$ ms, $E=0.5$ ms, 95% confidence (**D**, CLM-006):
+
+- $z\sigma/E = 1.96\times2/0.5 = 7.84$.
+- $n\ge7.84^2=61.47$, hence 62.
+- If $\sigma$ came from a small pilot, 62 is a planning approximation.
+- This formula does not size P99, ratios, clustered data, multiple comparisons, or statistical power for a minimum effect.
 
 Report effect size and uncertainty against a **minimum practically important effect**. A small p-value does not measure effect size, practical value, or the probability that a hypothesis is true.
 
@@ -348,7 +494,13 @@ When observations are dependent or hierarchical, analyze at the correct level or
 **Guided Practice:** Choose a minimum practically important effect and use pilot variance only as a planning input. Explain what changes when observations are clustered by process.
 
 **Feedback Contract:**
-- *Expected Evidence*: the minimum practically important effect in units; the pilot variance and its source; the planning $n$ labeled as an approximation; the experimental unit; and a statement that with observations clustered by process, $n$ counts processes (or a hierarchical/resampling analysis preserves the clustering). Knowledge check: 95% describes the long-run coverage of the procedure; a narrow interval around an effect smaller than the practical threshold changes no decision.
+- *Expected Evidence*:
+  - the minimum practically important effect in units;
+  - the pilot variance and its source;
+  - the planning $n$ labeled as an approximation;
+  - the experimental unit;
+  - a statement that with observations clustered by process, $n$ counts processes (or a hierarchical/resampling analysis preserves the clustering).
+  - Knowledge check: 95% describes the long-run coverage of the procedure; a narrow interval around an effect smaller than the practical threshold changes no decision.
 - *Common Failure*: “there is a 95% probability the true mean is in this interval,” or sizing a P99 experiment with the mean formula.
 - *Diagnostic Hint*: if you doubled requests per process but kept the number of processes, what new process-level information did you gain?
 - *Concept to Revisit*: interval coverage, experimental unit, and practical significance.
@@ -388,16 +540,40 @@ Other communities have used the last two terms differently, so never rely on the
 
 **Worked Example (static source reading):**
 - *Input*: MLCommons Inference commit `3fbc329939999c13d0a7b5e67fb2092287e06047`, question: “what interval is a LoadGen sample latency, and how is its percentile chosen?”
-- *Steps*: (1) `loadgen/loadgen.cc::StartTest` through sanitized settings and scenario/mode dispatch; (2) `IssueQueries` to `loadgen/issue_query_controller.cc::IssueQueryController::StartIssueQueries` (**O**, CLM-011); (3) SUT completion through `loadgen/loadgen.cc::QuerySamplesComplete`, which reads `PerfClock::now()` once on entry and passes that timestamp to each sample's `SampleComplete`; (4) in `ResponseDelegateDetailed::SampleComplete` the recorded latency is `sched.delta(complete_begin_time)`, where `sched` is built from `query->scheduled_time`; (5) `loadgen/results.cc::PerformanceSummary::ProcessLatencies` sorts the latencies and indexes `sample_latencies[sample_count * percentile]`.
-- *Result*: at this revision a sample latency runs from the query's *scheduled* time to the completion-callback timestamp, and a percentile is the sorted element at the truncated index $\lfloor n\cdot p\rfloor$ (0-based) (**O**, CLM-014). For example, with $n=1{,}000$ sorted latencies and $p=0.99$, the index is $\lfloor990\rfloor=990$, i.e. the 991st smallest value; the nearest-rank rule of Lesson 0.4 would instead take rank $\lceil0.99\times1000\rceil=990$, the 990th smallest. Here $n$ is the sample count, $p$ the percentile as a fraction, and $\lfloor\cdot\rfloor$ rounds down.
-- *Interpretation / limits*: measuring from scheduled rather than actual issue time is the property that keeps issue delay inside the latency (Lesson 0.2). The index rule is one quantile convention among several, so the same data can give a slightly different “P99” in another tool. This is static inspection of one upstream snapshot; it is not an executed run, and MLPerf's workload contract is not the universal definition of inference performance.
+- *Steps*:
+  1. `loadgen/loadgen.cc::StartTest` through sanitized settings and scenario/mode dispatch.
+  2. `IssueQueries` to `loadgen/issue_query_controller.cc::IssueQueryController::StartIssueQueries` (**O**, CLM-011).
+  3. SUT completion through `loadgen/loadgen.cc::QuerySamplesComplete`, which reads `PerfClock::now()` once on entry and passes that timestamp to each sample's `SampleComplete`.
+  4. In `ResponseDelegateDetailed::SampleComplete` the recorded latency is `sched.delta(complete_begin_time)`, where `sched` is built from `query->scheduled_time`.
+  5. `loadgen/results.cc::PerformanceSummary::ProcessLatencies` sorts the latencies and indexes `sample_latencies[sample_count * percentile]`.
+
+  ```mermaid
+  flowchart TD
+      A["1. StartTest<br/>settings sanitized · scenario/mode dispatch"] --> B["2. IssueQueries → StartIssueQueries"]
+      B --> C["3. SUT calls QuerySamplesComplete<br/>PerfClock::now() read once"]
+      C --> D["4. SampleComplete<br/>latency = sched.delta(complete_begin_time)<br/>sched from query scheduled_time"]
+      D --> E["5. ProcessLatencies<br/>sort · index sample_count × percentile"]
+  ```
+
+- Legend: SUT = system under test.
+- *Result* (**O**, CLM-014):
+  - At this revision a sample latency runs from the query's *scheduled* time to the completion-callback timestamp.
+  - A percentile is the sorted element at the truncated index $\lfloor n\cdot p\rfloor$ (0-based), where $n$ is the sample count, $p$ the percentile as a fraction, and $\lfloor\cdot\rfloor$ rounds down.
+  - Example, $n=1{,}000$, $p=0.99$: index $\lfloor990\rfloor=990$, i.e. the 991st smallest value.
+  - The nearest-rank rule of Lesson 0.4 would instead take rank $\lceil0.99\times1000\rceil=990$, the 990th smallest.
+- *Interpretation / limits*:
+  - Measuring from scheduled rather than actual issue time is the property that keeps issue delay inside the latency (Lesson 0.2).
+  - The index rule is one quantile convention among several, so the same data can give a slightly different “P99” in another tool.
+  - This is static inspection of one upstream snapshot; it is not an executed run.
+  - MLPerf's workload contract is not the universal definition of inference performance.
 
 **Knowledge Check:** Why is a commit hash insufficient when generated artifacts or the worktree differ, and which path establishes completion timing?
 
 **Independent Practice:** Produce the pinned trace, provenance manifest, and exact rerun commands. Mark unexecuted branches `TODO_VERIFY`.
 
 **Feedback Contract:**
-- *Expected Evidence*: repository, revision, dirty-tree state, exact files and symbols, the execution path, environment, raw output, checksums, rerun commands, and static-versus-executed status for every step. Knowledge check: a commit hash does not identify uncommitted changes, generated files, data, or dependencies; `QuerySamplesComplete` establishes completion timing.
+- *Expected Evidence*: repository, revision, dirty-tree state, exact files and symbols, the execution path, environment, raw output, checksums, rerun commands, and static-versus-executed status for every step.
+  - Knowledge check: a commit hash does not identify uncommitted changes, generated files, data, or dependencies; `QuerySamplesComplete` establishes completion timing.
 - *Common Failure*: citing a branch name or “latest,” or presenting a statically read path as executed.
 - *Diagnostic Hint*: could a colleague with only your manifest rebuild the same binary and regenerate the same table?
 - *Concept to Revisit*: provenance and repeatability/reproducibility/replicability.
@@ -418,32 +594,63 @@ Other communities have used the last two terms differently, so never rely on the
 
 Use this loop:
 
-```text
-SYMPTOM
-  → COMPETING HYPOTHESES
-  → MISSING EVIDENCE
-  → DISCRIMINATING MEASUREMENT OR INTERVENTION
-  → RANKED EXPLANATION
-  → CHANGE
-  → SAME-BOUNDARY REMEASUREMENT
+```mermaid
+flowchart TD
+    D1["<b>1. SYMPTOM</b>"]
+    D2["<b>2. COMPETING HYPOTHESES</b>"]
+    D3["<b>3. MISSING EVIDENCE</b>"]
+    D4["<b>4. DISCRIMINATING MEASUREMENT OR INTERVENTION</b>"]
+    D5["<b>5. RANKED EXPLANATION</b>"]
+    D6["<b>6. CHANGE</b>"]
+    D7["<b>7. SAME-BOUNDARY REMEASUREMENT</b>"]
+    D1 --> D2 --> D3 --> D4 --> D5 --> D6 --> D7
 ```
 
 Example symptom: treatment B improves mean latency but worsens P99.
 
-Competing hypotheses include cache warmup, batching changes, thermal drift, retries, rare long inputs, load-generator omission, or measurement corruption. GPU utilization, one profiler screenshot, or one correlation is necessary in some investigations but insufficient to select one mechanism. Predict what each hypothesis should change, intervene on one causal link, and preserve alternatives that remain observationally equivalent.
+- Competing hypotheses: cache warmup, batching changes, thermal drift, retries, rare long inputs, load-generator omission, or measurement corruption.
+- GPU utilization, one profiler screenshot, or one correlation is necessary in some investigations but insufficient to select one mechanism.
+- Predict what each hypothesis should change.
+- Intervene on one causal link.
+- Preserve alternatives that remain observationally equivalent.
 
 **Worked Example (synthetic results):**
 - *Input*: fixed order A→B shows mean latency 100 ms → 90 ms and P99 400 ms → 520 ms. Hypotheses: H1 order/warm-up drift, H2 a real mean improvement from B, H3 a B-specific tail mechanism (e.g., rare long batches).
-- *Steps*: predictions under randomized order within fresh-process blocks: H1 predicts the mean difference vanishes; H2 predicts it persists; H3 predicts the P99 gap persists regardless of order. The rerun gives mean 95 ms versus 95 ms and P99 405 ms versus 515 ms.
+- *Steps*:
+  - Predictions under randomized order within fresh-process blocks:
+    - H1: the mean difference vanishes.
+    - H2: the mean difference persists.
+    - H3: the P99 gap persists regardless of order.
+  - Rerun: mean 95 ms versus 95 ms; P99 405 ms versus 515 ms.
 - *Result*: H1 is strengthened and H2 weakened for the mean; the P99 regression survives randomization, so H3 (or another B-specific tail cause) remains live.
-- *Interpretation / limits*: the intervention discriminated H1 from H2 but did not identify the tail mechanism. The next measurement must target the tail (per-request batch composition, retries, input length) rather than repeat the mean comparison. Blocks here are synthetic; a real rerun also needs uncertainty on both differences.
+
+  ```mermaid
+  flowchart TD
+      R["Randomized-order rerun"] --> M{"Mean difference?"}
+      M -- "vanishes (95 vs 95 ms)" --> H1["H1 strengthened<br/>H2 weakened"]
+      M -- persists --> H2["H2 supported"]
+      R --> P{"P99 gap?"}
+      P -- "persists (405 vs 515 ms)" --> H3["H3 or other B-specific<br/>tail cause stays live"]
+  ```
+
+  - Legend: H1 = order/warm-up drift; H2 = real mean improvement from B; H3 = B-specific tail mechanism.
+  - P99 = 99th-percentile latency; A/B = baseline/treatment.
+- *Interpretation / limits*:
+  - The intervention discriminated H1 from H2 but did not identify the tail mechanism.
+  - The next measurement must target the tail (per-request batch composition, retries, input length) rather than repeat the mean comparison.
+  - Blocks here are synthetic; a real rerun also needs uncertainty on both differences.
 
 **Knowledge Check:** What observation weakens thermal drift, and why is lower GPU utilization not a unique cause?
 
 **Guided Practice:** Build a matrix of hypotheses, predicted telemetry, discriminating interventions, falsifiers, and unresolved equivalence for the example symptom.
 
 **Feedback Contract:**
-- *Expected Evidence*: a matrix with at least three hypotheses, the telemetry each predicts, one intervention that separates at least two of them, the falsifying observation for each, and the pairs that remain observationally equivalent. Knowledge check: stable temperature/frequency telemetry, or an effect that survives randomized order, weakens thermal drift; lower utilization is also produced by host gaps, smaller batches, or a faster kernel.
+- *Expected Evidence*:
+  - a matrix with at least three hypotheses and the telemetry each predicts;
+  - one intervention that separates at least two of them;
+  - the falsifying observation for each;
+  - the pairs that remain observationally equivalent.
+  - Knowledge check: stable temperature/frequency telemetry, or an effect that survives randomized order, weakens thermal drift; lower utilization is also produced by host gaps, smaller batches, or a faster kernel.
 - *Common Failure*: listing alternatives but choosing an intervention every hypothesis predicts identically.
 - *Diagnostic Hint*: for your chosen measurement, write the expected result under each hypothesis. If the column is constant, pick another measurement.
 - *Concept to Revisit*: discriminating measurements and falsifiers.
@@ -464,7 +671,8 @@ Competing hypotheses include cache warmup, batching changes, thermal drift, retr
 - Wasserstein and Lazar (2016), [*The ASA Statement on p-Values: Context, Process, and Purpose*](https://doi.org/10.1080/00031305.2016.1154108): limits of p-value interpretation (CLM-012).
 - ACM, [*Artifact Review and Badging – Current*](https://www.acm.org/publications/policies/artifact-review-and-badging-current): repeatability, reproducibility, replicability (CLM-010).
 
-These references were accessed 2026-09-25 and were not re-read in the WP-F1 review. They are canonical methods sources, not evidence about 2025–2026 practice; this module makes no frontier or current-default claim about benchmarking practice.
+- Accessed 2026-09-25; not re-read in the WP-F1 review.
+- Canonical methods sources, not evidence about 2025–2026 practice; this module makes no frontier or current-default claim about benchmarking practice.
 
 **CURRENT IMPLEMENTATION SNAPSHOTS**
 
@@ -491,7 +699,10 @@ These references were accessed 2026-09-25 and were not re-read in the WP-F1 revi
 
 Every lab follows:
 
-$$\text{PREDICT}\to\text{BUILD}\to\text{MEASURE}\to\text{EXPLAIN}\to\text{BREAK}\to\text{IMPROVE}\to\text{FALSIFY}$$
+```mermaid
+flowchart LR
+    P[PREDICT] --> B[BUILD] --> M[MEASURE] --> E[EXPLAIN] --> K[BREAK] --> I[IMPROVE] --> F[FALSIFY]
+```
 
 ### LAB A — Event-Level Benchmark Harness
 
@@ -544,7 +755,12 @@ $$\text{PREDICT}\to\text{BUILD}\to\text{MEASURE}\to\text{EXPLAIN}\to\text{BREAK}
 
 ### Incident 00.1: The 18% Optimization That Disappeared
 
-A team reports an 18% latency improvement after replacing a runtime component. The baseline always ran first, treatment second. Only successful requests were logged. Each configuration processed 50,000 requests in one long process. A rerun on another machine shows no gain, and production P99 worsens.
+A team reports an 18% latency improvement after replacing a runtime component.
+
+- The baseline always ran first, treatment second.
+- Only successful requests were logged.
+- Each configuration processed 50,000 requests in one long process.
+- A rerun on another machine shows no gain, and production P99 worsens.
 
 **Diagnostic Protocol (Task):**
 The learner must:

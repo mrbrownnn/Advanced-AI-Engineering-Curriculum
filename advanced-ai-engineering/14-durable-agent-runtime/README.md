@@ -2,25 +2,43 @@
 
 ## 00 Why This Module Exists
 
-An agent loop that works inside one process is not durable. Workers crash, deployments replace code, queues redeliver work, acknowledgements disappear, humans answer days later, and an external side effect may commit while the runtime still records “unknown.” A durable runtime must recover orchestration state without replaying effects blindly.
+An agent loop that works inside one process is not durable. Outside one process:
+- workers crash;
+- deployments replace code;
+- queues redeliver work;
+- acknowledgements disappear;
+- humans answer days later;
+- an external side effect may commit while the runtime still records “unknown.”
 
-```text
-workflow input
-     |
-durable history/checkpoint <---- timers / signals / approvals
-     |
-deterministic orchestration
-     |
-activity command + logical effect ID
-     |
-external system <---- idempotency / fencing / reconciliation
-     |
-effect receipt or unknown state
-     |
-history transition / retry / compensate / escalate
+A durable runtime must recover orchestration state without replaying effects blindly.
+
+```mermaid
+flowchart TD
+    IN["<b>Workflow input</b>"]
+    HIST["<b>1. Durable history/checkpoint</b>"]
+    TSA["timers · signals · approvals"]
+    ORCH["<b>2. Deterministic orchestration</b>"]
+    CMD["<b>3. Activity command + logical effect ID</b>"]
+    EXT["<b>4. External system</b>"]
+    GUARD["idempotency · fencing · reconciliation"]
+    REC["<b>5. Effect receipt or unknown state</b>"]
+    NEXT["<b>6. Next step</b><br/>history transition · retry · compensate · escalate"]
+
+    IN --> HIST
+    TSA -.-> HIST
+    HIST --> ORCH --> CMD --> EXT
+    GUARD -.-> EXT
+    EXT --> REC --> NEXT
 ```
 
-This module owns workflow history/checkpoints, deterministic replay, activities/effect boundaries, delivery semantics, idempotency, transactional outbox/inbox, sagas and compensation, leases/fencing, fan-out/join, durable waits and HITL, history growth, versioning, and crash recovery. Module 12 owns agent decisions and tool policy; Module 13 owns model-I/O adapters; Module 18 owns threat modeling; Module 23 owns platform-wide reliability operations.
+- Legend: ID = identity; I/O = input/output; HITL = human-in-the-loop.
+
+Scope boundaries:
+- **This module owns**: workflow history/checkpoints, deterministic replay, activities/effect boundaries, delivery semantics, idempotency, transactional outbox/inbox, sagas and compensation, leases/fencing, fan-out/join, durable waits and HITL, history growth, versioning, and crash recovery.
+- **Module 12**: agent decisions and tool policy.
+- **Module 13**: model-I/O adapters.
+- **Module 18**: threat modeling.
+- **Module 23**: platform-wide reliability operations.
 
 **Research cutoff:** 2026-09-26 for the original claim set. Entries marked *opened 2026-10-01* in Section 05 were read on that date for registry revision 1.1.0; where a publication or revision date is shown, it is on or before 2026-09-30. Claims not marked that way were not re-verified.
 
@@ -70,31 +88,43 @@ estimated_effort:
 ```
 Each category is counted once. The source trace is not also counted inside Lesson 14.6 or LAB D, and lab analysis is not counted again as lesson practice.
 
-The learner must be able to state what is durably committed; rebuild state from history; keep nondeterminism and I/O behind recorded boundaries; reason about at-most/at-least/effectively-once behavior; implement atomic idempotency and reconciliation; design honest compensation; fence stale workers; persist joins/timers/approvals; replay-test upgrades; control history growth; and crash the system at every effect boundary.
+The learner must be able to:
+- state what is durably committed;
+- rebuild state from history;
+- keep nondeterminism and I/O behind recorded boundaries;
+- reason about at-most/at-least/effectively-once behavior;
+- implement atomic idempotency and reconciliation;
+- design honest compensation;
+- fence stale workers;
+- persist joins/timers/approvals;
+- replay-test upgrades;
+- control history growth;
+- crash the system at every effect boundary.
 
 ### LAYER 1: KNOWLEDGE / INSTRUCTIONAL LAYER
 
 ## 03 Knowledge Map
 
-```text
-                workflow/run identity + code version
-                              |
-                    persisted ordered history
-                              |
-                  deterministic state rebuild
-                              |
-                      command/activity intent
-                              |
-        +---------------- effect boundary ----------------+
-        | operation key | attempt | auth | deadline       |
-        +-------------------------------------------------+
-                              |
-                 external effect + receipt/postcondition
-                              |
-         committed | absent | failed | partial | unknown
-                              |
-             continue | retry | compensate | escalate
+```mermaid
+flowchart TD
+    ID["<b>Workflow/run identity + code version</b>"]
+    H["<b>1. Persisted ordered history</b>"]
+    R["<b>2. Deterministic state rebuild</b>"]
+    INT["<b>3. Command/activity intent</b>"]
+
+    subgraph EB["<b>4. Effect boundary</b>"]
+        EBF["operation key · attempt · auth · deadline"]
+    end
+
+    EFF["<b>5. External effect + receipt/postcondition</b>"]
+    ST["<b>6. Outcome</b><br/>committed · absent · failed · partial · unknown"]
+    ACT["<b>7. Action</b><br/>continue · retry · compensate · escalate"]
+
+    ID --> H --> R --> INT --> EB
+    EB --> EFF --> ST --> ACT
 ```
+
+- Legend: auth = authorization; ID = identity.
 
 Keep four identities separate: workflow/run, logical transition, activity attempt, and external effect. A retry creates a new attempt but should not invent a new logical effect.
 
@@ -131,11 +161,24 @@ s_1=F(s_0,e_1),\quad s_2=F(s_1,e_2),\quad\ldots,\quad s_n=F(s_{n-1},e_n)
 \;\;\Longrightarrow\;\; s_n=F(\cdots F(F(s_0,e_1),e_2)\cdots,e_n).
 $$
 
-Two consequences follow directly. (1) Because $F$ reads only its arguments, the same events always give the same $s_n$; a reducer that also reads a clock or a random number has a hidden third argument, and replay can then disagree with the original run. (2) Because $s_n$ depends on $s_{k}$ and the suffix only, a stored state $s_k$ (a checkpoint/snapshot) plus the events $e_{k+1},\ldots,e_n$ gives the same $s_n$ as a full replay from $s_0$. Guided Practice (a) below works this fold on a four-event history.
+where:
+- $s_i$: state after the first $i$ events; $e_i$, $F$: as defined above.
+
+Two consequences follow directly:
+1. **Determinism.** Because $F$ reads only its arguments, the same events always give the same $s_n$. A reducer that also reads a clock or a random number has a hidden third argument, and replay can then disagree with the original run.
+2. **Checkpoints.** Because $s_n$ depends on $s_{k}$ and the suffix only, a stored state $s_k$ (a checkpoint/snapshot) plus the events $e_{k+1},\ldots,e_n$ gives the same $s_n$ as a full replay from $s_0$.
+
+Guided Practice (a) below works this fold on a four-event history.
 
 This reconstructs only state represented by the retained history and schemas (**D**, CLM-001). It does not reconstruct an external payment, message, deployment, or model response unless that observation/effect evidence was recorded.
 
-Replay runtimes compare commands produced by current workflow code with recorded history. Temporal and Azure Durable Functions both document deterministic orchestrator constraints (**O**, CLM-002); that is two runtime families, not every durable engine. Wall clocks, unrecorded random values, mutable environment/configuration, direct network/database/model calls, unordered iteration, and command-changing code edits can diverge.
+Replay runtimes compare commands produced by current workflow code with recorded history. Temporal and Azure Durable Functions both document deterministic orchestrator constraints (**O**, CLM-002); that is two runtime families, not every durable engine. Sources of divergence:
+- wall clocks;
+- unrecorded random values;
+- mutable environment/configuration;
+- direct network/database/model calls;
+- unordered iteration;
+- command-changing code edits.
 
 Declare the persistence acknowledgement: when may a client believe a workflow start, transition, signal, approval, or cancellation is durable? Crash immediately before and after that point.
 
@@ -144,7 +187,11 @@ For retained events, $s_n=fold(F,s_0,[e_1,\ldots,e_n])$. This is exact only for 
 
 **Worked Example (synthetic fixture):**
 
-*Input.* A history store commits each append atomically and sends the acknowledgement only after the commit. It de-duplicates workflow starts by workflow ID and signals by signal ID (a fixture assumption; real runtimes have their own ID-reuse rules). A client starts `wf-42` and later sends signal `approve-1`. A crash is injected on each side of each commit.
+*Input.* A history store commits each append atomically and sends the acknowledgement only after the commit.
+- It de-duplicates workflow starts by workflow ID and signals by signal ID (a fixture assumption;
+- real runtimes have their own ID-reuse rules).
+- A client starts `wf-42` and later sends signal `approve-1`.
+- A crash is injected on each side of each commit.
 
 | Case | Crash point | Durable prefix after restart | What the client saw | Allowed client action | State after recovery |
 |---|---|---|---|---|---|
@@ -162,17 +209,29 @@ In plain terms: an acknowledgement travels *after* the commit, so a crash can fa
 
 *Result.* After recovery every case has exactly one `Started` event and at most one `SignalReceived(approve-1)`. A client may treat the operation as durable only after an acknowledgement. Without one it knows nothing, and "no acknowledgement" must not be read as "did not happen".
 
-*Interpretation and limits.* S2 and T2 are commit-without-acknowledgement at the history layer. Lesson 14.2 meets the same shape at an external receiver, where the history store no longer holds the truth. The table depends on the fixture's de-duplication assumption (**D**, CLM-001); without it, S2 would create a second run.
+*Interpretation and limits.* S2 and T2 are commit-without-acknowledgement at the history layer.
+- Lesson 14.2 meets the same shape at an external receiver, where the history store no longer holds the truth.
+- The table depends on the fixture's de-duplication assumption (**D**, CLM-001);
+- without it, S2 would create a second run.
 
 **Knowledge Check:**
 1. Why can unrecorded wall time or randomness break replay?
 2. Does replay prove an external payment exists?
 
 **Guided Practice:**
-(a) History: `e1 Started`, `e2 StepScheduled(1)`, `e3 StepCompleted(1)`, `e4 StepScheduled(2)`. The reducer sets `status=running` on `Started`, `pending=n` on `StepScheduled(n)`, and `step=n` (clearing `pending`) on `StepCompleted(n)`. Give the state after each prefix. Then replay under a revision that starts a timer before scheduling step 2 and name the first divergence. (b) Build your own four-event history, replay it under unchanged code, inject a command-reordering revision, and record the first divergence.
+- (a) Fold a given history.
+  - History: `e1 Started`, `e2 StepScheduled(1)`, `e3 StepCompleted(1)`, `e4 StepScheduled(2)`.
+  - Reducer: sets `status=running` on `Started`, `pending=n` on `StepScheduled(n)`, and `step=n` (clearing `pending`) on `StepCompleted(n)`.
+  - Give the state after each prefix.
+  - Then replay under a revision that starts a timer before scheduling step 2 and name the first divergence.
+- (b) Build your own four-event history, replay it under unchanged code, inject a command-reordering revision, and record the first divergence.
 
 **Feedback Contract:**
-- *Expected Evidence*: (a) After 0–4 events: `{}`; `{running}`; `{running, pending 1}`; `{running, step 1}`; `{running, step 1, pending 2}`. The revision diverges at `e4`: history recorded `StepScheduled(2)`, the candidate emits `StartTimer`. Events `e1`–`e3` replay cleanly, so the divergence is at the first command the change affects, not at the start. (b) Acknowledgement boundary, retained inputs, reducer/command trace, and external-state exclusions.
+- *Expected Evidence*:
+  - (a) After 0–4 events: `{}`; `{running}`; `{running, pending 1}`; `{running, step 1}`; `{running, step 1, pending 2}`.
+    - The revision diverges at `e4`: history recorded `StepScheduled(2)`, the candidate emits `StartTimer`.
+    - Events `e1`–`e3` replay cleanly, so the divergence is at the first command the change affects, not at the start.
+  - (b) Acknowledgement boundary, retained inputs, reducer/command trace, and external-state exclusions.
 - *Common Failure*: Calling a chat transcript a complete checkpoint, or concluding that step 1's external effect "happened" because `e3` replays.
 - *Diagnostic Hint*: Which nondeterministic value was not recorded? Which recorded command does the candidate emit differently?
 - *Concept to Revisit*: Durable Prefix.
@@ -196,25 +255,41 @@ How should recovery act when an external commit may have succeeded but durable a
 
 **Mechanism Explanation:**
 
-Put nondeterministic external I/O behind activities/effects (**O**, CLM-003). Record canonical intent, logical-operation key, attempt, authorization, dispatch, timeout/cancellation, response, effect state, receipt/postcondition, and reconciliation.
+Put nondeterministic external I/O behind activities/effects (**O**, CLM-003). Record:
+- canonical intent, logical-operation key, attempt, authorization;
+- dispatch, timeout/cancellation, response;
+- effect state, receipt/postcondition, and reconciliation.
 
 The critical ambiguity is:
 
-```text
-external commit succeeds
-        |
-worker/runtime crashes before durable acknowledgement
-        |
-recovery sees pending/timeout, while external state may already be changed
+```mermaid
+flowchart TD
+    C1["<b>1.</b> external commit succeeds"]
+    C2["<b>2.</b> worker/runtime crashes<br/>before durable acknowledgement"]
+    C3["<b>3.</b> recovery sees pending/timeout,<br/>while external state may already be changed"]
+
+    C1 --> C2 --> C3
 ```
 
-Replay cannot solve this (**D**, CLM-004). If the external system cannot participate in the same atomic transaction, safe recovery needs a stable operation identity and atomic deduplication or a trustworthy postcondition query. For protected state `x` and operation key `k`, the required idempotency property is:
+Replay cannot solve this (**D**, CLM-004).
+- If the external system cannot participate in the same atomic transaction, safe recovery needs a stable operation identity and atomic deduplication or a trustworthy postcondition query.
+- For protected state `x` and operation key `k`, the required idempotency property is:
 
 $$
 apply(apply(x,k),k)=apply(x,k).
 $$
 
-where $x$ is the receiver's protected state before the operation, $k$ is the operation key (always sent with the same canonical intent), and $apply(x,k)$ is the state after the receiver processes one delivery of that keyed operation. Read left to right: delivering the operation a second time must leave the state exactly where the first delivery left it. Numeric check with the debit used below ($x$ = balance 100, $k$ = debit 30): $apply(100,k)=70$; a second delivery must return the stored outcome, so $apply(70,k)=70$, not $40$. A plain `balance -= 30` without the key record gives $40$ and fails the property.
+where:
+- $x$: the receiver's protected state before the operation
+- $k$: the operation key (always sent with the same canonical intent)
+- $apply(x,k)$: the state after the receiver processes one delivery of that keyed operation
+
+Read left to right: delivering the operation a second time must leave the state exactly where the first delivery left it.
+
+Numeric check with the debit used below ($x$ = balance 100, $k$ = debit 30):
+- First delivery: $apply(100,k)=70$.
+- Second delivery must return the stored outcome: $apply(70,k)=70$, not $40$.
+- A plain `balance -= 30` without the key record gives $40$ and fails the property.
 
 Test it under concurrent duplicates and key reuse with different intent. A header/key is not enough unless the receiver stores key + canonical intent + outcome atomically and defines scope and retention (**D**, CLM-005).
 
@@ -224,7 +299,10 @@ Test it under concurrent duplicates and key reuse with different intent. A heade
 2. **Atomic check-and-record.** The key record, the protected effect, and the stored outcome commit in one transaction or one conditional write. "Read whether the key exists, then write" in two steps is not this.
 3. **Conflict.** The same key with a different canonical intent is rejected and changes nothing. It is neither applied nor answered with the old outcome.
 4. **Replay.** The same key with the same intent returns the stored outcome and does not apply the effect again.
-5. **Retention.** Key records outlive the longest retry and redelivery window. After a record is purged, the key is new again, so a receiver that purges keys needs a second guard that does not expire with them: a version or base-state check on the protected record (the acceptance rule of Module 10, Lesson 10.2), or a ledger/postcondition lookup. An absolute write such as "set version 7 to this content" can be guarded that way; a relative effect such as "debit 30" cannot, and must be reconciled.
+5. **Retention.** Key records outlive the longest retry and redelivery window.
+  - After a record is purged, the key is new again, so a receiver that purges keys needs a second guard that does not expire with them: a version or base-state check on the protected record (the acceptance rule of Module 10, Lesson 10.2), or a ledger/postcondition lookup.
+  - An absolute write such as "set version 7 to this content" can be guarded that way;
+  - a relative effect such as "debit 30" cannot, and must be reconciled.
 
 ```text
 apply(scope, key, intent, epoch):
@@ -244,9 +322,30 @@ apply(scope, key, intent, epoch):
   return APPLIED(receipt)
 ```
 
-The epoch comparison is `<`, so a write carrying the current epoch is accepted; Lesson 14.3 explains why equality must pass. The unique constraint is what serializes two concurrent attempts: the second insert waits for, or conflicts with, the first, and can never observe "absent" after the first has committed. The transaction is a derivation (**D**, CLM-019). Published key contracts have the same parts: an expired IETF draft defines a request fingerprint and distinct error responses for a reused key with a different payload and for a retry that arrives while the original is still processing, and one payment API documents storing the first result per key, comparing parameters on reuse, and pruning keys after a retention period (**O**, CLM-017). Those are two documents, not a standard every endpoint follows.
+Notes on the transaction (a derivation, **D**, CLM-019):
+- **Epoch check.** The comparison is `<`, so a write carrying the current epoch is accepted; Lesson 14.3 explains why equality must pass.
+- **Unique constraint.** It serializes two concurrent attempts: the second insert waits for, or conflicts with, the first, and can never observe "absent" after the first has committed.
 
-A transactional outbox stores domain change and publish intent in one local transaction. The relay can still publish twice after a crash; consumers need deduplication/inbox semantics, which is the receiver contract above applied to messages (**D**, CLM-006). Track outbox lag, poison rows, ordering, and retention.
+Published key contracts have the same parts (**O**, CLM-017):
+- An expired IETF draft defines a request fingerprint and distinct error responses for (i) a reused key with a different payload and (ii) a retry that arrives while the original is still processing.
+- One payment API documents storing the first result per key, comparing parameters on reuse, and pruning keys after a retention period.
+- Those are two documents, not a standard every endpoint follows.
+
+A transactional outbox stores domain change and publish intent in one local transaction. The relay can still publish twice after a crash; consumers need deduplication/inbox semantics, which is the receiver contract above applied to messages (**D**, CLM-006).
+
+```mermaid
+flowchart LR
+    TX["<b>local transaction</b><br/>domain change + outbox row"]
+    RELAY["<b>relay</b><br/>reads outbox · publishes · marks sent"]
+    BUS["message broker"]
+    INBOX["<b>consumer inbox</b><br/>dedup by message key"]
+    APPLY["apply once per key"]
+
+    TX --> RELAY --> BUS --> INBOX --> APPLY
+    RELAY -. "crash after publish,<br/>before mark → publish twice" .-> BUS
+```
+
+Track outbox lag, poison rows, ordering, and retention.
 
 **Quantitative Model / Derivation:**
 The required idempotency property is $apply(apply(x,k),k)=apply(x,k)$ for the same key and canonical intent. A receiver must reject key reuse with different intent.
@@ -260,7 +359,11 @@ A timeout only means the caller stopped waiting; it says nothing about whether t
 
 **Worked Example (synthetic fixture):**
 
-*Input.* Workflow `wf-42` schedules one debit. Key `k = wf-42/charge/1`, scope `tenant-1/charge`, canonical intent `{"account":"A","amount":30}` with intent hash `h1`. Account A starts at 100. History events are `e1 Started`, `e2 ActivityScheduled(k, h1)`, and `e3 ActivityCompleted(k, receipt)`. The receiver runs the transaction above.
+*Input.* Workflow `wf-42` schedules one debit.
+- Key `k = wf-42/charge/1`, scope `tenant-1/charge`, canonical intent `{"account":"A","amount":30}` with intent hash `h1`.
+- Account A starts at 100.
+- History events are `e1 Started`, `e2 ActivityScheduled(k, h1)`, and `e3 ActivityCompleted(k, receipt)`.
+- The receiver runs the transaction above.
 
 | Case | What happened | Durable prefix | Receiver state before recovery | Allowed recovery | Result |
 |---|---|---|---|---|---|
@@ -281,17 +384,33 @@ A timeout only means the caller stopped waiting; it says nothing about whether t
 
 *Result.* With the atomic receiver, account A ends at 70 with one receipt in W1–W4 and C1. C2 and C3 are rejected without a state change. R1 is the one case where the same recovery action duplicates the effect.
 
-*Interpretation and limits.* The cases need different recovery because different parties hold the deciding evidence: the history in W4, the receiver's key table in W1–W3 and C1, the key's intent in C2, the ownership epoch in C3, and nothing at all in R1. A checkpoint or replay gives *at-least-once dispatch of a recorded decision*. Only the receiver's transaction gives *at-most-once application per key, within scope and retention*. The combination converges to one effect for this receiver; it is not exactly-once execution, and it says nothing about a receiver that does not implement the contract (**D**, CLM-004, CLM-019).
+*Interpretation and limits.* The cases need different recovery because different parties hold the deciding evidence:
+- W4: the history.
+- W1–W3 and C1: the receiver's key table.
+- C2: the key's intent.
+- C3: the ownership epoch.
+- R1: nothing at all.
+
+What each layer guarantees (**D**, CLM-004, CLM-019):
+- A checkpoint or replay gives *at-least-once dispatch of a recorded decision*.
+- Only the receiver's transaction gives *at-most-once application per key, within scope and retention*.
+- The combination converges to one effect for this receiver. It is not exactly-once execution, and it says nothing about a receiver that does not implement the contract.
 
 **Knowledge Check:**
 1. Why is an idempotency header alone insufficient?
 2. Why can an outbox relay still publish twice?
 
 **Guided Practice:**
-(a) A receiver holds row `(k9, hX, r-7)` for a debit of 5 and the balance is 55. Give the response and the balance for each independent request: (i) `(k9, hX)`; (ii) `(k9, hY)`; (iii) `(k10, hX)`. (b) Race two concurrent attempts with the same key, then reuse the key with different intent; verify one stored outcome and one conflict.
+- (a) A receiver holds row `(k9, hX, r-7)` for a debit of 5 and the balance is 55. Give the response and the balance for each independent request: (i) `(k9, hX)`; (ii) `(k9, hY)`; (iii) `(k10, hX)`.
+- (b) Race two concurrent attempts with the same key, then reuse the key with different intent; verify one stored outcome and one conflict.
 
 **Feedback Contract:**
-- *Expected Evidence*: (a) (i) `REPLAYED r-7`, balance 55. (ii) `KEY_CONFLICT`, balance 55. (iii) `APPLIED` with a new receipt, balance 50: the same payload under a new key is a new effect, which is why a retry must never mint a new key. (b) Stable logical ID, attempt IDs, the atomic receiver record, receipt/postcondition, and a reconciliation path for the retention-expiry case.
+- *Expected Evidence*:
+  - (a)
+    - (i) `REPLAYED r-7`, balance 55.
+    - (ii) `KEY_CONFLICT`, balance 55.
+    - (iii) `APPLIED` with a new receipt, balance 50: the same payload under a new key is a new effect, which is why a retry must never mint a new key.
+  - (b) Stable logical ID, attempt IDs, the atomic receiver record, receipt/postcondition, and a reconciliation path for the retention-expiry case.
 - *Common Failure*: Check-then-act deduplication; retry under a fresh key after an unknown commit; answering a key conflict with the stored outcome.
 - *Diagnostic Hint*: Which system owns the atomic decision, and which cases share the same durable prefix?
 - *Concept to Revisit*: Effect Convergence.
@@ -315,16 +434,56 @@ When can compensation restore a business invariant, and how does fencing prevent
 
 **Mechanism Explanation:**
 
-The 1987 Sagas paper is the reference model: decompose long-lived work into subtransactions with compensating transactions (**O**, CLM-007). In production, compensation is another forward action (**D**, CLM-008). It has authorization, retries, failures, cost, and evidence; it may restore a business invariant but cannot unread a message, retract a disclosure, erase an observed deployment, or reverse every real-world consequence.
+The 1987 Sagas paper is the reference model: decompose long-lived work into subtransactions with compensating transactions (**O**, CLM-007). In production, compensation is another forward action (**D**, CLM-008):
+- It has authorization, retries, failures, cost, and evidence.
+- It may restore a business invariant.
+- It cannot unread a message, retract a disclosure, erase an observed deployment, or reverse every real-world consequence.
 
-Register compensation before or atomically with the effect intent, preserve dependency order, and expose states such as `compensation_pending`, `compensation_failed`, `partially_compensated`, and `manual_recovery`.
+Register compensation before or atomically with the effect intent, preserve dependency order, and expose explicit saga states:
 
-Leases alone do not revoke a paused stale worker. A lease is a promise made by the lease service; a paused worker cannot see that its lease expired, so on resume it still acts as owner. Only a check at the resource that receives the write can stop it. If ownership epoch `q` increases on takeover, the protected resource must reject a write older than its last accepted epoch. Fencing prevents later stale writes only where enforced; it cannot undo an already accepted effect (**D**, CLM-009).
+```mermaid
+stateDiagram-v2
+    state "compensation_pending" as Pending
+    state "compensation_failed" as Failed
+    state "partially_compensated" as Partial
+    state "manual_recovery" as Manual
+    [*] --> Pending: permanent step failure
+    Pending --> [*]: all compensations succeed
+    Pending --> Failed: a compensation fails permanently
+    Failed --> Partial: remaining compensations still run
+    Partial --> Manual
+    Failed --> Manual
+```
 
-The Chubby lock service paper describes the same idea as a *sequencer*: the lock holder passes the lock's name, mode, and generation number with its requests, and the recipient server rejects a request whose sequencer is no longer valid, checking it either against the lock service or against the most recent sequencer it has observed (**O**, CLM-018). The second option has a window, shown in the trace below.
+- Legend: success ends in a restored business invariant, not a rollback. Edges follow the saga example below (C2 fails, C1 still runs, refund goes to `manual_recovery`). C1/C2: registered compensating actions.
+
+Leases alone do not revoke a paused stale worker:
+- A lease is a promise made by the lease service.
+- A paused worker cannot see that its lease expired, so on resume it still acts as owner.
+- Only a check at the resource that receives the write can stop it: if ownership epoch `q` increases on takeover, the protected resource must reject a write older than its last accepted epoch.
+- Fencing prevents later stale writes only where enforced; it cannot undo an already accepted effect (**D**, CLM-009).
+
+The Chubby lock service paper describes the same idea as a *sequencer*: the lock holder passes the lock's name, mode, and generation number with its requests, and the recipient server rejects a request whose sequencer is no longer valid, checking it either against the lock service or against the most recent sequencer it has observed (**O**, CLM-018).
+- The second option has a window, shown in the trace below.
 
 **Quantitative Model / Trade-off Comparison:**
-A resource with last accepted epoch $q_{last}$ accepts a write only when $q\ge q_{last}$, then sets $q_{last}\leftarrow q$, where $q$ is the epoch carried by the incoming write and $\leftarrow$ means "store this value". Per write, step by step: (1) compare $q$ with the stored $q_{last}$; (2) if $q<q_{last}$, reject and change nothing; (3) otherwise apply the write and store $q_{last}\leftarrow q$ (unchanged when $q=q_{last}$, raised when $q>q_{last}$). Example: with $q_{last}=7$, a write with $q=8$ is accepted and $q_{last}$ becomes 8; a later write with $q=7$ is then rejected since $7<8$. This prevents later stale writes where enforced; it cannot undo prior effects, and it rejects an old epoch only after the resource has seen a newer one.
+A resource with last accepted epoch $q_{last}$ accepts a write only when $q\ge q_{last}$, then sets $q_{last}\leftarrow q$.
+
+where:
+- $q$: the epoch carried by the incoming write
+- $q_{last}$: the last epoch the resource accepted
+- $\leftarrow$: "store this value"
+
+Per write, step by step:
+1. Compare $q$ with the stored $q_{last}$.
+2. If $q<q_{last}$, reject and change nothing.
+3. Otherwise apply the write and store $q_{last}\leftarrow q$ (unchanged when $q=q_{last}$, raised when $q>q_{last}$).
+
+Example, starting from $q_{last}=7$:
+- A write with $q=8$ is accepted; $q_{last}$ becomes 8.
+- A later write with $q=7$ is rejected, since $7<8$.
+
+This prevents later stale writes where enforced; it cannot undo prior effects, and it rejects an old epoch only after the resource has seen a newer one.
 
 The comparison is $\ge$, not $>$, and that differs on purpose from the version rule of Module 10, Lesson 10.2, which accepts only a strictly newer version:
 
@@ -335,7 +494,9 @@ The comparison is $\ge$, not $>$, and that differs on purpose from the version r
 | Rule | accept if $q\ge q_{last}$ | accept only if strictly newer; an equal version is a duplicate if the content hash matches and a conflict if it does not |
 | What handles a repeated operation | not the epoch: the idempotency key of Lesson 14.2 | the version and content hash themselves |
 
-Accepting an equal epoch is therefore harmless only because the epoch is not the duplicate guard. A resource that needs both protections applies both, in the order of the Lesson 14.2 transaction: reject a stale epoch, then check the key. With $>$ instead of $\ge$, an owner could write once per epoch and no more.
+Accepting an equal epoch is therefore harmless only because the epoch is not the duplicate guard.
+- A resource that needs both protections applies both, in the order of the Lesson 14.2 transaction: reject a stale epoch, then check the key.
+- With $>$ instead of $\ge$, an owner could write once per epoch and no more.
 
 **Worked Example (synthetic fixtures):**
 
@@ -350,7 +511,10 @@ Accepting an equal epoch is therefore harmless only because the epoch is not the
 
 *Steps.* Compensate in reverse dependency order: F3, then C2, then C1. Each is a new effect with its own key and receiver contract from Lesson 14.2. While they run the saga is `compensation_pending`.
 
-*Result.* If C2 and C1 succeed, the charge is refunded and the stock is free, and the customer has still read two messages. That is a restored business invariant, not a rollback. If C2 fails permanently, the saga is `compensation_failed`; C1 may still run, giving `partially_compensated`, and the refund goes to `manual_recovery`.
+*Result.* If C2 and C1 succeed, the charge is refunded and the stock is free, and the customer has still read two messages.
+- That is a restored business invariant, not a rollback.
+- If C2 fails permanently, the saga is `compensation_failed`;
+- C1 may still run, giving `partially_compensated`, and the refund goes to `manual_recovery`.
 
 *Limit.* If T4 had *timed out* instead of failing, its state would be unknown. Compensating T1 and T2 first could refund an order whose shipment exists. Reconcile T4 by key before compensating.
 
@@ -367,17 +531,45 @@ Accepting an equal epoch is therefore harmless only because the epoch is not the
 
 *Result.* The fenced resource applies `a` and `b` and rejects `c`. An unfenced resource accepts `c` at step 6, and a write computed from pre-takeover state lands on top of `b`.
 
-*Limits.* (1) Fencing does not undo `a`. (2) If W1's write arrives between steps 4 and 5, the resource still holds `last_epoch` 7 and accepts it, because a resource that compares against the highest epoch it has seen learns about the takeover only from the new owner's first write. Close that window by making the new owner's first action a barrier write that registers epoch 8 at every protected resource, or by having the resource validate epochs with the lease service. (3) A resource that ignores the epoch is unprotected whatever the lease service does.
+*Limits.*
+1. Fencing does not undo `a`.
+2. If W1's write arrives between steps 4 and 5, the resource still holds `last_epoch` 7 and accepts it. A resource that compares against the highest epoch it has seen learns about the takeover only from the new owner's first write. Close that window by either:
+   - making the new owner's first action a barrier write that registers epoch 8 at every protected resource, or
+   - having the resource validate epochs with the lease service.
+3. A resource that ignores the epoch is unprotected whatever the lease service does.
+
+```mermaid
+sequenceDiagram
+    participant W1
+    participant L as Lease service
+    participant W2
+    participant R as Resource
+    L->>W1: grant epoch 7
+    W1->>R: write a (epoch 7)
+    Note over R: accept, last_epoch 6 → 7
+    Note over W1: pauses past expiry
+    L->>W2: grant epoch 8
+    Note over R: window: still 7 until W2 writes
+    W2->>R: write b (epoch 8)
+    Note over R: accept, last_epoch 7 → 8
+    W1->>R: write c (epoch 7)
+    R-->>W1: STALE_EPOCH (7 < 8)
+```
+
+- Legend: W1/W2 = workers; R = protected resource; last_epoch = last accepted ownership epoch; STALE_EPOCH = rejected stale-owner write.
 
 **Knowledge Check:**
 1. Why is compensation not database rollback?
 2. What failure remains if a downstream resource ignores fencing tokens?
 
 **Guided Practice:**
-(a) A resource has `last_epoch` 11. Writes arrive in this order with epochs 12, 11, 12, 13, 12. Give each decision and the final `last_epoch`. (b) Implement `compensation_pending`, `failed`, `partially_compensated`, and `manual_recovery` paths plus a fenced/unfenced stale-worker test, including a stale write that arrives before the new owner's first write.
+- (a) A resource has `last_epoch` 11. Writes arrive in this order with epochs 12, 11, 12, 13, 12. Give each decision and the final `last_epoch`.
+- (b) Implement `compensation_pending`, `failed`, `partially_compensated`, and `manual_recovery` paths plus a fenced/unfenced stale-worker test, including a stale write that arrives before the new owner's first write.
 
 **Feedback Contract:**
-- *Expected Evidence*: (a) accept (11 → 12), reject, accept (stays 12), accept (12 → 13), reject; final `last_epoch` 13. (b) Compensation dependency order, authorization/evidence, irreversible cases, resource-enforced epochs, and the barrier write or lease check that closes the takeover window.
+- *Expected Evidence*:
+  - (a) accept (11 → 12), reject, accept (stays 12), accept (12 → 13), reject; final `last_epoch` 13.
+  - (b) Compensation dependency order, authorization/evidence, irreversible cases, resource-enforced epochs, and the barrier write or lease check that closes the takeover window.
 - *Common Failure*: Registering compensation after an untracked effect; rejecting the third write in (a) because its epoch "is not new"; checking the epoch in the worker instead of at the resource.
 - *Diagnostic Hint*: Can a paused worker still reach the resource? What has the resource seen at that moment?
 - *Concept to Revisit*: Forward Recovery and Fencing.
@@ -401,16 +593,43 @@ Which membership, deadline, cancellation, and identity state must persist for pa
 
 **Mechanism Explanation:**
 
-For fan-out, persist the expected child set before/with dispatch, stable child IDs, attempts, per-child outcome, join predicate, deadline, cancellation, and duplicate/late handling. An all-of join's latency is at least the slowest critical child plus scheduling/join overhead; total work sums all attempts. Quorum and any-of change success/cancel policy, not the need for durable membership (**D**, CLM-010).
+**Fan-out** (**D**, CLM-010):
+- Persist the expected child set before/with dispatch, stable child IDs, attempts, per-child outcome, join predicate, deadline, cancellation, and duplicate/late handling.
+- An all-of join's latency is at least the slowest critical child plus scheduling/join overhead; total work sums all attempts.
+- Quorum and any-of change success/cancel policy, not the need for durable membership.
 
-Long waits must not occupy worker threads or depend on process memory. Persist timer/event/approval identity, correlation, authorization, payload/schema version, deadline, cancellation, and supersession. Authenticate the human and bind the decision to the exact action preview/version; reject duplicate, expired, or late approval according to policy (**D**, CLM-011).
+**Durable waits** (**D**, CLM-011):
+- Long waits must not occupy worker threads or depend on process memory.
+- Persist timer/event/approval identity, correlation, authorization, payload/schema version, deadline, cancellation, and supersession.
+- Authenticate the human and bind the decision to the exact action preview/version.
+- Reject duplicate, expired, or late approval according to policy.
 
-Measure workflow-history and payload growth. High fan-out, frequent signals, verbose model/tool payloads, and repeated retries can make replay and storage expensive. Use object references, child partitions, compaction/snapshots, or continue-as-new semantics only after documenting changed lineage, atomicity, cancellation, and query behavior (**O**, CLM-013).
+**History growth** (**O**, CLM-013):
+- Measure workflow-history and payload growth. High fan-out, frequent signals, verbose model/tool payloads, and repeated retries can make replay and storage expensive.
+- Mitigations: object references, child partitions, compaction/snapshots, or continue-as-new semantics.
+- Use them only after documenting changed lineage, atomicity, cancellation, and query behavior.
 
 **Quantitative Model / Derivation:**
 For parallel child durations $T_i$, an all-of join cannot succeed before $\max_i T_i$ plus scheduling/join overhead, while total attempted work sums child attempts.
 
-Here $T_i$ is the time from dispatch until child $i$ finally completes (including its retries). The all-of join needs every child, so it waits for the slowest: latency $\ge\max_i T_i$. Work instead adds up every attempt's duration across all children, $\sum_i\sum_j d_{ij}$, where $d_{ij}$ is the running time of attempt $j$ of child $i$. Example from the five-child fixture below, if c4 were allowed to finish at 12 s: completions at 2, 3, 4, 12, 8 s give all-of latency $\ge\max=12$ s, while work is $2+3+4+12+(5+3)=29$ child-seconds. Parallelism shortens the wait, not the work.
+$$
+L \ge \max_i T_i, \qquad W = \sum_i \sum_j d_{ij}
+$$
+
+where:
+- $L$: all-of join latency (s)
+- $T_i$: time from dispatch until child $i$ finally completes, including its retries (s)
+- $W$: total attempted work (child-seconds)
+- $d_{ij}$: running time of attempt $j$ of child $i$ (s)
+
+The all-of join needs every child, so it waits for the slowest. Work instead adds up every attempt's duration across all children.
+
+Example from the five-child fixture below, if c4 were allowed to finish at 12 s:
+- Completions at 2, 3, 4, 12, 8 s.
+- All-of latency: $\ge\max=12$ s.
+- Work: $2+3+4+12+(5+3)=29$ child-seconds.
+
+Parallelism shortens the wait, not the work.
 
 History size and replay cost follow from four declared quantities: events per activity attempt, payload size, run shape, and retention.
 
@@ -420,12 +639,26 @@ H=e_0+N_a e_a+N_{sig},\qquad
 B=H\,m+N_a\,p+N_{sig}\,p_{sig},
 $$
 
+where:
+- $N_a$: activity attempts per run (attempts); $N_{steps}$: steps per run; $n_{act}$: activities per step; $\bar a$: mean attempts per activity.
+- $H$: history event count; $e_0$: fixed events per run; $e_a$: events per attempt; $N_{sig}$: signals per run.
+- $B$: history size (bytes, or KiB when all size inputs use KiB).
+- $m$: metadata size per event; $p$: payload size per attempt; $p_{sig}$: payload size per signal (bytes, or consistently KiB).
+
 $$
 R=\lambda\,(T_{open}+T_{retain}),\qquad
 t_{replay}=\frac{H}{r_e}+\frac{B}{r_b}.
 $$
 
-$N_a$ is activity attempts per run, $H$ history events, $B$ history bytes, $R$ retained histories at steady state (start rate times time in the store), and $t_{replay}$ the time to fetch and replay one history. The formulas are bookkeeping identities for a runtime that records every attempt; every input must be measured for a real runtime.
+where:
+- $R$: retained histories at steady state (runs; start rate times time in the store).
+- $\lambda$: workflow start rate (runs/day).
+- $T_{open}$, $T_{retain}$: open duration and retention after close (days).
+- $t_{replay}$: time to fetch and replay one history (s).
+- $H$, $B$: event count and history size, defined above.
+- $r_e$: event replay rate (events/s); $r_b$: history fetch rate (bytes/s, or MiB/s after converting $B$ to MiB).
+
+The formulas are bookkeeping identities for a runtime that records every attempt; every input must be measured for a real runtime.
 
 Reading each formula (symbols are defined in the input table below):
 1. $N_a$: each of $N_{steps}$ steps runs $n_{act}$ activities, and each activity takes $\bar a$ attempts on average, so attempts multiply.
@@ -459,19 +692,45 @@ Symbol note: $H$ (event count) is unrelated to the intent hashes `h1`, `h2` of L
 | growth per agent step | 15 events, 19.5 KiB | 15 events, 5.0 KiB |
 
 *Step-by-step for the table* (1 MiB = 1,024 KiB; 1 GiB = 1,024 MiB):
-1. $N_a=40\times2\times1.25=100$; $H=5+100\times6+10=615$.
-2. $B$ embedded $=615\times0.3+100\times6+10\times1=184.5+600+10=794.5$ KiB; $794.5/1024=0.776$ MiB. With references, the middle term becomes $100\times0.2=20$, so $B=214.5$ KiB $=0.209$ MiB.
-3. $R=2{,}000\times(2+30)=64{,}000$; storage $64{,}000\times794.5$ KiB $=50{,}848{,}000$ KiB $/1024^2=48.49$ GiB (embedded) and $64{,}000\times214.5$ KiB $=13.09$ GiB (references). The payloads moved out are $64{,}000\times100\times6$ KiB $=36.62$ GiB.
-4. $t_{replay}=615/5{,}000+0.776/20=0.123+0.039=0.162$ s embedded; $0.123+0.209/20=0.123+0.010=0.133$ s with references.
-5. Open runs $=\lambda T_{open}=2{,}000\times2=4{,}000$. Fleet-restart replay work $=4{,}000\times0.162\approx647$ s, and on 16 slots $647/16\approx40.4$ s; with references $4{,}000\times0.133\approx534$ s and $534/16\approx33.4$ s (computed from unrounded times).
-6. Per agent step: events $n_{act}\bar a\,e_a=2\times1.25\times6=15$; bytes $15\times0.3+2.5\times6=4.5+15=19.5$ KiB embedded, $4.5+2.5\times0.2=5.0$ KiB with references.
+1. Activity attempts and events:
+   - $N_a=40\times2\times1.25=100$.
+   - $H=5+100\times6+10=615$.
+2. History bytes:
+   - Embedded: $B=615\times0.3+100\times6+10\times1=184.5+600+10=794.5$ KiB; $794.5/1024=0.776$ MiB.
+   - With references, the middle term becomes $100\times0.2=20$: $B=214.5$ KiB $=0.209$ MiB.
+3. Retained histories and storage:
+   - $R=2{,}000\times(2+30)=64{,}000$.
+   - Embedded: $64{,}000\times794.5$ KiB $=50{,}848{,}000$ KiB; $/1024^2=48.49$ GiB.
+   - References: $64{,}000\times214.5$ KiB $=13.09$ GiB.
+   - Payloads moved out: $64{,}000\times100\times6$ KiB $=36.62$ GiB.
+4. Replay time per history:
+   - Embedded: $t_{replay}=615/5{,}000+0.776/20=0.123+0.039=0.162$ s.
+   - References: $0.123+0.209/20=0.123+0.010=0.133$ s.
+5. Fleet restart (computed from unrounded times):
+   - Open runs: $\lambda T_{open}=2{,}000\times2=4{,}000$.
+   - Embedded: $4{,}000\times0.162\approx647$ s of replay work; on 16 slots $647/16\approx40.4$ s.
+   - References: $4{,}000\times0.133\approx534$ s; on 16 slots $534/16\approx33.4$ s.
+6. Per agent step:
+   - Events: $n_{act}\bar a\,e_a=2\times1.25\times6=15$.
+   - Bytes embedded: $15\times0.3+2.5\times6=4.5+15=19.5$ KiB.
+   - Bytes with references: $4.5+2.5\times0.2=5.0$ KiB.
 
 *Interpretation and limits.*
 - References move bytes; they do not remove them. Total storage is 49.71 GiB with references against 48.49 GiB embedded, and the object store must now retain payloads at least as long as the histories that point to them.
 - The restart figures assume every open run is at full length, perfect parallelism, and no queueing. They size a bound; they do not predict a recovery time. Replay timing counts as evidence only when measured, and a synthetic value must stay labeled synthetic.
 - The replay time with references assumes orchestration code does not read the payloads. If it does, the fetch moves to the object store and returns to the total.
 - One mean history cannot bound a heavy-tailed population. Size the largest runs separately.
-- Limits are runtime-specific. One runtime documents a warning at 10,240 events or 10 MB and termination at 51,200 events or 50 MB of history per execution (**O**, CLM-020). Reading MB as MiB, this model with embedded payloads crosses the warning by size after 524 steps, before the event-count warning at 681 steps. With references, the event count binds first at 681 steps and size not until 2,045. Derivation for $S$ agent steps: the fixed part is $e_0+N_{sig}=15$ events and $15\times0.3+10=14.5$ KiB, and each step adds 15 events and 19.5 KiB (or 5.0 KiB). Events: $15+15S\le10{,}240\Rightarrow S\le681.7$. Size embedded: $14.5+19.5S\le10{,}240\Rightarrow S\le524.4$. Size with references: $14.5+5.0S\le10{,}240\Rightarrow S\le2{,}045.1$. The smallest bound binds first. The same documentation states that an activity's started event is written together with its terminal event, so $e_a$ per *attempt* is exactly the kind of input that must be measured rather than assumed.
+- Limits are runtime-specific. One runtime documents a warning at 10,240 events or 10 MB and termination at 51,200 events or 50 MB of history per execution (**O**, CLM-020). Reading MB as MiB:
+  - Embedded payloads: the size warning is crossed after 524 steps, before the event-count warning at 681 steps.
+  - References: the event count binds first at 681 steps, and size not until 2,045.
+  - Derivation for $S$ agent steps:
+    - Fixed part: $e_0+N_{sig}=15$ events and $15\times0.3+10=14.5$ KiB.
+    - Each step adds 15 events and 19.5 KiB (or 5.0 KiB with references).
+    - Events: $15+15S\le10{,}240\Rightarrow S\le681.7$.
+    - Size embedded: $14.5+19.5S\le10{,}240\Rightarrow S\le524.4$.
+    - Size with references: $14.5+5.0S\le10{,}240\Rightarrow S\le2{,}045.1$.
+    - The smallest bound binds first.
+  - The same documentation states that an activity's started event is written together with its terminal event, so $e_a$ per *attempt* is exactly the kind of input that must be measured rather than assumed.
 
 **Worked Example (synthetic fixture):**
 
@@ -485,7 +744,11 @@ Symbol note: $H$ (event count) is unrelated to the intent hashes `h1`, `h2` of L
 | c4 | 1 | nothing by 10; a completion arrives at 12 | timed out; the result at 12 is recorded as `late` |
 | c5 | 2 | attempt 1 fails at 5; attempt 2 completes at 8 | completed |
 
-*Steps.* Evaluate each join predicate over distinct child IDs in the persisted membership, at each event time. Work is counted from $t=0$ to each attempt's end or cancellation: for quorum at 4 s, c1–c3 contribute 2, 3, 4, and c4 and c5 (attempt 1, still running) are cancelled at 4, contributing 4 each. For all-of, c4 runs to the 10 s deadline and c5 contributes its two attempts, $5+(8-5)=5+3$.
+*Steps.*
+1. Evaluate each join predicate over distinct child IDs in the persisted membership, at each event time.
+2. Count work from $t=0$ to each attempt's end or cancellation:
+   - Quorum at 4 s: c1–c3 contribute 2, 3, 4; c4 and c5 (attempt 1, still running) are cancelled at 4, contributing 4 each.
+   - All-of: c4 runs to the 10 s deadline; c5 contributes its two attempts, $5+(8-5)=5+3$.
 
 | Join policy | Decided at | Outcome | Distinct children counted | Attempted work if cancellation is immediate |
 |---|---:|---|---:|---|
@@ -493,9 +756,15 @@ Symbol note: $H$ (event count) is unrelated to the intent hashes `h1`, `h2` of L
 | quorum 3-of-5 | 4 s | satisfied by c1, c2, c3 | 3 | $2+3+4+4+4=17$ child-seconds; c5's second attempt never starts |
 | all-of | 10 s, the deadline | not satisfied, 4 of 5 | 4 | $2+3+4+10+5+3=27$ child-seconds; 29 if c4 cannot be cancelled and runs to 12 |
 
-*Result.* Five children made six attempts. All-of fails at the deadline as an explicit partial outcome. Quorum succeeds at 4 s. An implementation that counts completion *messages* instead of distinct children reaches three at 3.5 s (c1, c2, and c2's repeat) and declares quorum with only two children done.
+*Result.* Five children made six attempts.
+- All-of fails at the deadline as an explicit partial outcome.
+- Quorum succeeds at 4 s.
+- An implementation that counts completion *messages* instead of distinct children reaches three at 3.5 s (c1, c2, and c2's repeat) and declares quorum with only two children done.
 
-*Late and human events.* c4's completion at 12 s arrives after the join has closed under every policy. It is recorded and not counted. If c4 performed an external effect, that effect exists and must be reconciled or compensated: quorum does not remove late children. The same rule applies to approvals. Take approval request `ap-9`, bound to action preview `p3`, expiring at $t=100$; each row is an independent scenario:
+*Late and human events.*
+- c4's completion at 12 s arrives after the join has closed under every policy. It is recorded and not counted.
+- If c4 performed an external effect, that effect exists and must be reconciled or compensated: quorum does not remove late children.
+- The same rule applies to approvals. Take approval request `ap-9`, bound to action preview `p3`, expiring at $t=100$; each row is an independent scenario:
 
 | Decision received | Rule | Result |
 |---|---|---|
@@ -511,10 +780,19 @@ Symbol note: $H$ (event count) is unrelated to the intent hashes `h1`, `h2` of L
 2. Does quorum remove the need to handle late children?
 
 **Guided Practice:**
-(a) With the per-event constants of the synthetic estimate ($e_a=6$, $e_0=5$, $m=0.3$ KiB, $p=6$ KiB or 0.2 KiB) and no signals, estimate events and bytes per history for 120 steps, 3 activities per step, and 1.5 mean attempts. (b) In the five-child fixture, give the decision time of a 4-of-5 quorum. (c) Estimate history entries for a fan-out/retry workload of your own, compare embedded payloads with object references, and state the changed failure modes.
+- (a) With the per-event constants of the synthetic estimate ($e_a=6$, $e_0=5$, $m=0.3$ KiB, $p=6$ KiB or 0.2 KiB) and no signals, estimate events and bytes per history for 120 steps, 3 activities per step, and 1.5 mean attempts.
+- (b) In the five-child fixture, give the decision time of a 4-of-5 quorum.
+- (c) Estimate history entries for a fan-out/retry workload of your own, compare embedded payloads with object references, and state the changed failure modes.
 
 **Feedback Contract:**
-- *Expected Evidence*: (a) 540 attempts; $5+540\times6=3{,}245$ events; $973.5+3{,}240=4{,}213.5$ KiB (4.11 MiB) embedded; $973.5+108=1{,}081.5$ KiB (1.06 MiB) with references. (b) 8 s, when c5's second attempt completes; the duplicate of c2 does not count. (c) Stable child/approval IDs, membership, join/deadline/cancel policy, late-event handling, and history growth with every input labeled measured or synthetic and with events per attempt, payload size, and retention stated.
+- *Expected Evidence*:
+  - (a) History estimate:
+    - Attempts: $120\times3\times1.5=540$.
+    - Events: $5+540\times6=3{,}245$.
+    - Embedded: $3{,}245\times0.3+540\times6=973.5+3{,}240=4{,}213.5$ KiB (4.11 MiB).
+    - References: $973.5+540\times0.2=973.5+108=1{,}081.5$ KiB (1.06 MiB).
+  - (b) 8 s, when c5's second attempt completes; the duplicate of c2 does not count.
+  - (c) Stable child/approval IDs, membership, join/deadline/cancel policy, late-event handling, and history growth with every input labeled measured or synthetic and with events per attempt, payload size, and retention stated.
 - *Common Failure*: Reconstructing membership from whatever children happen to return; multiplying by activities instead of attempts (3,245 becomes 2,165 events); presenting a synthetic replay time as measured.
 - *Diagnostic Hint*: Can recovery distinguish missing from never-scheduled children? Which inputs of the estimate did you measure?
 - *Concept to Revisit*: Durable Coordination.
@@ -548,12 +826,36 @@ Observe separately:
 
 One "workflow success" counter cannot separate these (**D**, CLM-014).
 
-Build a crash matrix around every boundary: before/after history append, task delivery, external dispatch, external commit, receipt write, activity completion, outbox publish/mark, compensation, timer firing, signal/approval handling, lease expiry/takeover, and join completion.
+Build a crash matrix: inject a crash before and after every boundary below.
 
-The claim that boundary-targeted injection finds more failures than generic restart tests is a hypothesis (**H**, CLM-016). Compare unique actionable failures, escaped incidents, test cost, and oracle divergence. Use a no-failure oracle for final state/effects, while acknowledging that irreversible real-world effects may require a sandbox.
+```mermaid
+flowchart LR
+    B["inject before and after each boundary"] --> HA["history append"]
+    B --> TD["task delivery"]
+    B --> XD["external dispatch"]
+    B --> XC["external commit"]
+    B --> RW["receipt write"]
+    B --> AC["activity completion"]
+    B --> OB["outbox publish/mark"]
+    B --> CP["compensation"]
+    B --> JC["join completion"]
+    B --> TF["timer firing"]
+    B --> SA["signal/approval handling"]
+    B --> LT["lease expiry/takeover"]
+```
+
+- Edges enumerate injection boundaries, not an execution order.
+
+The claim that boundary-targeted injection finds more failures than generic restart tests is a hypothesis (**H**, CLM-016):
+- Compare unique actionable failures, escaped incidents, test cost, and oracle divergence.
+- Use a no-failure oracle for final state/effects, while acknowledging that irreversible real-world effects may require a sandbox.
 
 **Quantitative Model / Trade-off Comparison:**
-Report recovery-time distribution, duplicate/lost/unknown effects, stuck workflows, replay failures, compensation outcomes, and manual interventions by injected boundary. Counts without opportunity denominators cannot compare fault coverage. An *opportunity* is one injected crash at one point: opportunities $=$ boundaries $\times$ sides (before/after) $\times$ trials per point, and a rate is observed failures divided by the opportunities at the same scope. Guided Practice (a) works this out.
+Report by injected boundary: recovery-time distribution, duplicate/lost/unknown effects, stuck workflows, replay failures, compensation outcomes, and manual interventions. Counts without opportunity denominators cannot compare fault coverage:
+- An *opportunity* is one injected crash at one point.
+- Opportunities $=$ boundaries $\times$ sides (before/after) $\times$ trials per point.
+- A rate is observed failures divided by the opportunities at the same scope.
+- Guided Practice (a) works this out.
 
 **Worked Example (synthetic fixture):**
 *Input.* A crash is injected after the external commit and before activity completion, which is case W3 of Lesson 14.2. Two views exist: the workflow dashboard and the receiver's ledger.
@@ -566,10 +868,17 @@ Report recovery-time distribution, duplicate/lost/unknown effects, stuck workflo
 2. Why can a generic process restart miss a narrow acknowledgement window?
 
 **Guided Practice:**
-(a) A matrix has 6 boundaries, each crashed before and after, with 20 trials per injection point. Three duplicate effects are observed, all at "after external commit, before completion". Report the opportunity count and the duplicate rate overall and at that point. (b) Build and execute a boundary matrix from history append through compensation and join completion, using a no-failure oracle where safe.
+- (a) A matrix has 6 boundaries, each crashed before and after, with 20 trials per injection point. Three duplicate effects are observed, all at "after external commit, before completion". Report the opportunity count and the duplicate rate overall and at that point.
+- (b) Build and execute a boundary matrix from history append through compensation and join completion, using a no-failure oracle where safe.
 
 **Feedback Contract:**
-- *Expected Evidence*: (a) $6\times2\times20=240$ opportunities; $3/240=1.25\%$ overall; $3/20=15\%$ at the one boundary. The overall rate hides a defect that is concentrated at one point, and 20 trials is too few to call the other eleven points safe. (b) Fault timing, opportunity count, correlated workflow/activity/effect IDs, oracle delta, and cleanup.
+- *Expected Evidence*:
+  - (a)
+    - Opportunities: $6\times2\times20=240$.
+    - Overall: $3/240=1.25\%$.
+    - At the one boundary: $3/20=15\%$.
+    - The overall rate hides a defect that is concentrated at one point, and 20 trials is too few to call the other eleven points safe.
+  - (b) Fault timing, opportunity count, correlated workflow/activity/effect IDs, oracle delta, and cleanup.
 - *Common Failure*: Declaring recovery correct because the workflow eventually closed; reporting three duplicates without a denominator.
 - *Diagnostic Hint*: What did the external system commit, and how many times was each boundary exercised?
 - *Concept to Revisit*: Boundary-Targeted Falsification.
@@ -593,11 +902,28 @@ How can code evolve while retained histories continue to replay and in-flight wo
 
 **Mechanism Explanation:**
 
-Long-running executions cross software releases. Command-affecting changes—reordering activities/timers, changing identities/types, altering branches, or consuming history differently—can break replay. Use runtime-specific patch/version routing and replay representative retained histories under candidate code before canary (**O**, CLM-012).
+Long-running executions cross software releases. Command-affecting changes can break replay:
+- reordering activities/timers;
+- changing identities/types;
+- altering branches;
+- consuming history differently.
 
-At Temporal Python SDK revision `eb642b14947bd8bcdf8816cffb6a63869803f5c6`, public workflow `start_activity`/`execute_activity` helpers delegate to the current runtime's `workflow_start_activity`; `Replayer.replay_workflow` and `replay_workflows` consume histories and surface replay failures, including nondeterminism (**O**, CLM-015). In `_workflow_replay_iterator`, an eviction hook converts a cache eviction whose reason is nondeterminism into a `NondeterminismError` and stores it as the result's `replay_failure`; `replay_workflow` raises it by default. Static inspection only, re-read at this commit on 2026-10-01. This is a source-reading example, not a universal workflow architecture.
+Use runtime-specific patch/version routing and replay representative retained histories under candidate code before canary (**O**, CLM-012).
 
-Test histories from every active version and branch, including timers waiting, activities pending/retrying, compensation in progress, approvals pending, and history near limits. Define how old workers/code remain available, how new starts route, and when histories/data can be retired.
+At Temporal Python SDK revision `eb642b14947bd8bcdf8816cffb6a63869803f5c6` (**O**, CLM-015; static inspection only, re-read at this commit on 2026-10-01):
+- Public workflow `start_activity`/`execute_activity` helpers delegate to the current runtime's `workflow_start_activity`.
+- `Replayer.replay_workflow` and `replay_workflows` consume histories and surface replay failures, including nondeterminism.
+- In `_workflow_replay_iterator`, an eviction hook converts a cache eviction whose reason is nondeterminism into a `NondeterminismError` and stores it as the result's `replay_failure`; `replay_workflow` raises it by default.
+- This is a source-reading example, not a universal workflow architecture.
+
+Test histories from every active version and branch, including:
+- timers waiting;
+- activities pending/retrying;
+- compensation in progress;
+- approvals pending;
+- history near limits.
+
+Define how old workers/code remain available, how new starts route, and when histories/data can be retired.
 
 **Quantitative Model / Derivation:**
 Capacity planning must measure retained-history count/size, replay latency, task queue delay, and recovery concurrency. These are empirical inputs; one average history cannot bound a heavy-tailed active population.
@@ -613,10 +939,16 @@ Capacity planning must measure retained-history count/size, replay latency, task
 2. When may old workers be retired?
 
 **Independent Practice:**
-(a) A replay corpus holds 120 open histories started on v1 and 300 started on v2. Under candidate v3, all 120 v1 histories fail replay at the same command and all 300 v2 histories pass. State the release decision and when v1 workers may be retired. (b) Replay every active branch/version including near-limit histories, then specify canary, routing, rollback, and data-retirement conditions.
+- (a) A replay corpus holds 120 open histories started on v1 and 300 started on v2. Under candidate v3, all 120 v1 histories fail replay at the same command and all 300 v2 histories pass. State the release decision and when v1 workers may be retired.
+- (b) Replay every active branch/version including near-limit histories, then specify canary, routing, rollback, and data-retirement conditions.
 
 **Feedback Contract:**
-- *Expected Evidence*: (a) v3 is not safe for v1 histories: $120/420\approx28.6\%$ of open runs would be stranded. Either add a patch/version branch and replay again, or route v1 histories to v1 workers. v1 workers may be retired only when no open v1 history remains and none can be reset or queried against that code. (b) History inventory, replay results, compatibility matrix, measured replay cost, and old-code retention plan.
+- *Expected Evidence*:
+  - (a)
+    - v3 is not safe for v1 histories: $120/420\approx28.6\%$ of open runs would be stranded.
+    - Either add a patch/version branch and replay again, or route v1 histories to v1 workers.
+    - v1 workers may be retired only when no open v1 history remains and none can be reset or queried against that code.
+  - (b) History inventory, replay results, compatibility matrix, measured replay cost, and old-code retention plan.
 - *Common Failure*: Testing only newly started workflows; shipping because "most" histories pass.
 - *Diagnostic Hint*: Which recorded command does candidate code emit differently, and which population of histories contains it?
 - *Concept to Revisit*: Replay-Safe Evolution.
@@ -635,23 +967,46 @@ Reading status is stated per entry. *Opened 2026-10-01* means the page or file w
 **REFERENCE / BASELINE**
 
 - [SAGAS](https://www.cs.princeton.edu/techreports/1987/070.pdf) — Garcia-Molina and Salem, Princeton technical report, January 1987. Opened 2026-10-01: abstract and Section 1 only (scanned document).
-  - *Scope*: the saga and compensating-transaction model in Lesson 14.3 (**O**, CLM-007). The abstract frames sagas for a database management system. Whether the report treats irreversible real-world effects was not read in this revision; the statements about them in Lesson 14.3 are this module's derivation (**D**, CLM-008).
+  - *Scope*: the saga and compensating-transaction model in Lesson 14.3 (**O**, CLM-007).
+    - The abstract frames sagas for a database management system.
+    - Whether the report treats irreversible real-world effects was not read in this revision;
+    - the statements about them in Lesson 14.3 are this module's derivation (**D**, CLM-008).
 - [The Chubby Lock Service for Loosely-Coupled Distributed Systems](https://research.google.com/archive/chubby-osdi06.pdf) — Burrows, OSDI 2006. Opened 2026-10-01: Section 2.4, Locks and sequencers.
   - *Scope*: the sequencer check that Lesson 14.3 calls a fencing token (**O**, CLM-018). One system's design from 2006.
 
 **RECOMMENDED ENGINEERING BASELINE** (this module's derivation; earlier revisions labeled this list "CURRENT DEFAULT")
 
-Durable transition history or checkpoints; explicit activity/effect boundaries; stable operation identities; an atomic receiver idempotency transaction or reconciliation; bounded retries; fencing enforced at the resource; durable timers, events, and approvals; version and replay tests; state/activity/effect telemetry.
+Durable transition history or checkpoints;
+- explicit activity/effect boundaries;
+- stable operation identities;
+- an atomic receiver idempotency transaction or reconciliation;
+- bounded retries;
+- fencing enforced at the resource;
+- durable timers, events, and approvals;
+- version and replay tests;
+- state/activity/effect telemetry.
 
 These items follow from stated assumptions (**D**, CLM-001, CLM-004, CLM-005, CLM-006, CLM-008, CLM-009, CLM-010, CLM-011, CLM-014, CLM-019). They are a recommendation. They are not the default of any runtime, and this module has not measured how widely they are adopted.
 
 **DOCUMENTED BEHAVIOR OF NAMED RUNTIMES AND APIS** (observed, scoped to the named source)
 
-- [Temporal Workflow Definition](https://docs.temporal.io/workflow-definition) — opened 2026-10-01. Workflow code must be deterministic to support replay; emitted commands are compared with the existing event history; nondeterministic work belongs in activities; versioning or patching is required for command-changing edits (**O**, CLM-002, CLM-003, CLM-012).
-- [Azure Durable orchestrator code constraints](https://learn.microsoft.com/en-us/azure/durable-task/common/durable-task-code-constraints) — opened 2026-10-01; URL redirect and page date (2026-10-12) re-checked 2026-11-09. Orchestrators replay and must be deterministic; clocks, random values, environment variables, and direct I/O must go through context APIs or activities (**O**, CLM-002).
+- [Temporal Workflow Definition](https://docs.temporal.io/workflow-definition) — opened 2026-10-01.
+  - Workflow code must be deterministic to support replay;
+  - emitted commands are compared with the existing event history;
+  - nondeterministic work belongs in activities;
+  - versioning or patching is required for command-changing edits (**O**, CLM-002, CLM-003, CLM-012).
+- [Azure Durable orchestrator code constraints](https://learn.microsoft.com/en-us/azure/durable-task/common/durable-task-code-constraints) — opened 2026-10-01;
+  - URL redirect and page date (2026-10-12) re-checked 2026-11-09.
+  - Orchestrators replay and must be deterministic;
+  - clocks, random values, environment variables, and direct I/O must go through context APIs or activities (**O**, CLM-002).
   - *Scope of both*: two runtime families that use replay. Not every durable engine does, and neither page describes external-effect safety.
-- [Temporal Cloud limits](https://docs.temporal.io/evaluate/cloud/limits), [Events and Event History](https://docs.temporal.io/workflow-execution/event), and [Child Workflows](https://docs.temporal.io/child-workflows) — opened 2026-10-01. Event-history warning and termination thresholds, and the child-workflow partitioning guidance (**O**, CLM-013, CLM-020). One runtime's documented limits; they can change.
-- [The Idempotency-Key HTTP Header Field](https://datatracker.ietf.org/doc/html/draft-ietf-httpapi-idempotency-key-header-07) (draft-07, 2025-10-15, an expired Internet-Draft) and [one payment API's idempotent-requests page](https://docs.stripe.com/api/idempotent_requests) — opened 2026-10-01 (**O**, CLM-017). A draft and one vendor's API; neither is a standard that endpoints can be assumed to follow.
+- [Temporal Cloud limits](https://docs.temporal.io/evaluate/cloud/limits), [Events and Event History](https://docs.temporal.io/workflow-execution/event), and [Child Workflows](https://docs.temporal.io/child-workflows) — opened 2026-10-01.
+  - Event-history warning and termination thresholds, and the child-workflow partitioning guidance (**O**, CLM-013, CLM-020).
+  - One runtime's documented limits;
+  - they can change.
+- [The Idempotency-Key HTTP Header Field](https://datatracker.ietf.org/doc/html/draft-ietf-httpapi-idempotency-key-header-07) (draft-07, 2025-10-15, an expired Internet-Draft) and [one payment API's idempotent-requests page](https://docs.stripe.com/api/idempotent_requests) — opened 2026-10-01 (**O**, CLM-017).
+  - A draft and one vendor's API;
+  - neither is a standard that endpoints can be assumed to follow.
 
 **INDUSTRY PREVALENCE:** not established by this module. No adoption survey was opened (`TODO_VERIFY`, CLM-023).
 
@@ -659,10 +1014,20 @@ These items follow from stated assumptions (**D**, CLM-001, CLM-004, CLM-005, CL
 
 **FRONTIER** (each scoped to what was read)
 
-- Durable-execution integrations for agent frameworks. One agent framework's documentation lists integrations with several durable-execution systems, and one runtime vendor publishes recipes for durable agent loops, tool calling, and human-in-the-loop approval ([framework page](https://pydantic.dev/docs/ai/capabilities/durable_execution/overview/), [vendor cookbook](https://docs.temporal.io/ai/cookbook); both opened 2026-10-01) (**O**, CLM-022). This shows availability. It does not show adoption, and it does not show that the integrations implement the receiver contract of Lesson 14.2.
+- Durable-execution integrations for agent frameworks (**O**, CLM-022; both pages opened 2026-10-01):
+  - One agent framework's documentation lists integrations with several durable-execution systems ([framework page](https://pydantic.dev/docs/ai/capabilities/durable_execution/overview/)).
+  - One runtime vendor publishes recipes for durable agent loops, tool calling, and human-in-the-loop approval ([vendor cookbook](https://docs.temporal.io/ai/cookbook)).
+  - This shows availability. It does not show adoption, and it does not show that the integrations implement the receiver contract of Lesson 14.2.
 - Replay-safe AI telemetry and richer durable event streams were named in the earlier revision without a source. No primary source was opened (`TODO_VERIFY`, CLM-023).
 
-**LEGACY / INSUFFICIENT:** save the chat transcript and call it a checkpoint; resume from a step number without effect evidence; assume a timeout means no commit; add an idempotency key without atomic receiver support; call compensation rollback; rely on an unfenced lease; block a worker during HITL; upgrade workflow code without replay tests.
+**LEGACY / INSUFFICIENT:** save the chat transcript and call it a checkpoint;
+- resume from a step number without effect evidence;
+- assume a timeout means no commit;
+- add an idempotency key without atomic receiver support;
+- call compensation rollback;
+- rely on an unfenced lease;
+- block a worker during HITL;
+- upgrade workflow code without replay tests.
 
 **PRODUCTION SOURCE TRACE**
 
@@ -670,8 +1035,22 @@ These items follow from stated assumptions (**D**, CLM-001, CLM-004, CLM-005, CL
 - Revision: `eb642b14947bd8bcdf8816cffb6a63869803f5c6`
 - Verified: 2026-09-26; both files and the symbols below were re-read at this revision on 2026-10-01. Static inspection only on both dates.
 - Files/symbols: `temporalio/workflow/_activities.py::{start_activity,execute_activity}` and `temporalio/worker/_replayer.py::{Replayer.replay_workflow,Replayer.replay_workflows,Replayer._workflow_replay_iterator}`.
-- Execution paths: workflow activity helper → current runtime `workflow_start_activity` → handle/result; history iterator → replay worker → eviction/result hook → replay result → raise/aggregate failure.
-- Observed in the re-read: `start_activity` returns `_Runtime.current().workflow_start_activity(...)` and `execute_activity` awaits the same call; `replay_workflow` raises `result.replay_failure` when `raise_on_replay_failure` is true (the default); `replay_workflows` raises on the first failure or collects failures by run ID; the eviction hook maps a nondeterminism eviction to `NondeterminismError`.
+- Execution paths:
+
+```mermaid
+flowchart LR
+    subgraph ACTP["activity path"]
+        AH["workflow activity helper"] --> WSA["current runtime<br/>workflow_start_activity"] --> HR["handle/result"]
+    end
+    subgraph REPP["replay path"]
+        HI["history iterator"] --> RW["replay worker"] --> EH["eviction/result hook"] --> RR["replay result"] --> RA["raise/aggregate failure"]
+    end
+```
+
+- Observed in the re-read: `start_activity` returns `_Runtime.current().workflow_start_activity(...)` and `execute_activity` awaits the same call;
+  - `replay_workflow` raises `result.replay_failure` when `raise_on_replay_failure` is true (the default);
+  - `replay_workflows` raises on the first failure or collects failures by run ID;
+  - the eviction hook maps a nondeterminism eviction to `NondeterminismError`.
 - Scope: one Python SDK snapshot (**O**, CLM-015). The runtime implementation behind `workflow_start_activity`, the server, and the bridge were not read, and recovery was not executed. Other runtimes implement durability differently.
 
 ### LAYER 2: ENGINEERING PRACTICE LAYER
@@ -679,6 +1058,11 @@ These items follow from stated assumptions (**D**, CLM-001, CLM-004, CLM-005, CL
 ## 06 Engineering Labs
 
 All labs follow `PREDICT → BUILD → MEASURE → EXPLAIN → BREAK → IMPROVE → FALSIFY`.
+
+```mermaid
+flowchart LR
+    P["PREDICT"] --> B["BUILD"] --> M["MEASURE"] --> E["EXPLAIN"] --> BR["BREAK"] --> I["IMPROVE"] --> F["FALSIFY"]
+```
 
 ### LAB A — History, Replay, and Crash Recovery
 
@@ -698,7 +1082,9 @@ All labs follow `PREDICT → BUILD → MEASURE → EXPLAIN → BREAK → IMPROVE
 ### LAB B — Effect Safety and Compensation
 
 - **Objective**: Implement atomic receiver idempotency, reconciliation, outbox/inbox, and dependency-aware compensation.
-- **Pre-Registered Hypothesis**: Atomic key+intent+outcome storage will prevent duplicate receiver effects under concurrent duplicate delivery where check-then-act does not. Both receivers are built by the learner, so this checks an implementation against the contract; it is not a finding about any product.
+- **Pre-Registered Hypothesis**: Atomic key+intent+outcome storage will prevent duplicate receiver effects under concurrent duplicate delivery where check-then-act does not.
+  - Both receivers are built by the learner, so this checks an implementation against the contract;
+  - it is not a finding about any product.
 - **Independent Variables**: Deduplication design, crash window, concurrency, retention, key conflict, and compensation failure.
 - **Dependent Variables**: Duplicate/lost/unknown effects, conflicts, reconciliation time, compensation state, and manual work.
 
@@ -744,9 +1130,17 @@ All labs follow `PREDICT → BUILD → MEASURE → EXPLAIN → BREAK → IMPROVE
 
 ### Incident 14.1 — Resumed Agent Duplicates an Irreversible Action
 
-- **Incident Symptoms**: After a timeout and replay, an external action duplicates, compensation fails, a late approval is applied, a stale worker writes after takeover, and older histories fail after rollout.
+- **Incident Symptoms**: After a timeout and replay:
+  - an external action duplicates;
+  - compensation fails;
+  - a late approval is applied;
+  - a stale worker writes after takeover;
+  - older histories fail after rollout.
 - **Diagnostic Protocol (Task)**:
-  1. *Formulate Competing Hypotheses*: Lost acknowledgement, non-atomic/expired idempotency, stale read-back, nested retry, outbox duplicate, compensation order, approval binding, unfenced lease, command drift, history pressure, or queue saturation.
+  1. *Formulate Competing Hypotheses*:
+     - lost acknowledgement; non-atomic/expired idempotency; stale read-back; nested retry; outbox duplicate;
+     - compensation order; approval binding; unfenced lease;
+     - command drift; history pressure; or queue saturation.
   2. *Rank Initial Plausibility*: Use external duplicate and replay evidence without assuming one root cause.
   3. *Identify Missing Evidence*: Recover workflow/history, task attempts, logical operation/intent, receiver records, dispatch/receipt/postconditions, external audit, outbox/inbox, compensation, approval, epochs, replay failure, history size, queue spans, and business outcome.
   4. *Design Discriminating Tests*: Freeze unknown-effect retry, reconcile by logical ID, replay old histories, and inject each crash window with predicted/falsifying outcomes.
@@ -786,7 +1180,10 @@ Submit a pinned trace of a durable runtime's activity and replay paths. The refe
 ### Rubric Dimensions
 
 - **Durability and Replay**: *Insufficient* saves a transcript/step. *Competent* defines acknowledgements and deterministic replay. *Strong* crash-tests durable prefixes and every active code path.
-- **Effects and Recovery**: *Insufficient* assumes timeout means no effect, retries under a new key, or claims exactly-once from a checkpoint. *Competent* uses a stable effect identity, an atomic receiver transaction, and reconciliation, and gives the correct recovery for commit-without-acknowledgement. *Strong* also proves concurrent-duplicate, key-conflict, stale-worker, retention-expiry, and compensation behavior with a table of durable prefix against receiver state.
+- **Effects and Recovery**:
+  - *Insufficient* assumes timeout means no effect, retries under a new key, or claims exactly-once from a checkpoint.
+  - *Competent* uses a stable effect identity, an atomic receiver transaction, and reconciliation, and gives the correct recovery for commit-without-acknowledgement.
+  - *Strong* also proves concurrent-duplicate, key-conflict, stale-worker, retention-expiry, and compensation behavior with a table of durable prefix against receiver state.
 - **Coordination and Capacity**: *Insufficient* keeps joins/approvals in memory or counts completion messages instead of distinct children. *Competent* persists membership, timers, approvals, and fencing, and gives a history estimate with declared inputs. *Strong* measures history/replay growth and failure behavior at limits and keeps measured and synthetic numbers apart.
 - **Diagnosis and Evolution**: *Insufficient* reports final status only. *Competent* correlates workflow/activity/effect evidence. *Strong* uses discriminating crash tests, replay corpora, routing, and remeasurement.
 
@@ -822,7 +1219,13 @@ A learner successfully completing Module 14 must be able to:
 ### Module Wrap-Up (Final Mental Model Reconstruction)
 
 - **The Core Invariant**: A durable runtime remembers decisions, while external reality has independent commit points.
-- **The Recovery Path**: history → deterministic state/command → activity attempt → external effect evidence → commit, reconcile, compensate, or escalate.
+- **The Recovery Path**:
+
+```mermaid
+flowchart LR
+    H["history"] --> SC["deterministic<br/>state/command"] --> AA["activity attempt"] --> EE["external effect<br/>evidence"] --> OUT["commit · reconcile ·<br/>compensate · escalate"]
+```
+
 - Correctness comes from history plus effect identity, atomic idempotency or reconciliation, fencing, explicit compensation, durable coordination, and adversarial crash testing—not from replay alone.
 
 ### Cost & Telemetry Hook

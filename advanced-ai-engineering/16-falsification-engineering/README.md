@@ -2,25 +2,37 @@
 
 ## 00 Why This Module Exists
 
-Evaluation estimates how a system performs on a declared population. Falsification engineering asks a different question: **what controlled search could prove our current requirement, oracle, or causal story wrong?** A passing suite is bounded negative evidence; a valid minimized counterexample is a concrete defect and a new regression asset.
+Evaluation estimates how a system performs on a declared population. Falsification engineering asks a different question: **what controlled search could prove our current requirement, oracle, or causal story wrong?**
+- A passing suite is bounded negative evidence.
+- A valid minimized counterexample is a concrete defect and a new regression asset.
 
-```text
-requirement / hypothesis
-          |
- valid domain + oracle + severity
-          |
- examples | properties | metamorphic | differential | mutation | faults
-          |
- search + stochastic repetitions + complete lineage
-          |
- candidate failure
-          |
- validate -> adjudicate -> minimize -> deduplicate -> attribute
-          |
- fix / accept risk -> promote regression -> remeasure escapes
+```mermaid
+flowchart TD
+    REQ["<b>1. requirement / hypothesis</b>"]
+    DOM["<b>2. valid domain + oracle + severity</b>"]
+    TECH["<b>3. techniques</b><br/>examples · properties · metamorphic · differential · mutation · faults"]
+    SEARCH["<b>4. search</b> + stochastic repetitions + complete lineage"]
+    CAND["<b>5. candidate failure</b>"]
+
+    subgraph TRIAGE["6. triage"]
+        direction LR
+        T1["validate"] --> T2["adjudicate"] --> T3["minimize"] --> T4["deduplicate"] --> T5["attribute"]
+    end
+
+    subgraph CLOSE["7. close"]
+        direction LR
+        C1["fix / accept risk"] --> C2["promote regression"] --> C3["remeasure escapes"]
+    end
+
+    REQ --> DOM --> TECH --> SEARCH --> CAND --> TRIAGE --> CLOSE
 ```
 
-Module 15 owns evaluation programs, estimates, graders, and release decisions. This module owns systematic counterexample search and test adequacy. Module 18 owns the security threat model and controls; Module 23 owns production reliability operations. Security red teams and chaos experiments use this module's methods but keep their domain policy in those modules.
+Ownership boundaries:
+- Module 15 owns evaluation programs, estimates, graders, and release decisions.
+- This module owns systematic counterexample search and test adequacy.
+- Module 18 owns the security threat model and controls.
+- Module 23 owns production reliability operations.
+- Security red teams and chaos experiments use this module's methods but keep their domain policy in those modules.
 
 **Research cutoff:** 2026-09-26 for claims unchanged since registry 1.0.0. Claims added or changed in registry 1.1.0 were checked against sources opened on 2026-10-01, with a landscape cutoff of 2026-09-30.
 
@@ -29,7 +41,10 @@ Module 15 owns evaluation programs, estimates, graders, and release decisions. T
 - **What You Will Do**: Specify falsification contracts, build generators/state machines/shrinkers, validate metamorphic relations, run differential and mutation tests, inject bounded faults, trace Hypothesis, and operate a counterexample lifecycle.
 - **Environment**: Python 3.10+, Hypothesis or an equivalent property-testing engine, isolated model/tool mocks, reproducible seeds, a fault injector, and disposable sandboxes for effectful tests.
 - **Evidence Rule**: Keep source observations (**O**), explicit derivations (**D**), and telemetry-dependent hypotheses (**H**) separate. `CLM-xxx` identifiers point to `research-registry/16-falsification-engineering.yaml`.
-- **Running fixture**: Lessons 16.2–16.6 follow one **synthetic** case, fixture F-16 (timeout after commit), from generation through shrinking, metamorphic adjudication, differential testing, mutation, replay, and promotion. Its traces and tables come from a small deterministic toy model that was executed for this module (**D**, CLM-019). The model is not in the repository and is not a production system; its rules are stated in Lesson 16.2 so the learner can rebuild it in LAB A.
+- **Running fixture**: Lessons 16.2–16.6 follow one **synthetic** case, fixture F-16 (timeout after commit).
+  - It runs from generation through shrinking, metamorphic adjudication, differential testing, mutation, replay, and promotion.
+  - Its traces and tables come from a small deterministic toy model that was executed for this module (**D**, CLM-019).
+  - The model is not in the repository and is not a production system; its rules are stated in Lesson 16.2 so the learner can rebuild it in LAB A.
 - **If You Only Have One Week**: Lessons 16.1, 16.2, 16.3 — they turn a requirement into a falsifiable contract and search it with property, stateful, and metamorphic tests; differential, mutation, fault-injection, and portfolio work build on those three.
 
 ## 01 Baseline Assumptions
@@ -71,7 +86,17 @@ estimated_effort:
 
 Each category is counted once. The 2h source trace is the Section 09 artifact; it is not also counted inside LAB A.
 
-The learner must specify properties and oracles; build valid generators and shrinkers; test stateful protocols; justify metamorphic relations; use differential and mutation testing without oracle illusions; quantify stochastic evidence; separate adaptive discovery from estimation; inject bounded faults; operate a counterexample lifecycle; and trace a pinned property-testing engine.
+The learner must:
+- specify properties and oracles;
+- build valid generators and shrinkers;
+- test stateful protocols;
+- justify metamorphic relations;
+- use differential and mutation testing without oracle illusions;
+- quantify stochastic evidence;
+- separate adaptive discovery from estimation;
+- inject bounded faults;
+- operate a counterexample lifecycle;
+- trace a pinned property-testing engine.
 
 ### LAYER 1: KNOWLEDGE / INSTRUCTIONAL LAYER
 
@@ -103,9 +128,19 @@ How can a vague robustness claim become a bounded predicate whose failure and no
 - **Non-claim**: behavior the search budget or generator cannot establish.
 
 **Mechanism Explanation:**
-Turn “the agent is robust” into observable contracts: schema is always valid; unauthorized effects never occur; adding irrelevant evidence should not change a cited answer; retry preserves one logical effect; cancellation prevents later effects; a locale transformation preserves a task-specific relation. Mark preconditions and acceptable nondeterminism (**D**, CLM-001).
+Turn “the agent is robust” into observable contracts (**D**, CLM-001):
+- schema is always valid;
+- unauthorized effects never occur;
+- adding irrelevant evidence should not change a cited answer;
+- retry preserves one logical effect;
+- cancellation prevents later effects;
+- a locale transformation preserves a task-specific relation.
 
-CheckList's minimum-functionality, invariance, and directional-expectation tests are a useful behavioral vocabulary (**O**, CLM-006). Build a capability × test-type × risk-slice matrix, but do not treat filled cells as proof of completeness. Structural coverage records what was exercised, not whether the oracle checked it correctly (**D**, CLM-013).
+Mark preconditions and acceptable nondeterminism.
+
+CheckList's minimum-functionality, invariance, and directional-expectation tests are a useful behavioral vocabulary (**O**, CLM-006).
+- Build a capability × test-type × risk-slice matrix, but do not treat filled cells as proof of completeness.
+- Structural coverage records what was exercised, not whether the oracle checked it correctly (**D**, CLM-013).
 
 **Quantitative Model / Derivation:**
 For generator support $S_G$ and valid domain $D$, a property test can falsify $P$ only on sampled $x\in S_G\cap D$. Passing provides no direct evidence about $D\setminus S_G$.
@@ -116,11 +151,30 @@ where:
 - $S_G\cap D$ ("intersection") is the inputs that are both reachable and valid — the only place a test can find a real counterexample;
 - $D\setminus S_G$ ("set difference") is the valid inputs the generator can never produce — the non-claims.
 
-*Tiny example (synthetic):* the domain allows amounts 1–100, but a generator draws amounts 1–50. Then $S_G\cap D$ covers amounts 1–50 and $D\setminus S_G$ is amounts 51–100. A million passing cases say nothing about amount 75, because amount 75 was never possible. Inputs in $S_G\setminus D$ (invalid ones the generator *can* produce) are the opposite problem: their failures are harness noise, not counterexamples.
+```mermaid
+flowchart LR
+    SG["S_G only<br/>(invalid but generated)<br/>failures = harness noise"]
+    BOTH["S_G ∩ D<br/>(valid and reachable)<br/>real counterexamples possible"]
+    DO["D only = D ∖ S_G<br/>(valid, never generated)<br/>non-claims"]
+    SG --- BOTH --- DO
+```
+
+Legend: $S_G$ = generator support; $D$ = valid domain.
+
+*Tiny example (synthetic):* the domain allows amounts 1–100, but a generator draws amounts 1–50.
+- $S_G\cap D$ covers amounts 1–50; $D\setminus S_G$ is amounts 51–100.
+- A million passing cases say nothing about amount 75, because amount 75 was never possible.
+- Inputs in $S_G\setminus D$ (invalid ones the generator *can* produce) are the opposite problem: their failures are harness noise, not counterexamples.
 
 **Worked Example (synthetic):**
 - *Input*: the claim “the payment agent is robust to retries.”
-- *Steps*: (1) Predicate: for an authorized transfer intent in the declared schema, the receiver records at most one effect per logical intent. (2) Domain: opened account, amount 1–100, unique intent id, at most two attempts. (3) Oracle: the receiver-side ledger, not the client's response. (4) Generator: action sequences with a fault choice per attempt from {none, request lost, acknowledgement lost}. (5) Budget and seed. (6) Severity: critical, because money moves.
+- *Steps*:
+  1. Predicate: for an authorized transfer intent in the declared schema, the receiver records at most one effect per logical intent.
+  2. Domain: opened account, amount 1–100, unique intent id, at most two attempts.
+  3. Oracle: the receiver-side ledger, not the client's response.
+  4. Generator: action sequences with a fault choice per attempt from {none, request lost, acknowledgement lost}.
+  5. Budget and seed.
+  6. Severity: critical, because money moves.
 - *Result*: a contract that one observation can falsify: two ledger entries for one intent.
 - *Interpretation / limits*: non-claims are part of the result. This generator never crashes the receiver between its own steps and never uses a third attempt, so survival says nothing about either. Fixture F-16 in Lesson 16.2 runs this contract.
 
@@ -132,7 +186,10 @@ where:
 Write a falsification contract for one invariant and list three inputs outside generator support.
 
 **Feedback Contract:**
-- *Expected Output*: requirement, domain/preconditions, oracle, generator/search budget, stopping rule, severity, and at least three named non-claims. Knowledge check 1: cells record that a test exists, not that its oracle is right or that the cell's inputs were reached. Knowledge check 2: the identity and permission state under which the action is attempted.
+- *Expected Output*:
+  - Requirement, domain/preconditions, oracle, generator/search budget, stopping rule, severity, and at least three named non-claims.
+  - Knowledge check 1: cells record that a test exists, not that its oracle is right or that the cell's inputs were reached.
+  - Knowledge check 2: the identity and permission state under which the action is attempted.
 - *Typical Error*: using case count or coverage as correctness, or an oracle that reads only the client's response.
 - *Diagnostic Hint*: What exact observation falsifies the predicate? Who records it?
 - *Concept to Revisit*: bounded negative evidence; generator support.
@@ -158,15 +215,45 @@ How do generators, state machines, and shrinkers find small valid failures witho
 **Mechanism Explanation:**
 QuickCheck established the generator-plus-property pattern (**O**, CLM-002). In AI systems, generate structured prompts, schemas, tool responses, event streams, model outcomes, and action sequences—not arbitrary invalid bytes unless parser rejection is the property.
 
-Measure generator support proxies: category/slice frequencies, boundary-value reach, filter/rejection rate, state/action transitions, and failure yield. Use constructive generators instead of filtering when possible (**D**, CLM-003). “Smallest” is relative to the shrinker's representation and order.
+Measure generator support proxies (**D**, CLM-003):
+- category/slice frequencies;
+- boundary-value reach;
+- filter/rejection rate;
+- state/action transitions;
+- failure yield.
 
-Stateful tests model commands, preconditions, transitions, invariants, and postconditions. Vary retries, cancellation, duplicate/out-of-order events, stale versions, timeout boundaries, and recovery. Record the whole action/observation/effect trace.
+Use constructive generators instead of filtering when possible. “Smallest” is relative to the shrinker's representation and order.
 
-**Production source trace.** At Hypothesis revision `9c55f97e507eae21677457e84737b386fd06e271`, `given` wraps a test, and `find` and `get_state_machine_test` (called by `run_state_machine_as_test`) each build a `@given` test. `StateForActualGivenExecution.run_engine` constructs a `ConjectureRunner` and calls `run`. `ConjectureRunner._run` goes through reuse, generate, and shrink phases; `shrink_interesting_test_cases` calls `Shrinker.shrink`, which runs `initial_coarse_reduction` and `greedy_shrink` (**O**, CLM-014). Static source inspection only.
+Stateful tests model commands, preconditions, transitions, invariants, and postconditions.
+- Vary retries, cancellation, duplicate/out-of-order events, stale versions, timeout boundaries, and recovery.
+- Record the whole action/observation/effect trace.
 
-**What "same failure" means in that engine.** At the same revision, the shrink predicate keeps a candidate only if it is `INTERESTING` with the same `interesting_origin`. `InterestingOrigin` holds the exception type, file name, line number, exception context, and group elements. When `report_multiple_bugs` is disabled the predicate accepts any `INTERESTING` result. Candidates are ordered by `sort_key`: shorter choice sequences first, then smaller choices (**O**, CLM-017).
+**Production source trace.** At Hypothesis revision `9c55f97e507eae21677457e84737b386fd06e271` (**O**, CLM-014; static source inspection only):
 
-That is weaker than this module's signature. Two invariants checked by one `assert` on one line share an origin, so the engine may slide from one to the other. To make the engine preserve the signature, raise each invariant from its own line or exception type, and assert the receiver-side effect count inside the test (**D**, CLM-018).
+```mermaid
+flowchart TD
+    GV["given<br/>(wraps a test)"] --> RE["StateForActualGivenExecution.run_engine"]
+    FIND["find"] -->|"builds @given test"| GV
+    RSM["run_state_machine_as_test"] --> GSM["get_state_machine_test"]
+    GSM -->|"builds @given test"| GV
+    RE --> CR["ConjectureRunner.run"]
+    CR --> RUN["ConjectureRunner._run"]
+    RUN --> P1["reuse phase"] --> P2["generate phase"] --> P3["shrink phase"]
+    P3 --> SITC["shrink_interesting_test_cases"]
+    SITC --> SH["Shrinker.shrink"]
+    SH --> ICR["initial_coarse_reduction"]
+    SH --> GS["greedy_shrink"]
+```
+
+**What "same failure" means in that engine.** At the same revision (**O**, CLM-017):
+- The shrink predicate keeps a candidate only if it is `INTERESTING` with the same `interesting_origin`.
+- `InterestingOrigin` holds the exception type, file name, line number, exception context, and group elements.
+- When `report_multiple_bugs` is disabled the predicate accepts any `INTERESTING` result.
+- Candidates are ordered by `sort_key`: shorter choice sequences first, then smaller choices.
+
+That is weaker than this module's signature (**D**, CLM-018):
+- Two invariants checked by one `assert` on one line share an origin, so the engine may slide from one to the other.
+- To make the engine preserve the signature, raise each invariant from its own line or exception type, and assert the receiver-side effect count inside the test.
 
 **Quantitative Model / Trade-off Comparison:**
 Report slice/boundary/transition reach, rejection rate, unique failure clusters, shrink steps and ratio, predicate calls, replay rate, and execution cost. None alone establishes oracle adequacy.
@@ -197,7 +284,25 @@ Client results: `i1 UNKNOWN`, `i2 UNKNOWN`, `i3 OK`. Receiver ledger: `(i1, i1-a
 
 Target signature: `(INV-ONE-EFFECT, ack_lost_after_commit, receiver_effects(i1)=2)`.
 
-*Steps — signature-preserving shrink.* The shrinker tries, in order: delete a step (last first), replace a fault by a simpler one (`none` < `req_lost` < `ack_lost`), set the amount to 1. It restarts after each accepted step. Selected candidates:
+*Steps — signature-preserving shrink.* The shrinker tries, in order:
+1. delete a step (last first);
+2. replace a fault by a simpler one (`none` < `req_lost` < `ack_lost`);
+3. set the amount to 1.
+
+It restarts after each accepted step. Each candidate goes through this check:
+
+```mermaid
+flowchart TD
+    CAND["Shrink candidate"] --> DOM{"In domain?"}
+    DOM -->|"no"| R1["reject: out of domain"]
+    DOM -->|"yes"| FAIL{"Fails?"}
+    FAIL -->|"no"| R2["reject: no failure"]
+    FAIL -->|"yes"| SIG{"Same signature?"}
+    SIG -->|"no"| R3["reject: different signature"]
+    SIG -->|"yes"| ACC["accept; shrinker restarts"]
+```
+
+Selected candidates:
 
 | Candidate | In domain | Outcome | Receiver effects (i1) | Accepted |
 |---|---|---|---:|---|
@@ -213,7 +318,14 @@ Target signature: `(INV-ONE-EFFECT, ack_lost_after_commit, receiver_effects(i1)=
 
 The run made 24 predicate calls and accepted 8 steps.
 
-*Counting the accepted steps:* deleting steps 8 and 7 (2), deleting the four `note`/`read` steps one at a time (4), simplifying fault 2 (1), and lowering the amount (1) give $2+4+1+1=8$. A **predicate call** is one execution of a candidate plus its oracle check; the table shows only selected candidates, so rejected calls outnumber the visible "no" rows.
+*Counting the accepted steps:*
+- deleting steps 8 and 7: 2;
+- deleting the four `note`/`read` steps one at a time: 4;
+- simplifying fault 2: 1;
+- lowering the amount: 1;
+- total $2+4+1+1=8$.
+
+A **predicate call** is one execution of a candidate plus its oracle check; the table shows only selected candidates, so rejected calls outnumber the visible "no" rows.
 
 *Result — minimized trace.* 2 steps, a shrink ratio of 2/8 (minimized length ÷ original length $=0.25$; lower means more reduction):
 
@@ -246,10 +358,25 @@ This trace is smaller, outside the domain, has no timeout, no retry, and no effe
 3. In the pinned engine, which fields decide that a shrunk case is "the same failure"?
 
 **Guided Practice:**
-(a) Under the F-16 model, the trace `open(B)`, `read(A)`, `transfer(i1, B, 40, (req_lost, ack_lost))`, `transfer(i2, B, 7, (ack_lost, none))` fails. State its signature. Then classify each candidate as accepted or rejected, with the reason: delete `read`; delete `transfer(i2)`; delete `transfer(i1)`; delete `open`; set i2's amount to 1; change i2's first fault to `req_lost`. Give the minimized trace. (b) Generate action sequences with cancellation, retries, stale versions, and unknown effects; implement a signature-preserving shrinker.
+(a) Under the F-16 model, the trace `open(B)`, `read(A)`, `transfer(i1, B, 40, (req_lost, ack_lost))`, `transfer(i2, B, 7, (ack_lost, none))` fails.
+- State its signature.
+- Classify each candidate as accepted or rejected, with the reason: delete `read`; delete `transfer(i2)`; delete `transfer(i1)`; delete `open`; set i2's amount to 1; change i2's first fault to `req_lost`.
+- Give the minimized trace.
+
+(b) Generate action sequences with cancellation, retries, stale versions, and unknown effects; implement a signature-preserving shrinker.
 
 **Feedback Contract:**
-- *Expected Output*: (a) signature `(INV-ONE-EFFECT, ack_lost_after_commit, 2)` on i2 (i1 ends `UNKNOWN` with one effect). Delete `read`: accepted. Delete `transfer(i2)`: rejected, different signature (`INV-TERMINAL-KNOWN`, one effect). Delete `transfer(i1)`: accepted. Delete `open`: rejected, out of domain. Amount to 1: accepted. First fault to `req_lost`: rejected, the duplicate disappears. Minimized: `open(B)`, `transfer(i2, B, 1, (ack_lost, none))`. (b) Support proxies, preconditions, full trace, seed, shrink log with rejection reasons, failure signature, and replay count. Knowledge check 3: exception type, file, line, context, and group elements.
+- *Expected Output*:
+  - (a) Signature `(INV-ONE-EFFECT, ack_lost_after_commit, 2)` on i2 (i1 ends `UNKNOWN` with one effect).
+    - Delete `read`: accepted.
+    - Delete `transfer(i2)`: rejected, different signature (`INV-TERMINAL-KNOWN`, one effect).
+    - Delete `transfer(i1)`: accepted.
+    - Delete `open`: rejected, out of domain.
+    - Amount to 1: accepted.
+    - First fault to `req_lost`: rejected, the duplicate disappears.
+    - Minimized: `open(B)`, `transfer(i2, B, 1, (ack_lost, none))`.
+  - (b) Support proxies, preconditions, full trace, seed, shrink log with rejection reasons, failure signature, and replay count.
+  - Knowledge check 3: exception type, file, line, context, and group elements.
 - *Typical Error*: accepting "delete `transfer(i2)`" because the trace still fails; shrinking out the boundary that caused the defect; an oracle that reads the client response.
 - *Diagnostic Hint*: Does the minimized case fail for the same adjudicated reason, with the same receiver-side effects?
 - *Concept to Revisit*: failure signature and valid shrinking.
@@ -277,27 +404,77 @@ Metamorphic testing replaces a missing single-input oracle with two obligations 
 
 $$R_i(x,x')\Rightarrow R_o(f(x),f(x')).$$
 
-where $x$ is the source input, $x'$ the follow-up input, $f$ the system under test, and $\Rightarrow$ reads "if … then". In words: *if* the pair of inputs satisfies the input relation, *then* the pair of outputs must satisfy the output relation. A violation needs both halves: $R_i$ true **and** $R_o$ false. If $R_i$ is false, the implication says nothing, which is why the verdict is `NOT_APPLICABLE` rather than `PASS`.
+where:
+- $x$: source input; $x'$: follow-up input
+- $f$: system under test; $f(x)$, $f(x')$ its outputs
+- $R_i$: input relation; $R_o$: output relation
+- $\Rightarrow$: reads "if … then"
 
-Both $x,x'$ must remain in-domain; $R_i$ must preserve or deliberately change the relevant semantics; $R_o$ must encode the expected invariant or direction. Candidate relations include permutation invariance only when order is irrelevant, citation preservation under irrelevant distractors, and equivariance under a semantics-preserving locale transform. Each is a claim to be proved for the task, not a default.
+In words: *if* the pair of inputs satisfies the input relation, *then* the pair of outputs must satisfy the output relation.
+- A violation needs both halves: $R_i$ true **and** $R_o$ false.
+- If $R_i$ is false, the implication says nothing, which is why the verdict is `NOT_APPLICABLE` rather than `PASS`.
 
-A 2025 study collected 191 relations for NLP tasks, ran 36 of them on three LLMs, and manually analyzed 937 reported violations. The authors report that roughly 60% were true positives (**O**, CLM-005). That figure is author-reported for their four tasks and relations and does not transfer. Its lesson does: a large share of raw violations can come from the relation, not the system. Never assume synonym replacement, paraphrase, formatting, answer-order swap, or added context is semantically neutral for every task.
+```mermaid
+flowchart LR
+    IN["Source x, follow-up x′<br/>+ run manifest"] --> VAL{"Validator:<br/>R_i holds?<br/>(inputs only)"}
+    VAL -->|"no"| NA["NOT_APPLICABLE"]
+    VAL -->|"yes"| RUN["Run f(x), f(x′)"]
+    RUN --> RO{"R_o holds?"}
+    RO -->|"yes"| PASS["PASS"]
+    RO -->|"no"| VIO["VIOLATION"]
+```
+
+Legend:
+- $x$, $x'$: source and follow-up inputs; $f$: system under test.
+- $R_i$, $R_o$: input and output relations.
+
+Requirements on a relation:
+- Both $x,x'$ must remain in-domain.
+- $R_i$ must preserve or deliberately change the relevant semantics.
+- $R_o$ must encode the expected invariant or direction.
+- Candidate relations include permutation invariance only when order is irrelevant, citation preservation under irrelevant distractors, and equivariance under a semantics-preserving locale transform. Each is a claim to be proved for the task, not a default.
+
+A 2025 study (**O**, CLM-005):
+- collected 191 relations for NLP tasks, ran 36 of them on three LLMs, and manually analyzed 937 reported violations;
+- the authors report that roughly 60% were true positives;
+- that figure is author-reported for their four tasks and relations and does not transfer.
+
+Its lesson does transfer: a large share of raw violations can come from the relation, not the system. Never assume synonym replacement, paraphrase, formatting, answer-order swap, or added context is semantically neutral for every task.
 
 For free-form outputs, separate transformation validity from output-relation grading. Use executable/domain checks where possible and audit any semantic judge independently.
 
 **Quantitative Model / Derivation:**
 
-*An invalid relation: "recall is monotonic when the eligible corpus grows."* With $Recall@k=|Rel\cap Top_k|/|Rel|$ and fixed $k$, this is false. Counterexample: $k=1$, one relevant document $r$ with score 0.8, so $Recall@1=1$. Add one irrelevant document with score 0.9. It takes rank 1 and $Recall@1=0$ (**D**, CLM-016).
+*An invalid relation: "recall is monotonic when the eligible corpus grows."* With $Recall@k=|Rel\cap Top_k|/|Rel|$ and fixed $k$, this is false (**D**, CLM-016).
+- Counterexample: $k=1$, one relevant document $r$ with score 0.8, so $Recall@1=1$.
+- Add one irrelevant document with score 0.9. It takes rank 1 and $Recall@1=0$.
 
-where $Rel$ is the set of relevant documents, $Top_k$ the set of the first $k$ returned documents, $|\cdot|$ set size, and $k$ the cutoff (here $k$ is a rank cutoff, not the reproduction count $k$ of Lesson 16.5). The numerator can only count relevant documents that fit inside the $k$ slots, so a new higher-scoring irrelevant document pushes a relevant one out.
+where:
+- $Rel$: set of relevant documents
+- $Top_k$: set of the first $k$ returned documents
+- $|\cdot|$: set size
+- $k$: rank cutoff (not the reproduction count $k$ of Lesson 16.5)
 
-Corpus growth has no general direction at all. With a corpus-dependent scorer such as BM25, adding irrelevant documents changes the IDF of query terms and can reorder the *old* documents. Example with $tf=1$, no length normalization, and $IDF=\ln\bigl(1+\frac{N-n+0.5}{n+0.5}\bigr)$: corpus $d_1=\{a\}$, $d_2=\{b\}$, $d_3=\{b\}$, $d_4=\{c\}$, query $\{a,b\}$. Scores are $d_1=1.204$ and $d_2=d_3=0.693$, so $d_1$ ranks first. Add three irrelevant documents containing only $a$. Now $IDF(a)=0.575$ and $IDF(b)=1.163$, and $d_2$ ranks first. If $Rel=\{d_2\}$, $Recall@1$ rose from 0 to 1; if $Rel=\{d_1\}$, it fell from 1 to 0.
+The numerator can only count relevant documents that fit inside the $k$ slots, so a new higher-scoring irrelevant document pushes a relevant one out.
+
+Corpus growth has no general direction at all.
+- With a corpus-dependent scorer such as BM25, adding irrelevant documents changes the IDF of query terms and can reorder the *old* documents.
+- Example: $tf=1$, no length normalization, and $IDF=\ln\bigl(1+\frac{N-n+0.5}{n+0.5}\bigr)$ ($tf$: term frequency in the document; $N$, $n$ defined below).
+- Corpus $d_1=\{a\}$, $d_2=\{b\}$, $d_3=\{b\}$, $d_4=\{c\}$; query $\{a,b\}$.
+- Scores: $d_1=1.204$, $d_2=d_3=0.693$, so $d_1$ ranks first.
+- Add three irrelevant documents containing only $a$: now $IDF(a)=0.575$ and $IDF(b)=1.163$, and $d_2$ ranks first.
+- If $Rel=\{d_2\}$, $Recall@1$ rose from 0 to 1; if $Rel=\{d_1\}$, it fell from 1 to 0.
 
 *Step-by-step for the BM25 example.* $N$ is the number of documents in the corpus and $n$ the number containing the term. With $tf=1$ and no length normalization, a document's score is the sum of $IDF$ over query terms it contains.
-1. Before: $N=4$. Term $a$: $n=1$, $IDF(a)=\ln\bigl(1+\frac{4-1+0.5}{1+0.5}\bigr)=\ln(1+2.333)=\ln 3.333=1.204$. Term $b$: $n=2$, $IDF(b)=\ln\bigl(1+\frac{2.5}{2.5}\bigr)=\ln 2=0.693$.
+1. Before: $N=4$.
+   - Term $a$: $n=1$, $IDF(a)=\ln\bigl(1+\frac{4-1+0.5}{1+0.5}\bigr)=\ln(1+2.333)=\ln 3.333=1.204$.
+   - Term $b$: $n=2$, $IDF(b)=\ln\bigl(1+\frac{2.5}{2.5}\bigr)=\ln 2=0.693$.
 2. Scores: $d_1$ contains only $a$, so $1.204$; $d_2,d_3$ contain only $b$, so $0.693$. Rank 1 is $d_1$.
-3. After adding three $\{a\}$ documents: $N=7$. Term $a$: $n=4$, $IDF(a)=\ln\bigl(1+\frac{3.5}{4.5}\bigr)=\ln 1.778=0.575$. Term $b$: $n=2$, $IDF(b)=\ln\bigl(1+\frac{5.5}{2.5}\bigr)=\ln 3.2=1.163$.
-4. Scores: $d_1$ (and each new document) $0.575$; $d_2,d_3$ $1.163$. Rank 1 is now $d_2$ (by tie-break over $d_3$). Term $a$ became common, so it is worth less; $b$ became relatively rarer, so it is worth more.
+3. After adding three $\{a\}$ documents: $N=7$.
+   - Term $a$: $n=4$, $IDF(a)=\ln\bigl(1+\frac{3.5}{4.5}\bigr)=\ln 1.778=0.575$.
+   - Term $b$: $n=2$, $IDF(b)=\ln\bigl(1+\frac{5.5}{2.5}\bigr)=\ln 3.2=1.163$.
+4. Scores: $d_1$ (and each new document) $0.575$; $d_2,d_3$ $1.163$. Rank 1 is now $d_2$ (by tie-break over $d_3$).
+   - Term $a$ became common, so it is worth less; $b$ became relatively rarer, so it is worth more.
 
 *A valid relation, MR-K: grow $k$ on a fixed exact ranking.*
 
@@ -359,7 +536,11 @@ def check_mr_k(src, fol):
 | D | manifest says exact, same lists as C | no problems; `nested_prefix=False` | 1.0 → 0.5 | `VIOLATION` |
 | E | a new document is judged relevant between runs | `relevance universe … differs` | 0.5 → 0.667 | `NOT_APPLICABLE` |
 
-- *Interpretation / limits*: B is the counterexample to the corpus-growth relation; the drop is real and is not a defect under MR-K. C is expected behavior of an approximate index; measure it against exact search with ANN recall (Module 09), not with MR-K. D is a defect candidate: either the manifest is wrong or the "exact" path is not deterministic, and `nested_prefix=False` says where to look. The validator trusts the manifest's `mode` field; confirm it on a sample by brute-force recomputation.
+- *Interpretation / limits*:
+  - B is the counterexample to the corpus-growth relation; the drop is real and is not a defect under MR-K.
+  - C is expected behavior of an approximate index; measure it against exact search with ANN recall (Module 09), not with MR-K.
+  - D is a defect candidate: either the manifest is wrong or the "exact" path is not deterministic, and `nested_prefix=False` says where to look.
+  - The validator trusts the manifest's `mode` field; confirm it on a sample by brute-force recomputation.
 
 **Worked Example B — metamorphic adjudication of fixture F-16 (synthetic, executed toy model):**
 
@@ -377,10 +558,19 @@ With the client fixed to reuse one `effect_id` per intent, MR-2 gives 1 and 1. M
 3. Why must the validator not read the returned rankings?
 
 **Guided Practice:**
-(a) An exact ranking is `d2, d5, d1, d7, d3` with $Rel=\{d_1,d_3\}$. Compute $Recall@k$ for $k=2,3,5$ and state the MR-K verdict for $k=2\to3$ and $k=3\to5$. Then give the verdict for: the same $k$ change after the index was rebuilt from a larger crawl; the same $k$ change on an ANN index. (b) Define five relations with preconditions, including one deliberately invalid transformation, and adjudicate both stages independently.
+(a) An exact ranking is `d2, d5, d1, d7, d3` with $Rel=\{d_1,d_3\}$.
+- Compute $Recall@k$ for $k=2,3,5$ and state the MR-K verdict for $k=2\to3$ and $k=3\to5$.
+- Then give the verdict for: the same $k$ change after the index was rebuilt from a larger crawl; the same $k$ change on an ANN index.
+
+(b) Define five relations with preconditions, including one deliberately invalid transformation, and adjudicate both stages independently.
 
 **Feedback Contract:**
-- *Expected Output*: (a) $Recall@2=0$, $Recall@3=0.5$, $Recall@5=1.0$; both steps `PASS`. Rebuilt index: `NOT_APPLICABLE` (`corpus_hash differs`). ANN index: `NOT_APPLICABLE` (`retrieval mode is not exact`). (b) Relation cards with domain proof, independent output oracle, stochastic repetitions, and a false-positive taxonomy. Knowledge check 3: a relation whose precondition is checked on the outputs it constrains cannot be violated.
+- *Expected Output*:
+  - (a) $Recall@2=0$, $Recall@3=0.5$, $Recall@5=1.0$; both steps `PASS`.
+    - Rebuilt index: `NOT_APPLICABLE` (`corpus_hash differs`).
+    - ANN index: `NOT_APPLICABLE` (`retrieval mode is not exact`).
+  - (b) Relation cards with domain proof, independent output oracle, stochastic repetitions, and a false-positive taxonomy.
+  - Knowledge check 3: a relation whose precondition is checked on the outputs it constrains cannot be violated.
 - *Typical Error*: treating any changed answer as model failure; filing an ANN recall drop or a corpus-growth drop as an MR violation; asserting recall rises with corpus size.
 - *Diagnostic Hint*: Did the transformation preserve the relevant semantics? Which manifest field changed between the two runs?
 - *Concept to Revisit*: input-relation validity; exact versus approximate ranking (Module 09, Lesson 9.3).
@@ -405,18 +595,38 @@ How can disagreement and controlled mutants expose blind spots without pretendin
 - **Subsumed mutant**: one killed by every test that kills another mutant; it adds no information.
 
 **Mechanism Explanation:**
-Differential testing runs comparable implementations or revisions on the same input. DeepXplore demonstrates this family for neural systems (**O**, CLM-007). A disagreement locates a candidate boundary; adjudication decides whether A, B, both, or neither satisfy the contract. Independence matters: related models, shared retrieval, shared prompts, a shared mock, or the same judge can fail together.
+Differential testing runs comparable implementations or revisions on the same input. DeepXplore demonstrates this family for neural systems (**O**, CLM-007).
+- A disagreement locates a candidate boundary; adjudication decides whether A, B, both, or neither satisfy the contract.
+- Independence matters: related models, shared retrieval, shared prompts, a shared mock, or the same judge can fail together.
 
-Mutation testing injects controlled faults into code, configuration, prompt, policy, data, tool response, or workflow guard (**O**, CLM-008). Report operator distribution, equivalence review, subsumption, execution cost, and which test killed which mutant. Include realistic mutants such as removed authorization, wrong timeout unit, missing citation binding, stale version, dropped terminal event, retry after unknown commit, and changed system prompt.
+Mutation testing injects controlled faults into code, configuration, prompt, policy, data, tool response, or workflow guard (**O**, CLM-008).
+- Report operator distribution, equivalence review, subsumption, execution cost, and which test killed which mutant.
+- Include realistic mutants such as removed authorization, wrong timeout unit, missing citation binding, stale version, dropped terminal event, retry after unknown commit, and changed system prompt.
 
 **Quantitative Model / Derivation:**
 With generated mutants $M$, killed mutants $K$, and adjudicated equivalent or invalid mutants $E$:
 
 $$MS=\frac{K}{M-E}.$$
 
-where $MS$ is the mutation score, $M$ the count of generated mutants, $K$ the count killed (at least one test fails on the mutant), and $E$ the count adjudicated equivalent or invalid. The denominator $M-E$ is the number of mutants a test *could* kill: an equivalent mutant behaves correctly, so no correct test should fail on it, and an invalid mutant never runs. Leaving them in the denominator would penalize the suite for something no test can do. (Here $K$ is a count of mutants; it is unrelated to the cutoff $k$ of Lesson 16.3.)
+where:
+- $MS$: mutation score
+- $M$: count of generated mutants
+- $K$: count killed (at least one test fails on the mutant)
+- $E$: count adjudicated equivalent or invalid
 
-Example: 20 generated, 12 killed, 3 equivalent, 1 invalid gives $MS=12/(20-3-1)=0.75$. Step by step: $E=3+1=4$; killable mutants $=20-4=16$; $MS=12/16=0.75$. The naive $12/20=0.60$ understates sensitivity. The score measures sensitivity to the selected operators—not production defect prevalence or correctness. One surviving critical mutant matters more than the score.
+The denominator $M-E$ is the number of mutants a test *could* kill:
+- an equivalent mutant behaves correctly, so no correct test should fail on it;
+- an invalid mutant never runs.
+
+Leaving them in the denominator would penalize the suite for something no test can do. (Here $K$ is a count of mutants; it is unrelated to the cutoff $k$ of Lesson 16.3.)
+
+Example: 20 generated, 12 killed, 3 equivalent, 1 invalid.
+- $E=3+1=4$.
+- Killable mutants: $20-4=16$.
+- $MS=12/16=0.75$.
+- The naive $12/20=0.60$ understates sensitivity.
+
+The score measures sensitivity to the selected operators—not production defect prevalence or correctness. One surviving critical mutant matters more than the score.
 
 **Worked Example — fixture F-16, differential miss and mutation kill table (synthetic, executed toy model):**
 
@@ -427,7 +637,11 @@ Example: 20 generated, 12 killed, 3 equivalent, 1 invalid gives $MS=12/(20-3-1)=
 | Shared mock: commit and acknowledgement are one atomic call, so `ack_lost` cannot be expressed | OK, 1 effect | OK, 1 effect | OK, 1 effect | none | passes for all three |
 | Faithful receiver | OK, 2 effects | OK, 2 effects | OK, 1 effect | A and B agree; C differs | A and B violate `INV-ONE-EFFECT`; C passes |
 
-Two common-mode misses appear. First, the shared mock hides the defect from every target. Second, on the faithful receiver A and B still agree with each other, because they share the id policy. Only a target with an independent design (C) or an oracle that does not depend on agreement exposes the defect. Even then, disagreement alone does not say which side is wrong; the ledger invariant does.
+Two common-mode misses appear:
+1. The shared mock hides the defect from every target.
+2. On the faithful receiver A and B still agree with each other, because they share the id policy.
+
+Only a target with an independent design (C) or an oracle that does not depend on agreement exposes the defect. Even then, disagreement alone does not say which side is wrong; the ledger invariant does.
 
 *Mutation.* Base system: the fixed client (one `effect_id` per intent) and the deduping receiver. Tests:
 - T1: response-only; one request is lost, the retry must end `OK`.
@@ -446,10 +660,19 @@ All four pass on the base system.
 | M5 dedupe store refactored, same behavior | pass | pass | pass | pass | equivalent | equivalent |
 | M6 receiver acknowledges before it commits | pass | pass | pass | pass | survives | **survives** |
 
-- *Steps*: $M=6$, $E=1$ (M5), so $M-E=5$ killable mutants. Before promotion only M2 and M3 are killed by T1, T2, or T4: $K=2$ and $MS=2/5=0.40$. Promoting T3 adds kills of M1 and M4. After promotion $K=4$ and $MS=4/5=0.80$.
+- *Steps*:
+  - $M=6$, $E=1$ (M5), so $M-E=5$ killable mutants.
+  - Before promotion only M2 and M3 are killed by T1, T2, or T4: $K=2$, $MS=2/5=0.40$.
+  - Promoting T3 adds kills of M1 and M4.
+  - After promotion: $K=4$, $MS=4/5=0.80$.
 - *Result*: M1 is the incident's defect, and the suite could not see it until T3 existed. M4 is a second defect class that only T3 kills. M6 survives a suite scoring 0.80.
-- *Why M6 is not equivalent*: a probe outside the suite crashes the receiver between its two steps. The base system then ends with one effect after the retry; M6 ends with the client told `OK` and zero effects. The suite has no fault at that boundary, which is exactly the non-claim recorded in Lesson 16.1.
-- *Interpretation / limits*: the score rose from 0.40 to 0.80 and the most severe survivor is unchanged. Six hand-written mutants are not an operator distribution; a real registry needs systematic operators and an equivalence review.
+- *Why M6 is not equivalent*:
+  - A probe outside the suite crashes the receiver between its two steps.
+  - The base system then ends with one effect after the retry; M6 ends with the client told `OK` and zero effects.
+  - The suite has no fault at that boundary, which is exactly the non-claim recorded in Lesson 16.1.
+- *Interpretation / limits*:
+  - The score rose from 0.40 to 0.80 and the most severe survivor is unchanged.
+  - Six hand-written mutants are not an operator distribution; a real registry needs systematic operators and an equivalence review.
 
 **Knowledge Check:**
 1. Why does disagreement require independent adjudication?
@@ -460,7 +683,10 @@ All four pass on the base system.
 (a) A registry has 15 generated mutants: 9 killed, 2 equivalent, 1 stillborn. Compute $MS$. One survivor removes an authorization check. State what you report. (b) Build a kill matrix across code, configuration, prompt, policy, retrieval, event-order, retry, and stopping mutants.
 
 **Feedback Contract:**
-- *Expected Output*: (a) $MS=9/(15-3)=0.75$; report the score **and** the surviving authorization mutant as a critical gap with the missing test named. (b) Operator distribution, equivalence review, adjudicated disagreement, common dependencies, kill matrix, and cost. Knowledge check 3: a shared defect in both targets, or a shared dependency (mock, retrieval, prompt, judge) that hides the difference.
+- *Expected Output*:
+  - (a) $MS=9/(15-3)=0.75$; report the score **and** the surviving authorization mutant as a critical gap with the missing test named.
+  - (b) Operator distribution, equivalence review, adjudicated disagreement, common dependencies, kill matrix, and cost.
+  - Knowledge check 3: a shared defect in both targets, or a shared dependency (mock, retrieval, prompt, judge) that hides the difference.
 - *Typical Error*: dividing by all 15 mutants (0.60); declaring one disagreeing implementation wrong by identity; reporting a high score while a critical mutant survives.
 - *Diagnostic Hint*: Which oracle or dependency do all targets share? Which test would kill the survivor?
 - *Concept to Revisit*: suite sensitivity and common-mode failure.
@@ -488,22 +714,43 @@ Define the trial unit and preserve failed attempts. Repetitions estimate conditi
 
 Fuzzers and red teams adapt toward weakness. Their finds are discovery evidence, not unbiased prevalence samples (**D**, CLM-010). Freeze promoted regressions and use a separate protected confirmatory sample or an analysis that models adaptive selection.
 
-Fault injection names target boundary, fault, timing, expected invariant, blast radius, abort/cleanup, and recovery oracle (**D**, CLM-011). Inject timeout, malformed/partial response, cancellation race, quota, stale cache, duplicate event, tool failure, worker crash, or lost acknowledgement at controlled boundaries. Synthetic faults may miss correlated provider or regional incidents.
+Fault injection names (**D**, CLM-011):
+- target boundary, fault, timing;
+- expected invariant;
+- blast radius and abort/cleanup;
+- recovery oracle.
+
+Inject timeout, malformed/partial response, cancellation race, quota, stale cache, duplicate event, tool failure, worker crash, or lost acknowledgement at controlled boundaries. Synthetic faults may miss correlated provider or regional incidents.
 
 **Quantitative Model / Derivation:**
 Under IID Bernoulli trials with a fixed failure predicate and zero observed failures in $n$ trials, the exact one-sided upper bound at confidence $1-\alpha$ is
 
 $$p_U=1-\alpha^{1/n}.$$
 
-With $n=100$ and $\alpha=0.05$, $p_U\approx0.0295$ (**D**, CLM-009). By symmetry, $n$ reproductions in $n$ replays give a one-sided lower bound $\alpha^{1/n}$ on the reproduction rate. For $k$ reproductions in $n$ replays with $0<k<n$, report $k/n$ with an exact binomial (Clopper–Pearson) interval. All three assume independent, identically distributed trials. They do not cover unseen prompts and fail under correlated retries, shifting systems, adaptive search, or hidden exclusions.
+where:
+- $p$: unknown per-trial failure probability (dimensionless)
+- $n$: number of trials (count)
+- $\alpha$: error rate we accept (confidence $1-\alpha$, e.g. 95% for $\alpha=0.05$)
+- $p_U$: upper bound on $p$ (dimensionless)
+- $k$: number of reproductions (not the rank cutoff of Lesson 16.3)
 
-where $p$ is the unknown per-trial failure probability, $n$ the number of trials, $\alpha$ the error rate we accept (confidence $1-\alpha$, e.g. 95% for $\alpha=0.05$), $p_U$ the upper bound on $p$, and $k$ the number of reproductions (not the rank cutoff of Lesson 16.3). "IID Bernoulli" means each trial is an independent yes/no draw with the same $p$.
+Reading the bounds (**D**, CLM-009):
+- With $n=100$ and $\alpha=0.05$, $p_U\approx0.0295$.
+- By symmetry, $n$ reproductions in $n$ replays give a one-sided lower bound $\alpha^{1/n}$ on the reproduction rate.
+- For $k$ reproductions in $n$ replays with $0<k<n$, report $k/n$ with an exact binomial (Clopper–Pearson) interval.
+- All three assume independent, identically distributed trials. "IID Bernoulli" means each trial is an independent yes/no draw with the same $p$.
+- They do not cover unseen prompts and fail under correlated retries, shifting systems, adaptive search, or hidden exclusions.
 
 *Step-by-step for $p_U$.*
 1. If the true rate is $p$, the chance that $n$ independent trials all pass is $(1-p)^n$.
 2. The bound is the largest $p$ that is still not "too surprising" given zero failures: set $(1-p_U)^n=\alpha$. Any $p>p_U$ would make a clean run less likely than $\alpha$.
 3. Take the $n$-th root: $1-p_U=\alpha^{1/n}$, so $p_U=1-\alpha^{1/n}$.
-4. Numbers for $n=100$: $\ln 0.05=-2.996$; $-2.996/100=-0.02996$; $e^{-0.02996}=0.9705$; $p_U=1-0.9705=0.0295$. Check: $(1-0.0295)^{100}\approx0.050$.
+4. Numbers for $n=100$:
+   - $\ln 0.05=-2.996$.
+   - $-2.996/100=-0.02996$.
+   - $e^{-0.02996}=0.9705$.
+   - $p_U=1-0.9705=0.0295$.
+   - Check: $(1-0.0295)^{100}\approx0.050$.
 
 Plain reading: 100 clean trials do not show the failure rate is zero; they show it is probably below about 3%. Because $-\ln 0.05\approx3$, $p_U\approx 3/n$ for large $n$, so halving the bound needs twice the trials.
 
@@ -511,15 +758,30 @@ Plain reading: 100 clean trials do not show the failure rate is zero; they show 
 
 *Step-by-step for the reproduction lower bound.* Let $q$ be the reproduction rate. All $n$ replays reproduce with probability $q^n$. Setting $q_L^{\,n}=\alpha$ gives $q_L=\alpha^{1/n}$ — the same algebra with "pass" and "fail" swapped.
 
-*Clopper–Pearson in plain language.* The interval contains every rate $p$ under which the observed $k$ of $n$ would not be in the extreme $\alpha/2$ tail on either side. It is "exact" because it uses the binomial distribution directly instead of a normal approximation, so it stays valid for small $n$ and for $k$ near 0 or $n$. Its width shrinks roughly like $1/\sqrt{n}$: in the worked example below, going from 20 to 200 replays narrows the interval from width 0.438 to 0.132.
+*Clopper–Pearson in plain language.*
+- The interval contains every rate $p$ under which the observed $k$ of $n$ would not be in the extreme $\alpha/2$ tail on either side.
+- It is "exact" because it uses the binomial distribution directly instead of a normal approximation, so it stays valid for small $n$ and for $k$ near 0 or $n$.
+- Its width shrinks roughly like $1/\sqrt{n}$: in the worked example below, going from 20 to 200 replays narrows the interval from width 0.438 to 0.132.
 
 **Worked Example — fixture F-16 under replay (synthetic, executed toy model):**
 - *Input 1, scripted fault*: the minimized trace with `ack_lost` forced on attempt 1. 20 replays.
 - *Result 1*: 20 of 20 reproduce the signature with two receiver effects. One-sided 95% lower bound on the reproduction rate: $0.05^{1/20}=0.861$. The model is deterministic, so the bound is slack; it shows what 20 clean replays can and cannot support.
 - *Input 2, timing race*: no scripted fault. The acknowledgement latency of attempt 1 is drawn from a log-normal distribution with median 80 ms and $\sigma=0.5$; the client timeout is 100 ms; the duplicate occurs when latency exceeds the timeout. Replay seed 163.
-- *Result 2*: 7 of 20 replays reproduce the signature: rate 0.35, exact 95% interval $[0.154,\,0.592]$. With 200 replays: 60 reproduce, rate 0.30, interval $[0.237,\,0.369]$. In this model the true probability is 0.328.
-- *Where 0.328 comes from*: log-normal latency $L$ means $\ln L$ is normal with mean $\ln 80$ and standard deviation $\sigma=0.5$ (σ is on the log scale, not in ms). A duplicate needs $L>100$. Standardize: $z=\frac{\ln 100-\ln 80}{0.5}=\frac{\ln 1.25}{0.5}=\frac{0.223}{0.5}=0.446$. Then $P(L>100)=1-\Phi(0.446)=0.328$, where $\Phi$ is the standard normal CDF. Both intervals contain 0.328; the point estimates 0.35 and 0.30 do not equal it, which is ordinary sampling noise.
-- *Interpretation / limits*: one failing run does not make the case deterministic, and 13 passing replays do not make it fixed. Record the count and interval, and keep the scripted-fault version as the regression test. In every reproducing replay the signature and both ledger entries match; a replay that fails for another reason is counted separately, not as a reproduction. The latency distribution is an exercise assumption.
+- *Result 2*:
+  - 20 replays: 7 reproduce the signature, rate 0.35, exact 95% interval $[0.154,\,0.592]$.
+  - 200 replays: 60 reproduce, rate 0.30, interval $[0.237,\,0.369]$.
+  - In this model the true probability is 0.328.
+- *Where 0.328 comes from*:
+  - Log-normal latency $L$ means $\ln L$ is normal with mean $\ln 80$ and standard deviation $\sigma=0.5$ (σ is on the log scale, not in ms).
+  - A duplicate needs $L>100$.
+  - Standardize: $z=\frac{\ln 100-\ln 80}{0.5}=\frac{\ln 1.25}{0.5}=\frac{0.223}{0.5}=0.446$.
+  - $P(L>100)=1-\Phi(0.446)=0.328$, where $\Phi$ is the standard normal CDF.
+  - Both intervals contain 0.328; the point estimates 0.35 and 0.30 do not equal it, which is ordinary sampling noise.
+- *Interpretation / limits*:
+  - One failing run does not make the case deterministic, and 13 passing replays do not make it fixed.
+  - Record the count and interval, and keep the scripted-fault version as the regression test.
+  - In every reproducing replay the signature and both ledger entries match; a replay that fails for another reason is counted separately, not as a reproduction.
+  - The latency distribution is an exercise assumption.
 - *Contrast*: 100 independent draws on one fixed prompt match the IID model. 100 retries on ten prompts chosen adaptively after near failures do not. Neither covers unseen prompt domains.
 
 **Knowledge Check:**
@@ -527,10 +789,17 @@ Plain reading: 100 clean trials do not show the failure rate is zero; they show 
 2. Which safety controls must accompany fault injection?
 
 **Guided Practice:**
-(a) A fixed case shows 0 failures in 50 independent trials. Give the 95% upper bound. A flaky counterexample reproduces in 12 of 30 replays; give the rate and exact 95% interval. (b) Separate adaptive discovery, protected confirmation, and workload estimation; specify fault boundary, blast radius, abort, cleanup, and recovery oracle.
+(a) Two cases:
+- A fixed case shows 0 failures in 50 independent trials. Give the 95% upper bound.
+- A flaky counterexample reproduces in 12 of 30 replays; give the rate and exact 95% interval.
+
+(b) Separate adaptive discovery, protected confirmation, and workload estimation; specify fault boundary, blast radius, abort, cleanup, and recovery oracle.
 
 **Feedback Contract:**
-- *Expected Output*: (a) $1-0.05^{1/50}=0.058$; $12/30=0.40$ with interval $[0.227,\,0.594]$. (b) Trial unit, independence assumptions, denominator, selection history, system version, fault timing, and cleanup. Knowledge check 2: bounded blast radius, an abort condition, cleanup, and a recovery oracle.
+- *Expected Output*:
+  - (a) $1-0.05^{1/50}=0.058$; $12/30=0.40$ with interval $[0.227,\,0.594]$.
+  - (b) Trial unit, independence assumptions, denominator, selection history, system version, fault timing, and cleanup.
+  - Knowledge check 2: bounded blast radius, an abort condition, cleanup, and a recovery oracle.
 - *Typical Error*: reporting red-team finds as prevalence, applying an IID bound to adaptive trials, or deleting a flaky case instead of measuring its reproduction rate.
 - *Diagnostic Hint*: Did later trials depend on earlier outcomes? Is the denominator every replay or only the ones that failed?
 - *Concept to Revisit*: discovery versus estimation; reproduction rate.
@@ -553,7 +822,17 @@ How should discoveries become durable regression evidence, and which mix of meth
 - **Portfolio evidence**: unique consequential yield, overlap, false positives, cost, latency, and escapes.
 
 **Mechanism Explanation:**
-Every candidate moves through `VALIDATE → ADJUDICATE → MINIMIZE → DEDUPLICATE → ATTRIBUTE → FIX/ACCEPT → PROMOTE → RETIRE/REFRESH` (**D**, CLM-012). Preserve original and minimized cases, transformation/shrink trace, system/oracle versions, raw attempts, effect evidence, root cause, owner, severity, and replay status.
+Every candidate follows this lifecycle (**D**, CLM-012):
+
+```mermaid
+flowchart LR
+    V["VALIDATE"] --> A["ADJUDICATE"] --> M["MINIMIZE"] --> D["DEDUPLICATE"] --> AT["ATTRIBUTE"] --> F["FIX/ACCEPT"] --> P["PROMOTE"] --> R["RETIRE/REFRESH"]
+```
+
+Preserve:
+- original and minimized cases, transformation/shrink trace;
+- system/oracle versions, raw attempts, effect evidence;
+- root cause, owner, severity, and replay status.
 
 Cluster by causal signature, not surface text alone. A flaky failure remains a stochastic test with a measured reproduction rate; it is not silently deleted. Review obsolete fixtures when product requirements change.
 
@@ -562,11 +841,15 @@ The claim that a risk-weighted portfolio beats one coverage objective is a hypot
 **Quantitative Model / Trade-off Comparison:**
 For each method report unique adjudicated clusters and severity alongside compute/judge/human/triage cost, overlap, suite latency, false blocks, replay rate, and escaped incidents. One summary is
 
-$$\text{yield}=\frac{\sum_{\text{unique clusters}}\text{severity weight}}{\text{total cost}},$$
+$$Y=\frac{\sum_{c\in U}w_c}{C},$$
 
-where the weights are risk policy, not measurements.
+where:
+- $Y$: yield (risk-weighted distinct problems found per unit of cost)
+- $U$: set of unique adjudicated clusters found by the method; $c$: cluster index
+- $w_c$: severity weight of cluster $c$ (risk policy, not a measurement)
+- $C$: method's total declared cost, including compute, judge, human, and triage, in one cost unit
 
-The numerator sums one severity weight per **unique adjudicated cluster** the method found — not per case — so 20 duplicates of one cluster count once. The denominator is the method's total declared cost (compute, judge, human, triage) in one unit. Yield is therefore "risk-weighted distinct problems found per unit of cost".
+The numerator sums one severity weight per **unique adjudicated cluster**, not per case; 20 duplicates of one cluster count once.
 
 **Worked Example A — the F-16 ledger entry (synthetic):**
 
@@ -595,10 +878,15 @@ The numerator sums one severity weight per **unique adjudicated cluster** the me
 2. When should a promoted case be retired or refreshed?
 
 **Guided Practice:**
-(a) Method C finds 12 cases in four clusters, three low and one high (weight 5), at cost 3. Compute its yield and rank it against A and B. (b) Run `validate → adjudicate → minimize → deduplicate → attribute → fix/accept → promote`, then compare a risk-weighted portfolio with one coverage-maximizing baseline.
+(a) Method C finds 12 cases in four clusters, three low and one high (weight 5), at cost 3. Compute its yield and rank it against A and B.
+
+(b) Run the lifecycle through promotion (diagram above), then compare a risk-weighted portfolio with one coverage-maximizing baseline.
 
 **Feedback Contract:**
-- *Expected Output*: (a) $(3+5)/3=2.67$; order B (6.0), C (2.67), A (2.0). (b) A ledger with every field of Worked Example A, causal cluster, owner/severity, replay rate, cost, overlap, and escape tracking. Knowledge check 2: when the requirement, protocol, or oracle it encodes changes, or when another case covers the same signature.
+- *Expected Output*:
+  - (a) $(3+5)/3=2.67$; order B (6.0), C (2.67), A (2.0).
+  - (b) A ledger with every field of Worked Example A, causal cluster, owner/severity, replay rate, cost, overlap, and escape tracking.
+  - Knowledge check 2: when the requirement, protocol, or oracle it encodes changes, or when another case covers the same signature.
 - *Typical Error*: ranking by case count; accumulating unreproducible fixtures with no owner; dropping the original trace after minimizing.
 - *Diagnostic Hint*: Which unique risk does this test continue to cover?
 - *Concept to Revisit*: counterexample lifecycle.
@@ -624,13 +912,26 @@ Entries say what was opened and when. Where no date is given, the source was not
 
 **RECOMMENDED ENGINEERING BASELINE** (this module's derivation; earlier revisions labeled this list "CURRENT DEFAULT")
 
-Explicit falsification contracts; valid structured generation; stateful invariants; domain- and signature-preserving shrink; input-relation validation before output adjudication; independent adjudication; discovery/confirmation separation; complete attempt lineage; minimized versioned regression cases; cost and escape accounting.
+Recommended baseline:
+- explicit falsification contracts;
+- valid structured generation and stateful invariants;
+- domain- and signature-preserving shrink;
+- input-relation validation before output adjudication;
+- independent adjudication;
+- discovery/confirmation separation;
+- complete attempt lineage;
+- minimized versioned regression cases;
+- cost and escape accounting.
 
 These follow from stated assumptions (**D**, CLM-001, CLM-003, CLM-009, CLM-010, CLM-011, CLM-012, CLM-013, CLM-016, CLM-018). They are a recommendation. They are not the default of any tool, and this module has not measured how widely they are adopted.
 
 **ONE IMPLEMENTATION'S DEFAULT** (observed, scoped to the named source)
 
-- Hypothesis at the pinned commit: the default settings profile has `max_examples=100`, `stateful_step_count=50`, `derandomize=False`, and a 200 ms deadline; `run_state_machine_as_test` without settings uses `deadline=None`. Shrinking keeps a candidate with the same `interesting_origin` (**O**, CLM-017). This is one library at one revision. A 100-example default is not a recommended budget for an effectful property.
+- Hypothesis at the pinned commit (**O**, CLM-017):
+  - Default settings profile: `max_examples=100`, `stateful_step_count=50`, `derandomize=False`, and a 200 ms deadline.
+  - `run_state_machine_as_test` without settings uses `deadline=None`.
+  - Shrinking keeps a candidate with the same `interesting_origin`.
+  - This is one library at one revision. A 100-example default is not a recommended budget for an effectful property.
 
 **INDUSTRY PREVALENCE:** not established by this module. No adoption survey of property-based, metamorphic, or mutation testing for AI systems was opened (`TODO_VERIFY`, CLM-020).
 
@@ -638,17 +939,35 @@ These follow from stated assumptions (**D**, CLM-001, CLM-003, CLM-009, CLM-010,
 
 **FRONTIER** (scoped to what was read)
 
-- [Metamorphic Testing of Large Language Models for Natural Language Processing](https://arxiv.org/abs/2511.02108) — Cho, Ruberto, Terragni, arXiv v1, 2025. Abstract, introduction, and Section IV opened 2026-10-01 (**O**, CLM-005). Author-reported and not reproduced; its relations and rates need task-specific validation.
+- [Metamorphic Testing of Large Language Models for Natural Language Processing](https://arxiv.org/abs/2511.02108) — Cho, Ruberto, Terragni, arXiv v1, 2025.
+  - Abstract, introduction, and Section IV opened 2026-10-01 (**O**, CLM-005).
+  - Author-reported and not reproduced; its relations and rates need task-specific validation.
 - Other 2025–2026 work on automated relation discovery, LLM-specific mutation operators, and agent fault injection was not surveyed (`TODO_VERIFY`, CLM-020).
 
-**LEGACY / INSUFFICIENT:** random prompts without a domain model; “no failures means safe”; agreement as truth; disagreement as proof one named system is wrong; coverage as correctness; mutation score without equivalent-mutant policy; red-team findings as prevalence; shrinking that changes the failure; "recall can only rise when the corpus grows"; chaos without blast-radius controls.
+**LEGACY / INSUFFICIENT:**
+- random prompts without a domain model;
+- “no failures means safe”;
+- agreement as truth;
+- disagreement as proof one named system is wrong;
+- coverage as correctness;
+- mutation score without equivalent-mutant policy;
+- red-team findings as prevalence;
+- shrinking that changes the failure;
+- "recall can only rise when the corpus grows";
+- chaos without blast-radius controls.
 
 **PRODUCTION SOURCE TRACE**
 
 - Repository: `HypothesisWorks/hypothesis`
 - Revision: `9c55f97e507eae21677457e84737b386fd06e271`
 - Verified: 2026-09-26; files and symbols below re-read at this revision on 2026-10-01. Static inspection only; nothing was executed.
-- Files/symbols, under `hypothesis/src/hypothesis/`: `core.py::{given,find,StateForActualGivenExecution.run_engine}`; `stateful.py::{RuleBasedStateMachine,get_state_machine_test,run_state_machine_as_test}`; `internal/conjecture/engine.py::ConjectureRunner.{run,_run,shrink_interesting_test_cases,shrink,new_shrinker}`; `internal/conjecture/shrinker.py::{sort_key,Shrinker.shrink}`; `internal/escalation.py::InterestingOrigin`; `_settings.py` (default profile).
+- Files/symbols, under `hypothesis/src/hypothesis/`:
+  - `core.py::{given,find,StateForActualGivenExecution.run_engine}`
+  - `stateful.py::{RuleBasedStateMachine,get_state_machine_test,run_state_machine_as_test}`
+  - `internal/conjecture/engine.py::ConjectureRunner.{run,_run,shrink_interesting_test_cases,shrink,new_shrinker}`
+  - `internal/conjecture/shrinker.py::{sort_key,Shrinker.shrink}`
+  - `internal/escalation.py::InterestingOrigin`
+  - `_settings.py` (default profile).
 - Path: `@given` test or state machine → `run_engine` → `ConjectureRunner.run` → reuse / generate / shrink phases → `Shrinker.shrink` with the same-origin predicate.
 
 ### LAYER 2: ENGINEERING PRACTICE LAYER
@@ -666,7 +985,11 @@ All labs follow `PREDICT → BUILD → MEASURE → EXPLAIN → BREAK → IMPROVE
 
 - Specify schema, authorization, cancellation, retry, and effect invariants for a tool-using loop.
 - Rebuild the F-16 model from the rules in Lesson 16.2 as a rule-based state machine with a receiver-side oracle; pin and replay seeds.
-- **Required test**: (i) find a duplicate-effect failure and record the original trace; (ii) minimize it with a signature-preserving shrinker and log every rejected candidate with its reason; (iii) run a shrinker that accepts any failure and show where it leaves the domain or changes signature; (iv) replay the minimized case 20 times and report the count.
+- **Required test**:
+  - (i) find a duplicate-effect failure and record the original trace;
+  - (ii) minimize it with a signature-preserving shrinker and log every rejected candidate with its reason;
+  - (iii) run a shrinker that accepts any failure and show where it leaves the domain or changes signature;
+  - (iv) replay the minimized case 20 times and report the count.
 - Break with invalid overgeneration, heavy filtering, rare transitions, correlated choices, nondeterminism, and a shrinker that changes failure identity.
 - Artifact: support/transition report, original and minimized trace, shrink log, replay count, and explicit non-claims.
 - **Break & Falsify**: Seed a failure that a naive shrinker erases; if the final case changes causal signature, minimization fails.
@@ -788,9 +1111,18 @@ Reviewers use these to check a rebuilt F-16 model. A submission on another syste
 
 ### Rubric Dimensions
 
-- **Contract and Generation** (Deliverables 1–2): *Insufficient* sends random prompts or shrinks to a case with a different signature. *Competent* defines domain/property/oracle, measures support, and logs a signature-preserving shrink. *Strong* produces valid replayable minimized counterexamples with explicit non-claims and shows what a naive shrinker would have done.
-- **Oracles and Adequacy** (Deliverables 3–4): *Insufficient* treats disagreement/coverage as truth or files an invalid relation as a defect. *Competent* validates input relations before output relations and reviews mutants. *Strong* exposes common-mode and equivalent-mutant blind spots through independent adjudication and ranks survivors by hazard.
-- **Statistics and Fault Safety** (Deliverables 5–6): *Insufficient* reports prevalence from adaptive cases, calls a once-seen failure deterministic, or injects uncontrolled faults. *Competent* states trial assumptions, reports reproduction counts with intervals, and contains faults. *Strong* separates discovery/confirmation and proves abort, cleanup, and postconditions.
+- **Contract and Generation** (Deliverables 1–2):
+  - *Insufficient* sends random prompts or shrinks to a case with a different signature.
+  - *Competent* defines domain/property/oracle, measures support, and logs a signature-preserving shrink.
+  - *Strong* produces valid replayable minimized counterexamples with explicit non-claims and shows what a naive shrinker would have done.
+- **Oracles and Adequacy** (Deliverables 3–4):
+  - *Insufficient* treats disagreement/coverage as truth or files an invalid relation as a defect.
+  - *Competent* validates input relations before output relations and reviews mutants.
+  - *Strong* exposes common-mode and equivalent-mutant blind spots through independent adjudication and ranks survivors by hazard.
+- **Statistics and Fault Safety** (Deliverables 5–6):
+  - *Insufficient* reports prevalence from adaptive cases, calls a once-seen failure deterministic, or injects uncontrolled faults.
+  - *Competent* states trial assumptions, reports reproduction counts with intervals, and contains faults.
+  - *Strong* separates discovery/confirmation and proves abort, cleanup, and postconditions.
 - **Lifecycle and Economics** (Deliverables 6–8): *Insufficient* accumulates cases. *Competent* owns, clusters, promotes, and reviews them. *Strong* optimizes unique consequential yield, overlap, latency, triage cost, false blocks, and escapes.
 
 ## 10 Capability Traceability Matrix

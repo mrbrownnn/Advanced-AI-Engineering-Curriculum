@@ -4,17 +4,43 @@
 
 RAG is not “retrieve top-k and paste it into a prompt.” It is a versioned evidence system whose answer depends on source state, index visibility, query transformations, candidate retrieval, context selection and order, generator behavior, citation binding, and conflict policy.
 
-```text
-source change -> parse/chunk/embed -> candidate index -> query-visible revision
-                                                       |
-query -> preserve/rewrite/decompose/route -> retrieve/rerank
-      -> select/deduplicate/order context -> generate claims
-      -> bind citations -> verify/support/abstain -> response
+```mermaid
+flowchart TD
+    subgraph IDX["Index path"]
+        direction LR
+        SC["source change"] --> PCE["parse/chunk/embed"] --> CI["candidate index"] --> QVR["query-visible revision"]
+    end
+    subgraph QRY["Query path"]
+        direction TB
+        Q["query"] --> TR["preserve/rewrite/decompose/route"] --> RET["retrieve/rerank"]
+        RET --> CTX["select/deduplicate/order context"] --> GEN["generate claims"]
+        GEN --> CIT["bind citations"] --> VER["verify/support/abstain"] --> RESP["response"]
+    end
+    QVR --> RET
 ```
 
-A wrong answer can therefore arise because evidence did not exist, was not yet visible, was not retrieved, was omitted from context, was displaced by order or noise, contradicted another version, was ignored by the model, or was cited incorrectly. Those failures require different fixes.
+- Legend: RAG = retrieval-augmented generation.
 
-This module owns query orchestration, incremental-index freshness and version consistency, context assembly, contradiction handling, citations/grounding, staged RAG diagnosis, and RAG-versus-long-context decisions. Module 08 owns upstream data lineage, Module 09 owns retrieval/index/fusion/reranking mechanics, Module 11 owns general context and memory engineering, and Module 15 owns the organization-wide evaluation program.
+A wrong answer can arise because evidence:
+
+- did not exist;
+- was not yet visible;
+- was not retrieved;
+- was omitted from context;
+- was displaced by order or noise;
+- contradicted another version;
+- was ignored by the model;
+- or was cited incorrectly.
+
+Those failures require different fixes.
+
+Ownership:
+
+- **This module:** query orchestration, incremental-index freshness and version consistency, context assembly, contradiction handling, citations/grounding, staged RAG diagnosis, RAG-versus-long-context decisions.
+- **Module 08:** upstream data lineage.
+- **Module 09:** retrieval/index/fusion/reranking mechanics.
+- **Module 11:** general context and memory engineering.
+- **Module 15:** organization-wide evaluation program.
 
 **Research cutoff:** 2026-09-30. Sources marked as re-opened on that date are listed in the registry; other entries keep their original access dates.
 
@@ -22,7 +48,10 @@ This module owns query orchestration, incremental-index freshness and version co
 
 - **Engineering problem:** deliver evidence-backed answers from a mutable corpus under quality, freshness, consistency, latency, cost, access, and abstention constraints.
 - **What you will do:** define a versioned RAG request contract; implement replay-safe updates and deletes; measure query-visible freshness; compare query and context policies; resolve temporal/authority conflicts; audit claim-level citations; test RAG against long-context and hybrid routes; and diagnose stale unsupported answers.
-- **Environment:** Python 3.10+ with a versioned document store/search fixture and reproducible generation endpoint; optional distributed index and load generator for replica/cache/failure tests. Pin source, index, query transformation, prompt, model, evaluator, and cache revisions.
+- **Environment:**
+  - Python 3.10+ with a versioned document store/search fixture and reproducible generation endpoint.
+  - Optional: distributed index and load generator for replica/cache/failure tests.
+  - Pin source, index, query transformation, prompt, model, evaluator, and cache revisions.
 - **Evidence rule:** keep source observations (**O**), derivations (**D**), and telemetry-dependent hypotheses (**H**) distinct. A paper result remains scoped to its model, corpus, retriever, prompt, task, and metric.
 - **If You Only Have One Week**: Lessons 10.1, 10.2, 10.5 — they define the evidence contract, query-visible freshness under updates and deletes, and claim-level citation support; orchestration, contradiction handling, and adaptive routes build on those three.
 
@@ -66,37 +95,59 @@ estimated_effort:
 ```
 Each category is counted once. Lab analysis is not also counted as guided practice, and the source trace is not also counted as assessment time.
 
-The learner must be able to define an end-to-end RAG contract; build idempotent incremental updates and deletes; prove query visibility and snapshot lineage; test query rewrites and context order; resolve or expose contradictions; validate citations at claim level; attribute failures by stage; and choose RAG, long context, or a hybrid route from matched evidence.
+The learner must be able to:
+
+- define an end-to-end RAG contract;
+- build idempotent incremental updates and deletes;
+- prove query visibility and snapshot lineage;
+- test query rewrites and context order;
+- resolve or expose contradictions;
+- validate citations at claim level;
+- attribute failures by stage;
+- choose RAG, long context, or a hybrid route from matched evidence.
 
 ### LAYER 1: KNOWLEDGE / INSTRUCTIONAL LAYER
 
 ## 03 Knowledge Map
 
-```text
-                    mutable source-of-truth
-                             |
-             stable ID + version + event time
-                             v
-      parse -> chunk -> embed -> write -> refresh/commit
-                             |
-                   visible high-watermark
-                             |
-request contract -> query transform -> retrieve/rerank
-                             |
-            evidence eligibility + context budget
-                 /           |            \
-          authority       conflict       ordering
-                 \           |            /
-                    assembled context
-                             |
-                  generator claims
-                             |
-            citation binding + verification
-                             |
-                  answer or abstention
+```mermaid
+flowchart TD
+    SOT["<b>Mutable source-of-truth</b>"]
+    ID["stable ID + version + event time"]
+    subgraph ING["Ingestion"]
+        direction LR
+        I1["parse"] --> I2["chunk"] --> I3["embed"] --> I4["write"] --> I5["refresh/commit"]
+    end
+    HW["<b>Visible high-watermark</b>"]
+    subgraph REQ["Request path"]
+        direction LR
+        R1["request contract"] --> R2["query transform"] --> R3["retrieve/rerank"]
+    end
+    ELIG["<b>Evidence eligibility + context budget</b>"]
+    AUTH["authority"]
+    CONF["conflict"]
+    ORD["ordering"]
+    CTX["<b>Assembled context</b>"]
+    GEN["generator claims"]
+    CIT["citation binding + verification"]
+    OUT["answer or abstention"]
+
+    SOT --> ID --> ING --> HW --> REQ --> ELIG
+    ELIG --> AUTH --> CTX
+    ELIG --> CONF --> CTX
+    ELIG --> ORD --> CTX
+    CTX --> GEN --> CIT --> OUT
 ```
 
-Every request must preserve enough lineage to answer: which source versions were eligible, which were actually retrieved, what entered the prompt and in what order, which claim cites which immutable evidence span, and which policy resolved a conflict.
+- Legend: ID = stable identity; high-watermark = largest source sequence number fully visible in a representation (Lesson 10.2).
+
+Every request must preserve enough lineage to answer:
+
+- which source versions were eligible;
+- which were actually retrieved;
+- what entered the prompt and in what order;
+- which claim cites which immutable evidence span;
+- which policy resolved a conflict.
 
 ## 04 Lessons
 
@@ -107,7 +158,17 @@ Can a delivered answer be reconstructed from an immutable request and evidence b
 
 **Concepts & Definitions:**
 
-Pin the request's query intent and time, tenant/access scope, corpus or index revision, original and transformed queries, retrieval/context budgets, model and prompt versions, answer format, citation semantics, and abstention policy. “Latest” is not a version. A response built from unrecorded mutable state cannot be reproduced or audited.
+Pin the request's:
+
+- query intent and time;
+- tenant/access scope;
+- corpus or index revision;
+- original and transformed queries;
+- retrieval/context budgets;
+- model and prompt versions;
+- answer format, citation semantics, and abstention policy.
+
+“Latest” is not a version. A response built from unrecorded mutable state cannot be reproduced or audited.
 
 The original RAG architecture is a reference: generation is conditioned on retrieved non-parametric evidence (**O**, CLM-001). Production systems add many lossy boundaries. Keep three values separate:
 
@@ -124,7 +185,7 @@ The original RAG architecture is a reference: generation is conditioned on retri
 **Feedback Contract:**
 - *Expected Output*: a trace record whose replay against the recorded snapshot reproduces the same eligible set, candidates, context order, and citation targets. Any dependency that cannot be replayed (for example, a hosted model revision that is no longer served) is listed explicitly as unavailable.
 - *Common Failure*: storing only the final prompt and answer. The prompt shows what the model saw. It does not show which evidence was eligible but not retrieved, or which query transformation ran.
-- *Diagnostic Hint*: remove one field from your trace. Can you still tell whether a wrong answer came from a missing source, an invisible version, or a retrieval miss? If you can, that field was not doing any work.
+- *Diagnostic Hint*: remove one field from your trace. Can you still tell whether a wrong answer came from a missing source, an invisible version, or a retrieval miss? If yes, that field was not doing any work.
 - *Concept to Revisit*: available versus opportunity versus use/support.
 
 **Learning Outcome:** Capture a complete request trace rather than only the final prompt and answer.
@@ -140,35 +201,63 @@ When is a source update or deletion actually visible to production-equivalent re
 
 An update lifecycle is not complete when a worker reports success:
 
-```text
-source event -> detected -> parsed -> chunked -> embedded -> written
-             -> refreshed/committed -> replicated/routed -> cache-visible
-             -> retrieved by a production-equivalent probe
+```mermaid
+flowchart LR
+    E1["source event"] --> E2["detected"] --> E3["parsed"] --> E4["chunked"] --> E5["embedded"] --> E6["written"]
+    E6 --> E7["refreshed/committed"] --> E8["replicated/routed"] --> E9["cache-visible"]
+    E9 --> E10["retrieved by a production-equivalent probe"]
 ```
 
 Define the freshness measurand:
 
 $$
-L_{visible}=t_{query\ visible}-t_{source\ event}.
+L_{\text{vis}}=t_v-t_{\text{ev}}.
 $$
 
 where:
 
-- $t_{source\ event}$: the time the change happened at the source of truth (the declared start endpoint);
-- $t_{query\ visible}$: the first time a production-equivalent query (same route, replica, and cache path a user would hit) returns the new version;
-- $L_{visible}$: the visibility lag in seconds for one event on one read path. Each event and path gives one sample; the SLO is stated over the distribution of samples (for example its p95).
+- $t_{\text{ev}}$: the time the change happened at the source of truth (the declared start endpoint; s);
+- $t_v$: the first time a production-equivalent query (same route, replica, and cache path a user would hit) returns the new version (s);
+- $L_{\text{vis}}$: the visibility lag in seconds for one event on one read path. Each event and path gives one sample; the SLO is stated over the distribution of samples (for example its p95).
 
 A useful split, used in the worked example below, puts the write acknowledgement time $t_w$ between the two endpoints:
 
 $$
-L_{visible}=\underbrace{(t_w-t_{source\ event})}_{\text{before the write}}+\underbrace{(t_{query\ visible}-t_w)}_{\text{after the write}}.
+L_{\text{vis}}=\underbrace{(t_w-t_{\text{ev}})}_{\text{before the write}}+\underbrace{(t_v-t_w)}_{\text{after the write}}.
 $$
 
-This is an identity (add and subtract $t_w$), so it always holds for one event. What it does not give is a per-stage breakdown inside each bracket, because stages can overlap.
+where:
+- $t_w$: write acknowledgement time (s);
+- $t_v$: first query-visible time (s);
+- $t_{	ext{ev}}$: source-event time (s);
+- $L_{	ext{vis}}$: visibility lag (s).
 
-The relation is exact for declared endpoints; decomposing it into stage times requires the actual dependency graph because work may overlap. Record event time semantics and clock skew. Report a distribution and stale-read fraction by source/slice, not only a mean. In Elasticsearch, for example, a write can return before it is searchable, and refresh trades visibility latency against indexing and search work (**O**, CLM-008).
+- This is an identity (add and subtract $t_w$), so it always holds for one event.
+- It does not give a per-stage breakdown inside each bracket; decomposing into stage times requires the actual dependency graph, because work may overlap.
+- Record event time semantics and clock skew.
+- Report a distribution and stale-read fraction by source/slice, not only a mean.
+- In Elasticsearch, for example, a write can return before it is searchable, and refresh trades visibility latency against indexing and search work (**O**, CLM-008).
 
-**Stable IDs and versions are inputs to idempotency; they do not create it.** A retry is safe only if the *store* applies an acceptance rule to every write, and applies it atomically. Each logical source item has a stable `doc_id`. The source assigns each change a monotonically increasing `version` (an event sequence number or source revision, never a worker's wall clock). The store keeps one record per `doc_id`: `(version_s, content_hash_s, state_s ∈ {live, tombstone})`. An incoming event `(op, doc_id, version_e, hash_e)` is decided as follows (**D**, CLM-018):
+**Stable IDs and versions are inputs to idempotency; they do not create it.** A retry is safe only if the *store* applies an acceptance rule to every write, and applies it atomically.
+
+- Each logical source item has a stable `doc_id`.
+- The source assigns each change a monotonically increasing `version` (an event sequence number or source revision, never a worker's wall clock).
+- The store keeps one record per `doc_id`: `(version_s, content_hash_s, state_s ∈ {live, tombstone})`.
+- An incoming event `(op, doc_id, version_e, hash_e)` is decided as follows (**D**, CLM-018):
+
+```mermaid
+flowchart TD
+    IN["Incoming event<br/>(op, doc_id, version_e, hash_e)"] --> R{"Stored record<br/>for doc_id?"}
+    R -- no --> A0["ACCEPT<br/>upsert/create → live · delete → tombstone"]
+    R -- yes --> V{"version_e vs version_s"}
+    V -- "&gt;" --> A1["ACCEPT<br/>upsert → live · delete → tombstone"]
+    V -- "&lt;" --> ST["STALE · no write"]
+    V -- "=" --> H{"Same op and hash?"}
+    H -- yes --> DU["DUPLICATE · no write<br/>return stored outcome"]
+    H -- no --> CF["CONFLICT · no write · alert"]
+```
+
+- Legend: `op` = operation; `doc_id` = stable document identity; `_e` = incoming-event field; `_s` = stored field; `hash` = content hash. Compare and write atomically.
 
 | Stored state | Incoming event | Decision | Store after | Acknowledge source as |
 |---|---|---|---|---|
@@ -181,12 +270,23 @@ The relation is exact for declared endpoints; decomposing it into stage times re
 
 Four conditions make this rule an idempotency guarantee rather than a hope:
 
-1. **Atomicity.** Compare and write must be one atomic step per `doc_id`: a conditional write, a compare-and-set, or a single-writer partition. "Read the stored version, then write" in two steps lets two workers both pass the check. Elasticsearch implements such conditions: `version_type=external` fails the write with a 409 conflict when the supplied version is less than or equal to the stored one, `if_seq_no`/`if_primary_term` make a write conditional on the last modification, and `op_type=create` fails if the ID already exists (**O**, CLM-019). Those are one store's semantics, not a definition for every vector store.
+1. **Atomicity.** Compare and write must be one atomic step per `doc_id`: a conditional write, a compare-and-set, or a single-writer partition.
+   - "Read the stored version, then write" in two steps lets two workers both pass the check.
+   - Elasticsearch implements such conditions (**O**, CLM-019):
+     - `version_type=external` fails the write with a 409 conflict when the supplied version is less than or equal to the stored one;
+     - `if_seq_no`/`if_primary_term` make a write conditional on the last modification;
+     - `op_type=create` fails if the ID already exists.
+   - Those are one store's semantics, not a definition for every vector store.
 2. **Same rule in every representation.** Text, chunks, embeddings, metadata, and citation-target stores each apply the rule with the *source* version, not a local counter. A tombstone that reaches lexical search but not vector search is not a completed delete.
-3. **Tombstones outlive the replay window.** A delete must leave a versioned tombstone. If it is physically removed (or the delete was unversioned) before every delayed or retried event for that `doc_id` has arrived, a late upsert meets "no record" and is accepted. The deleted document comes back.
+3. **Tombstones outlive the replay window.** A delete must leave a versioned tombstone.
+   - If it is physically removed (or the delete was unversioned) before every delayed or retried event for that `doc_id` has arrived, a late upsert meets "no record" and is accepted.
+   - The deleted document comes back.
 4. **Acknowledge after the decision is durable.** The ingestion worker acknowledges a source event only after the ACCEPT/DUPLICATE/STALE/CONFLICT outcome is durably recorded. That acknowledgement means "decided", not "query-visible".
 
-This is the same contract Module 14 (Lesson 14.2) develops for external effects: the receiver stores identity, canonical intent (here, version plus content hash), and outcome atomically, and rejects reuse of a key with different intent. Module 10 applies it to index writes. Durable workflow recovery stays in Module 14.
+This is the same contract Module 14 (Lesson 14.2) develops for external effects:
+
+- The receiver stores identity, canonical intent (here, version plus content hash), and outcome atomically, and rejects reuse of a key with different intent.
+- Module 10 applies it to index writes; durable workflow recovery stays in Module 14.
 
 **Solved traces for one `doc_id`** (synthetic events; hashes `hA ≠ hB`):
 
@@ -202,10 +302,20 @@ The last row is the reason for condition 3. The fix is a tombstone retention per
 
 **Progress watermark versus pinned read snapshot.** These are different objects (**D**, CLM-021):
 
-- A **progress watermark** $H_r$ for representation $r$ is the largest source sequence number $s$ such that every event $\le s$ has been decided and is visible in $r$. It is a monotone progress report. By itself it guarantees nothing about what one request reads.
-- A **pinned read snapshot** $S$ is chosen once per request, and *every* read for that request is served at $S$: lexical, vector, metadata, citation-target fetch, and cache. Enforcement needs one of: a store-level point-in-time or generation/alias read; or an application filter that drops any hit with version newer than $S$ and refuses (or waits for) representations with $H_r<S$. If a representation cannot serve $S$, the response is marked partial or the request abstains.
+- A **progress watermark** $H_r$ for representation $r$ is the largest source sequence number $s$ such that every event $\le s$ has been decided and is visible in $r$.
+  - It is a monotone progress report.
+  - By itself it guarantees nothing about what one request reads.
+- A **pinned read snapshot** $S$ is chosen once per request, and *every* read for that request is served at $S$: lexical, vector, metadata, citation-target fetch, and cache.
+  - Enforcement option 1: a store-level point-in-time or generation/alias read.
+  - Enforcement option 2: an application filter that drops any hit with version newer than $S$ and refuses (or waits for) representations with $H_r<S$.
+  - If a representation cannot serve $S$, the response is marked partial or the request abstains.
 
-Notation: lowercase $s$ is any source sequence number; uppercase $S$ is the one sequence number a request is pinned to. Small example of the watermark definition: if events 100, 101, and 103 are decided and visible in $r$ but 102 is not, then $H_r=101$, not 103, because "every event $\le s$" fails at $s=102$. A request pinned at $S$ can be served by $r$ only when $H_r\ge S$.
+Notation:
+
+- $r$: one representation (lexical, vector, metadata, cache, ...); $H_{lex}$, $H_{vec}$ are $H_r$ for lexical and vector.
+- $s$: any source sequence number; $S$: the one sequence number a request is pinned to.
+- Example: if events 100, 101, and 103 are decided and visible in $r$ but 102 is not, then $H_r=101$, not 103, because "every event $\le s$" fails at $s=102$.
+- A request pinned at $S$ can be served by $r$ only when $H_r\ge S$.
 
 Deletions obligated by policy or law are a separate hard constraint. A snapshot older than a delete must still exclude the deleted item, typically through a tombstone overlay checked at read time.
 
@@ -221,13 +331,18 @@ Deletions obligated by policy or law are a separate hard constraint. A snapshot 
 
 A read-time filter can only *drop* hits newer than $S$. It cannot bring back an older version that the store has already overwritten. Pinning to an older snapshot therefore needs a store that retains that generation; without one, the last row is the only consistent option.
 
-**Cache keys.** Including $S$ (or the index generation), the transformation/prompt versions, and the access scope in the cache key is one strategy. It stops a response built at one snapshot from being served to a request pinned at another. It does not remove the need for delete overlays and for validating the version of each cached citation target, because a key built at an old $S$ can still be requested legitimately. Timeout and retry handling must expose whether a response is stale, partial, failed, or a safe abstention. A fallback that silently serves an older snapshot changes the consistency contract.
+**Cache keys.** One strategy: include $S$ (or the index generation), the transformation/prompt versions, and the access scope in the cache key.
+
+- It stops a response built at one snapshot from being served to a request pinned at another.
+- It does not remove the need for delete overlays and for validating the version of each cached citation target, because a key built at an old $S$ can still be requested legitimately.
+- Timeout and retry handling must expose whether a response is stale, partial, failed, or a safe abstention.
+- A fallback that silently serves an older snapshot changes the consistency contract.
 
 **Worked Example — freshness ledger with two replicas and a cache** (synthetic values, registry CLM-022; times in seconds after the source event at $t=0$):
 
 | Stage | Time | Note |
 |---|---:|---|
-| source event (document `P` updated v7→v8) | 0.0 | declared endpoint $t_{event}$ |
+| source event (document `P` updated v7→v8) | 0.0 | declared endpoint $t_{\text{ev}}$ |
 | change detected, parsed, chunked, embedded | 9.0 | |
 | write acknowledged by primary | 11.0 | $t_w$ |
 | refresh makes v8 searchable on replica R1 | 12.5 | |
@@ -238,12 +353,42 @@ A read-time filter can only *drop* hits newer than $S$. It cannot bring back an 
 
 Steps:
 
-1. Per-path visibility: $L_{visible,R1}=12.5$ s and $L_{visible,R2}=19.0$ s. The post-write portion $t_v-t_w$ is 1.5 s on R1 and 8.0 s on R2. Reporting only $t_v-t_w$ would hide the 11 s before the write. (Here $t_v$ is short for $t_{query\ visible}$ on that replica. Check with the split above: R1 $=11.0+1.5=12.5$ s; R2 $=11.0+8.0=19.0$ s.)
-2. Probes run once per second from $t=0$ to $t=30$ (31 probes), alternating R1 (even seconds) and R2 (odd seconds), bypassing the cache. Stale probes: 7 on R1 ($t=0,2,\dots,12$) and 9 on R2 ($t=1,3,\dots,17$), so $16/31\approx0.516$ of probes in the window are stale. Counting: a probe is stale when it runs before its replica's visibility time. R1 has 16 even-second probes and the ones with $t<12.5$ are $0,2,\dots,12$, that is $12/2+1=7$. R2 has 15 odd-second probes and the ones with $t<19.0$ are $1,3,\dots,17$, that is $(17-1)/2+1=9$. Stale fraction $=(7+9)/(16+15)=16/31$. The fraction depends on the window length chosen, so report the window with it.
-3. The cache is independent of both replicas. With no invalidation, the cached v7 answer is served until $t=65$. With invalidation at $t=12.0$ and a cache miss refilled from R2 at $t=12.2$, the refill stores v7 again and serves it until $t=72.2$. Invalidation without a version check made the cache *later* than either replica. A cache key or entry check that requires version ≥ v8 prevents that refill.
+1. Per-path visibility ($t_v$ is the query-visible time on that replica, $t_w$ the write time):
+   - R1: $L_{\text{vis}} = 11.0 + 1.5 = 12.5$ s; post-write portion $t_v - t_w = 1.5$ s.
+   - R2: $L_{\text{vis}} = 11.0 + 8.0 = 19.0$ s; post-write portion $t_v - t_w = 8.0$ s.
+   - Reporting only $t_v - t_w$ would hide the 11 s before the write.
+2. Probes run once per second from $t=0$ to $t=30$ (31 probes), alternating R1 (even seconds) and R2 (odd seconds), bypassing the cache. A probe is stale when it runs before its replica's visibility time.
+   - R1: 16 even-second probes; stale ones have $t < 12.5$, i.e. $t = 0, 2, \dots, 12$: $12/2 + 1 = 7$.
+   - R2: 15 odd-second probes; stale ones have $t < 19.0$, i.e. $t = 1, 3, \dots, 17$: $(17 - 1)/2 + 1 = 9$.
+   - Stale fraction: $(7 + 9)/(16 + 15) = 16/31 \approx 0.516$.
+   - The fraction depends on the window length chosen, so report the window with it.
+3. The cache is independent of both replicas.
+   - No invalidation: cached v7 answer served until $t=5+60=65$.
+   - Invalidation at $t=12.0$, cache miss refilled from R2 at $t=12.2$: refill stores v7 again (R2 not fresh until 19.0) and serves it until $t=12.2+60=72.2$.
+   - Invalidation without a version check made the cache *later* than either replica.
+   - A cache key or entry check that requires version ≥ v8 prevents that refill.
+
+   ```mermaid
+   sequenceDiagram
+       participant C as Cache
+       participant R2 as Replica R2
+       Note over C: t=5 entry built, holds v7 (TTL 60 s)
+       Note over C: t=12.0 invalidated
+       C->>R2: t=12.2 miss → refill
+       R2-->>C: v7 (R2 visible only at 19.0)
+       Note over C: serves v7 until t=72.2
+   ```
+
+   - Legend: R2 = replica 2; v7 = old document version; TTL = time to live; $t$ = seconds after source event.
+
 4. For `Q`, the lexical path stops returning it at 12 s, but the vector path still returns it until 40 s. That is an incomplete delete, not refresh lag.
 
-Interpretation: an "index refresh lag" hypothesis predicts that direct replica probes and cached answers become fresh at the same time. At $t=30$ both direct replica probes return v8 while the cached path returns v7, so index lag is **refuted** as the cause of staleness after 19 s. The remaining causes are the cache and, for `Q`, the failed vector delete. Limits: the numbers are synthetic, the probe schedule is deterministic, and a real measurement needs clock-skew bounds and a distribution over many events, not one document.
+Interpretation:
+
+- An "index refresh lag" hypothesis predicts that direct replica probes and cached answers become fresh at the same time.
+- At $t=30$ both direct replica probes return v8 while the cached path returns v7, so index lag is **refuted** as the cause of staleness after 19 s.
+- Remaining causes: the cache and, for `Q`, the failed vector delete.
+- Limits: numbers are synthetic, the probe schedule is deterministic, and a real measurement needs clock-skew bounds and a distribution over many events, not one document.
 
 **Knowledge Check:**
 1. Why does worker success not establish cache or replica visibility?
@@ -253,7 +398,12 @@ Interpretation: an "index refresh lag" hypothesis predicts that direct replica p
 **Guided Practice:** Inject duplicate, reordered, delayed, failed, and timed-out events across text/vector/cache representations; probe high-watermarks and deletion convergence. Then decide these two traces with the acceptance table: (a) `create v1 hA; upsert v3 hB; upsert v2 hC; delete v3`; (b) `upsert v5; delete v6; GC after 30 s; upsert v5 retry arriving at 45 s`.
 
 **Feedback Contract:**
-- *Expected Output*: (a) ACCEPT, ACCEPT, STALE, CONFLICT: the delete reuses version 3 with a different op, so it is rejected and alerted, and the item stays live at v3 hB. The source must issue the delete as v4. (b) The retry meets "no record" and is accepted, resurrecting the document; the design fails unless tombstone retention exceeds 45 s. Your ledger should also report visibility as a distribution per representation, the stale/partial rate, and a rollback proof. Knowledge Check 2: the final state is tombstone v3, because the retry is STALE; it is safe only while the tombstone is retained. Knowledge Check 3: a watermark says how far each representation has progressed, and two representations can have different watermarks at the moment one request reads both.
+- *Expected Output*:
+  - (a) ACCEPT, ACCEPT, STALE, CONFLICT: the delete reuses version 3 with a different op, so it is rejected and alerted, and the item stays live at v3 hB. The source must issue the delete as v4.
+  - (b) The retry meets "no record" and is accepted, resurrecting the document; the design fails unless tombstone retention exceeds 45 s.
+  - The ledger should also report visibility as a distribution per representation, the stale/partial rate, and a rollback proof.
+  - Knowledge Check 2: the final state is tombstone v3, because the retry is STALE; it is safe only while the tombstone is retained.
+  - Knowledge Check 3: a watermark says how far each representation has progressed, and two representations can have different watermarks at the moment one request reads both.
 - *Common Failure*: averaging only successful updates; or treating stable IDs plus versions as idempotent without an atomic conditional write.
 - *Diagnostic Hint*: for each event ask "who compares the version, and can two workers both pass that comparison?" For each stale read ask "was the replica behind, or did the cache refill from a replica that was behind?"
 - *Concept to Revisit*: conditional acceptance rule; progress watermark versus pinned read snapshot; Module 14 Lesson 14.2 (atomic idempotency).
@@ -269,11 +419,36 @@ Which query transformation and context packing choices improve evidence opportun
 
 **Concepts & Definitions:**
 
-Preserving the original query is a valid route. Rewriting, expansion, decomposition, and multi-step retrieval are interventions that can improve evidence opportunity or silently alter identifiers, negation, scope, entity, and time. Log every transformation and compare it with the original using paired slices (**H**, CLM-009).
+Preserving the original query is a valid route (**H**, CLM-009):
 
-Context assembly is constrained selection, not concatenation. Candidate evidence differs in relevance, authority, freshness, length, redundancy, conflict, and access eligibility. Deduplicate by stable identity/version, retain source boundaries, budget tokens, and vary order deliberately (**D**, CLM-010).
+- Rewriting, expansion, decomposition, and multi-step retrieval are interventions.
+- They can improve evidence opportunity, or silently alter identifiers, negation, scope, entity, and time.
+- Log every transformation and compare it with the original using paired slices.
 
-Fusion-in-Decoder shows that a model can aggregate multiple retrieved passages in a scoped QA setup (**O**, CLM-002). Lost in the Middle (**O**, CLM-003) and FreshLLMs (**O**, CLM-004) show why “more context” is not a universal rule: evidence position, amount, and order can matter. Test depth/order matrices, relevant-plus-distractor mixtures, duplicate amplification, and truncation for the target model and prompt.
+Context assembly is constrained selection, not concatenation (**D**, CLM-010):
+
+- Candidate evidence differs in relevance, authority, freshness, length, redundancy, conflict, and access eligibility.
+- Deduplicate by stable identity/version, retain source boundaries, budget tokens, and vary order deliberately.
+
+```mermaid
+flowchart LR
+    Q["Original query"] --> T{"Route"}
+    T --> P["preserve"]
+    T --> RW["rewrite / expand"]
+    T --> DC["decompose / multi-step"]
+    P --> C["Candidates"]
+    RW --> C
+    DC --> C
+    C --> D["Dedupe by ID/version"] --> E["Drop ineligible<br/>(access · superseded)"] --> B["Fit token budget"] --> O["Order deliberately"] --> X["Assembled context"]
+```
+
+- Legend: ID = stable document identity.
+
+Evidence on context amount and order:
+
+- Fusion-in-Decoder shows that a model can aggregate multiple retrieved passages in a scoped QA setup (**O**, CLM-002).
+- Lost in the Middle (**O**, CLM-003) and FreshLLMs (**O**, CLM-004) show why “more context” is not a universal rule: evidence position, amount, and order can matter.
+- Test depth/order matrices, relevant-plus-distractor mixtures, duplicate amplification, and truncation for the target model and prompt.
 
 **Worked Example — packing five candidates into a 1,000-token evidence budget** (synthetic candidates, registry CLM-022).
 
@@ -287,20 +462,44 @@ Fusion-in-Decoder shows that a model can aggregate multiple retrieved passages i
 
 Steps:
 
-Both policies below walk the list in rank order and add a chunk only if the running total stays within the budget $B=1{,}000$ tokens, i.e. chunk $k$ is added when $\sum_{j\in\text{context}} tokens_j + tokens_k \le B$. They differ only in which chunks are eligible before that walk starts.
+Both policies below walk the list in rank order and add a chunk only if the running total stays within the budget. They differ only in which chunks are eligible before that walk starts. Chunk $k$ is added when
 
-1. *Concatenate by rank:* k1 (450) + k2 (400) = 850 tokens. k3 does not fit (1,150). The context holds one document twice and does not contain k4.
-2. *Constrained selection:* drop k2 as a duplicate of k1 by document/version and overlap; drop k3 because a newer version is eligible. Remaining in rank order: k1 (450), k4 (350), k5 (250). k1 + k4 = 800 fits; adding k5 gives 1,050, which does not. Context = {k1, k4}, 800 tokens, 200 unused.
+$$\sum_{j\in\text{ctx}} T_j + T_k \le B$$
+
+where:
+- $B=1{,}000$: evidence budget (tokens);
+- $T_j$, $T_k$: token counts of chunks $j$, $k$ (tokens);
+- $\text{ctx}$: chunks already in the context;
+- $k$: the candidate chunk being considered.
+
+1. *Concatenate by rank:*
+   - k1 + k2: $450 + 400 = 850$ tokens.
+   - Adding k3 gives $1{,}150 > 1{,}000$: does not fit.
+   - The context holds one document twice and does not contain k4.
+2. *Constrained selection:*
+   - Drop k2 as a duplicate of k1 by document/version and overlap; drop k3 because a newer version is eligible.
+   - Remaining in rank order: k1 (450), k4 (350), k5 (250).
+   - k1 + k4: $450 + 350 = 800$ fits; adding k5 gives $1{,}050$, which does not.
+   - Context = {k1, k4}, 800 tokens, 200 unused.
 3. *Result:* evidence opportunity for the needed qualifier is 0 in the first context and 1 in the second, with 50 fewer tokens ($850-800=50$).
 
-Interpretation and limits: the gain here comes from selection, with retrieval unchanged. Whether the model then *uses* k4 is a separate measurement. To test placement, hold the context {k1, k4} fixed and move k4 from first to last, then add distractors; a quality change under that design isolates placement sensitivity more directly than changing retrieval and order together. The table does not predict which order is better for a given model.
+Interpretation and limits:
+
+- The gain here comes from selection, with retrieval unchanged.
+- Whether the model then *uses* k4 is a separate measurement.
+- To test placement, hold the context {k1, k4} fixed, move k4 from first to last, then add distractors; a quality change under that design isolates placement sensitivity more directly than changing retrieval and order together.
+- The table does not predict which order is better for a given model.
 
 **Knowledge Check:** Why can rewriting improve recall while corrupting an identifier or negation?
 
 **Guided Practice:** Cross original/rewrite/decompose with depth, order, duplicates, distractors, and token budget; preserve candidate/context lineage.
 
 **Feedback Contract:**
-- *Expected Output*: a paired table, one row per (query route × depth × order) cell at a matched token budget, with intent fidelity, evidence opportunity, use/support, latency, and cost, plus the identifier/negation slice reported separately. At least one cell should show a transformation that raises opportunity while lowering intent fidelity, or you should state that none was found and how many cases were tried.
+- *Expected Output*:
+  - a paired table, one row per (query route × depth × order) cell at a matched token budget;
+  - columns: intent fidelity, evidence opportunity, use/support, latency, and cost;
+  - the identifier/negation slice reported separately;
+  - at least one cell showing a transformation that raises opportunity while lowering intent fidelity, or a statement that none was found and how many cases were tried.
 - *Common Failure*: changing the rewrite, the depth, and the order in one run. The quality change then cannot be assigned to any of them.
 - *Diagnostic Hint*: for a failing case, was the supporting passage in the candidates before the rewrite? Was it in the assembled context? If it was in both, the loss is in order or use, not in retrieval.
 - *Concept to Revisit*: context assembly as constrained selection; Lesson 10.1 opportunity versus use.
@@ -323,9 +522,17 @@ Contradiction can occur among source documents, revisions of one source, retriev
  source_identity, authority, scope)
 ```
 
-Two passages may be temporally different rather than contradictory. Ten mirrors of a stale article do not outrank one authoritative update. “Newest” is unsafe when publication time differs from effective time. Model confidence does not establish source authority (**D**, CLM-012).
+Rules of thumb (**D**, CLM-012):
 
-Real-document experiments report that models can retain incorrect parametric answers despite corrective context (**O**, CLM-011). Therefore test both directions: trusted context correcting model memory, and untrusted context attempting to override a valid prior. If authority/time/scope cannot resolve the evidence, surface the conflict or abstain.
+- Two passages may be temporally different rather than contradictory.
+- Ten mirrors of a stale article do not outrank one authoritative update.
+- “Newest” is unsafe when publication time differs from effective time.
+- Model confidence does not establish source authority.
+
+Real-document experiments report that models can retain incorrect parametric answers despite corrective context (**O**, CLM-011). Therefore:
+
+- Test both directions: trusted context correcting model memory, and untrusted context attempting to override a valid prior.
+- If authority/time/scope cannot resolve the evidence, surface the conflict or abstain.
 
 **Worked Example — authority and valid-time conflict table** (synthetic sources).
 
@@ -348,6 +555,18 @@ Declared policy, applied in order. This is a product decision made for the exerc
 5. Within one source lineage, the latest valid version wins.
 6. If two or more distinct values remain, the state is UNRESOLVED: show both with their sources, or abstain.
 
+```mermaid
+flowchart TD
+    A["Retrieved, access-checked sources"] --> R1["1. Collapse copies<br/>(same identity or hash)"]
+    R1 --> R2["2. Keep in-scope sources<br/>valid at query time"]
+    R2 --> R3["3. Keep highest authority tier"]
+    R3 --> R4["4. Specific scope overrides general<br/>unless superseded"]
+    R4 --> R5["5. Latest valid version<br/>within one lineage"]
+    R5 --> N{"Distinct values left?"}
+    N -- one --> ANS["Answer + citation"]
+    N -- "two or more" --> U["UNRESOLVED<br/>show both or abstain"]
+```
+
 Steps for query time 2026-03-15:
 
 - Rule 1: S4 becomes one tier-C source.
@@ -361,9 +580,21 @@ For comparison, the two shortcuts give a different answer on the same table:
 - "Newest publication wins" picks S4 (2026-03-01): 150 EUR.
 - "Majority by document count" counts ten copies of S4: 150 EUR.
 
-Now move the query time to 2026-04-15. S2 is valid and replaces S1 by rule 5. S2 is global and S3 is EU, and S2's *Supersedes* field lists only v3. Rule 4 as written keeps S3, so this policy returns 90 EUR. Whether a new global policy was *meant* to replace a regional addendum cannot be read from these fields. A stricter rule 4 is also defensible: when a general source becomes valid *after* the specific one, require an explicit record saying the specific one is still in force. Under that variant the output is UNRESOLVED, with both 120 EUR (S2) and 90 EUR (S3) shown and a request for a supersession record. The two variants disagree on this input, so the choice between them must be declared before the system is evaluated.
+Now move the query time to 2026-04-15:
 
-Interpretation and limits: S1 and S2 are temporal versions, not a contradiction. S1 and S3 are a scope difference, not a contradiction. Only the S2/S3 case at the later date can be a real unresolved conflict, and it is a missing-metadata problem, not a model problem. A different organization could reasonably order rules 3 and 4 the other way; the table and the trace are what make the decision auditable.
+- S2 is valid and replaces S1 by rule 5.
+- S2 is global and S3 is EU; S2's *Supersedes* field lists only v3.
+- Rule 4 as written keeps S3, so this policy returns 90 EUR.
+- Whether a new global policy was *meant* to replace a regional addendum cannot be read from these fields.
+- Stricter rule 4 variant (also defensible): when a general source becomes valid *after* the specific one, require an explicit record saying the specific one is still in force. Output: UNRESOLVED, both 120 EUR (S2) and 90 EUR (S3) shown, plus a request for a supersession record.
+- The two variants disagree on this input, so the choice must be declared before the system is evaluated.
+
+Interpretation and limits:
+
+- S1 and S2 are temporal versions, not a contradiction.
+- S1 and S3 are a scope difference, not a contradiction.
+- Only the S2/S3 case at the later date can be a real unresolved conflict, and it is a missing-metadata problem, not a model problem.
+- A different organization could reasonably order rules 3 and 4 the other way; the table and the trace are what make the decision auditable.
 
 **Knowledge Check:**
 1. When are two different values temporal versions rather than contradictions?
@@ -372,7 +603,10 @@ Interpretation and limits: S1 and S2 are temporal versions, not a contradiction.
 **Guided Practice:** Resolve a set containing stale mirrors, future-effective updates, scope-specific rules, and equal-authority conflict; preserve an unresolved state. Start from the table above with one change: S5 is reclassified to tier A with valid-from 2026-02-01.
 
 **Feedback Contract:**
-- *Expected Output*: a normalized claim table and a rule-by-rule trace. For the modified table at query time 2026-03-15: rule 3 keeps S1, S3, and S5; rule 4 removes S1; S3 (90 EUR) and S5 (100 EUR) are two tier-A EU sources from different lineages with different values, so the result is UNRESOLVED with both shown.
+- *Expected Output*: a normalized claim table and a rule-by-rule trace. For the modified table at query time 2026-03-15:
+  - Rule 3 keeps S1, S3, and S5.
+  - Rule 4 removes S1.
+  - S3 (90 EUR) and S5 (100 EUR) are two tier-A EU sources from different lineages with different values, so the result is UNRESOLVED with both shown.
 - *Common Failure*: majority vote by document count, or "newest publication wins". A second one is choosing S5 because its valid-from date is later, which applies rule 5 across two different source lineages.
 - *Diagnostic Hint*: write each source as (subject, predicate, value, scope, valid interval, lineage, tier). Which of those fields actually differ between the two candidates you are comparing?
 - *Concept to Revisit*: valid time versus publication time; normalized claim tuple; deliberate unresolved state.
@@ -391,62 +625,103 @@ Does each support-required claim bind to adequate evidence, and where was opport
 A citation has at least two independent properties. This module uses the following definitions (**D**, CLM-020); they are course definitions, and a published metric with a similar name may differ:
 
 $$
-CitationCorrectness=\frac{supported\ emitted\ citations}{checked\ emitted\ citations}
+R_{\text{cor}}=\frac{s}{e}
 $$
 
+where:
+- $R_{\text{cor}}$: citation correctness (dimensionless);
+- $s$: supported checked emitted citations (citations);
+- $e$: checked emitted citations (citations).
+
 $$
-SupportCompleteness=\frac{support\text{-}required\ claims\ whose\ cited\ evidence\ entails\ them}
-{support\text{-}required\ claims}.
+R_{\text{comp}}=\frac{k}{n}
 $$
+
+where:
+- $R_{\text{comp}}$: support completeness (dimensionless);
+- $k$: claims whose cited evidence entails them (claims);
+- $n$: support-required claims (claims).
 
 A third quantity is purely syntactic and must not be confused with either:
 
 $$
-CitationCoverage=\frac{support\text{-}required\ claims\ with\ at\ least\ one\ citation\ marker}
-{support\text{-}required\ claims}.
+R_{\text{cov}}=\frac{m}{n}
 $$
 
-Short notation for one answer:
+where (counts for one answer):
+- $R_{\text{cor}}$: citation correctness (dimensionless, 0–1);
+- $R_{\text{comp}}$: support completeness (dimensionless, 0–1);
+- $R_{\text{cov}}$: citation coverage (dimensionless, 0–1);
+- $e$: emitted citations that were checked (citations);
+- $s$: checked emitted citations judged supported (citations; rule below);
+- $n$: support-required claims (claims);
+- $k$: support-required claims whose cited evidence entails them (claims);
+- $m$: support-required claims with at least one citation marker (claims).
 
-- $e$: emitted citations that were checked; $s$: those judged supported (rule below). $CitationCorrectness=s/e$.
-- $n$: support-required claims; $k$: claims whose cited evidence entails them; $m$: claims with at least one citation marker. $SupportCompleteness=k/n$ and $CitationCoverage=m/n$.
+Bounds:
 
-A claim can only have entailing cited evidence if it has a citation, so $k\le m\le n$, and therefore completeness $\le$ coverage always. A gap between them counts the claims that carry a marker but are not supported. Correctness has a different denominator ($e$, not $n$), so it is not bounded by either.
+- A claim can only have entailing cited evidence if it has a citation, so $k\le m\le n$.
+- Therefore completeness $\le$ coverage always; the gap counts claims that carry a marker but are not supported.
+- Correctness has a different denominator ($e$, not $n$), so it is not bounded by either.
 
-The units differ. Correctness counts *citations*. Completeness and coverage count *claims*. A claim is "support-required" when the answer policy says it needs evidence; greetings, hedges, and restatements of the question are excluded by a declared rule.
+Units differ:
+
+- Correctness counts *citations*; completeness and coverage count *claims*.
+- A claim is "support-required" when the answer policy says it needs evidence; greetings, hedges, and restatements of the question are excluded by a declared rule.
 
 **Multi-citation rule.** When one claim carries several citations:
 
 - The claim counts toward completeness if the *concatenation* of its cited passages entails it. Two passages may each be insufficient and jointly sufficient.
 - A citation counts as supported if it entails the claim alone, or if removing it breaks the joint support. A citation that does not support the claim alone, and whose removal leaves the claim still supported, is unsupported (irrelevant).
 
-ALCE uses the same structure: its citation recall asks whether the concatenation of a statement's cited passages entails the statement, and its citation precision flags a citation as irrelevant under the removal test above (**O**, CLM-013; §3.3 and Figure 3 of the paper). ALCE scores precision as 0 for every citation of a statement whose recall is 0. That detail belongs to ALCE; state your own rule for it.
+ALCE uses the same structure (**O**, CLM-013; §3.3 and Figure 3 of the paper):
 
-**Zero-denominator rule.** If an answer emits no citations, correctness is *undefined* for that answer: report it as "n/a, 0 citations", not as 1 and not as 0. If an answer has no support-required claims, completeness and coverage are undefined. When aggregating, say whether you pool counts over answers (micro) or average per-answer ratios (macro), exclude undefined answers from a macro average, and report how many were excluded. An abstention is scored by the abstention policy, not by these ratios.
+- Citation recall asks whether the concatenation of a statement's cited passages entails the statement.
+- Citation precision flags a citation as irrelevant under the removal test above.
+- ALCE scores precision as 0 for every citation of a statement whose recall is 0.
+  - That detail belongs to ALCE; state your own rule for it.
+
+**Zero-denominator rule.**
+
+- No citations emitted: correctness is *undefined* for that answer; report "n/a, 0 citations", not 1 and not 0.
+- No support-required claims: completeness and coverage are undefined.
+- When aggregating, say whether you pool counts over answers (micro) or average per-answer ratios (macro).
+- Exclude undefined answers from a macro average and report how many were excluded.
+- An abstention is scored by the abstention policy, not by these ratios.
 
 For answers $a=1,\dots,A$ with counts $s_a$ and $e_a$ (same pattern for $k_a/n_a$ and $m_a/n_a$):
 
 $$
-Correctness_{micro}=\frac{\sum_a s_a}{\sum_a e_a},\qquad
-Correctness_{macro}=\frac{1}{|A'|}\sum_{a\in A'}\frac{s_a}{e_a},
+R_{\text{cor}}^{\text{mic}}=\frac{\sum_a s_a}{\sum_a e_a},\qquad
+R_{\text{cor}}^{\text{mac}}=\frac{1}{|A'|}\sum_{a\in A'}\frac{s_a}{e_a},
 $$
 
-where $A'$ is the set of answers with $e_a>0$. Micro weights each citation equally, so answers with many citations dominate; macro weights each answer equally.
+where:
+- $a$ indexes answers, $a=1,\dots,A$; $A$ is answer count;
+- $s_a$, $e_a$: supported and checked emitted citations of answer $a$ (citations);
+- $A'$: the set of answers with $e_a>0$; $|A'|$ its size (answers);
+- $R_{\text{cor}}^{\text{mic}}$: micro (pooled) correctness; weights each citation equally, so answers with many citations dominate;
+- $R_{\text{cor}}^{\text{mac}}$: macro (mean per-answer) correctness; weights each answer equally.
+- Both correctness ratios are dimensionless.
 
-Declare claim segmentation, support threshold, citation granularity, and the rules above before scoring. A syntactically valid `[3]` can point to a real but irrelevant document. ALCE separates answer correctness and citation quality; source inspection of Haystack at the pinned revision likewise shows numeric reference parsing/binding, not semantic entailment verification.
+Declare before scoring: claim segmentation, support threshold, citation granularity, and the rules above.
+
+- A syntactically valid `[3]` can point to a real but irrelevant document.
+- ALCE separates answer correctness and citation quality.
+- Source inspection of Haystack at the pinned revision likewise shows numeric reference parsing/binding, not semantic entailment verification.
 
 Diagnose an incorrect claim in order:
 
-```text
-source absent?
-  -> version invisible?
-  -> not retrieved?
-  -> retrieved but not selected?
-  -> selected but ignored/misread?
-  -> correct claim but wrong/incomplete citation?
+```mermaid
+flowchart TD
+    D1["source absent?"] --> D2["version invisible?"] --> D3["not retrieved?"]
+    D3 --> D4["retrieved but not selected?"] --> D5["selected but ignored/misread?"]
+    D5 --> D6["correct claim but wrong/incomplete citation?"]
 ```
 
-Each stage admits a different intervention, so attribute the failure to the earliest failing stage rather than to one answer score (**D**, CLM-014). Record evaluator identity and uncertainty. Automated NLI or LLM judges are measurements with errors, not ground truth.
+- Each stage admits a different intervention, so attribute the failure to the earliest failing stage rather than to one answer score (**D**, CLM-014).
+- Record evaluator identity and uncertainty.
+- Automated NLI or LLM judges are measurements with errors, not ground truth.
 
 **Worked Example — one claim-citation table, three metrics** (synthetic answer; entailment labels are assumed to come from an adjudicated human check).
 
@@ -461,11 +736,15 @@ Answer 1 has four support-required claims and emits at most one citation per cla
 
 Steps, all from this one table:
 
-- Emitted citations checked: 3. Supported: 2. $CitationCorrectness=2/3\approx0.667$.
-- Support-required claims: 4. Claims whose cited evidence entails them: 2 (C1, C2). $SupportCompleteness=2/4=0.5$.
-- Claims with a citation marker: 3. $CitationCoverage=3/4=0.75$.
+- Emitted citations checked: 3. Supported: 2. $R_{\text{cor}}=2/3\approx0.667$.
+- Support-required claims: 4. Claims whose cited evidence entails them: 2 (C1, C2). $R_{\text{comp}}=2/4=0.5$.
+- Claims with a citation marker: 3. $R_{\text{cov}}=3/4=0.75$.
 
-Interpretation: 3/4 is the number a marker-counting script reports. It is coverage, and it overstates support, because C3 has a marker but no support. Reporting "completeness 3/4" for this answer would count C3 as supported while the correctness figure counts the same citation as unsupported. That contradiction is the error to avoid: both ratios must come from the same rows.
+Interpretation:
+
+- 3/4 is the number a marker-counting script reports. It is coverage, and it overstates support, because C3 has a marker but no support.
+- Reporting "completeness 3/4" would count C3 as supported while the correctness figure counts the same citation as unsupported.
+- That contradiction is the error to avoid: both ratios must come from the same rows.
 
 Answer 2 shows the multi-citation rule. It has two claims:
 
@@ -483,9 +762,18 @@ Aggregating the two answers:
 | Correctness | $(2+3)/(3+4)=5/7\approx0.714$ | $(2/3+3/4)/2=17/24\approx0.708$ |
 | Completeness | $(2+2)/(4+2)=4/6\approx0.667$ | $(1/2+1)/2=0.75$ |
 
-Step-by-step for correctness: micro pools numerators and denominators, $s_1+s_2=2+3=5$ over $e_1+e_2=3+4=7$. Macro averages the two ratios, $(2/3+3/4)/2=(8/12+9/12)/2=17/24$. Micro is slightly higher because Answer 2, with the better ratio, also has more citations and so more weight.
+Step-by-step for correctness:
 
-Micro and macro differ, so the report must say which one it uses. A third answer with zero citations would add nothing to the micro correctness denominator and would be excluded from the macro correctness average, with the exclusion count reported. Limits: the entailment labels are given here. In practice they come from an NLI model or an LLM judge with its own error rate, and that error must be estimated against human adjudication before the ratios are trusted.
+- Micro numerator: $s_1+s_2=2+3=5$.
+- Micro denominator: $e_1+e_2=3+4=7$; micro $=5/7$.
+- Macro: $(2/3+3/4)/2=(8/12+9/12)/2=17/24$.
+- Micro is slightly higher because Answer 2, with the better ratio, also has more citations and so more weight.
+
+Reporting and limits:
+
+- Micro and macro differ, so the report must say which one it uses.
+- A third answer with zero citations would add nothing to the micro correctness denominator and would be excluded from the macro correctness average, with the exclusion count reported.
+- The entailment labels are given here. In practice they come from an NLI model or an LLM judge with its own error rate, and that error must be estimated against human adjudication before the ratios are trusted.
 
 **Knowledge Check:**
 1. Why does a valid reference index not establish semantic support?
@@ -494,7 +782,10 @@ Micro and macro differ, so the report must say which one it uses. A third answer
 **Guided Practice:** Label claims and evidence spans, then replay with oracle availability, candidates, context, and citation binding to isolate the earliest failing stage.
 
 **Feedback Contract:**
-- *Expected Output*: a claim-evidence table with one row per (claim, citation) pair, evaluator/human agreement, a stage trace, and uncertainty. For Knowledge Check 2: correctness $5/5=1$, completeness $3/5$, coverage $3/5$ ($e=s=5$; $n=5$; the markers sit on 3 claims, so $m=3$, and those 3 are supported, so $k=3$). High correctness with low completeness means the citations that exist are good and two claims have none.
+- *Expected Output*: a claim-evidence table with one row per (claim, citation) pair, evaluator/human agreement, a stage trace, and uncertainty. For Knowledge Check 2:
+  - Counts: $e=s=5$; $n=5$; markers sit on 3 claims, so $m=3$; those 3 are supported, so $k=3$.
+  - Correctness $5/5=1$, completeness $3/5$, coverage $3/5$.
+  - High correctness with low completeness means the citations that exist are good and two claims have none.
 - *Common Failure*: one aggregate "groundedness" score; or computing completeness from marker counts, which gives coverage.
 - *Diagnostic Hint*: point to the row in your table that each numerator counts. If correctness and completeness cannot be traced to the same rows, they were computed from different data.
 - *Concept to Revisit*: citation versus claim as the counted unit; multi-citation rule; zero-denominator rule.
@@ -510,21 +801,36 @@ Which route maximizes declared utility while preserving hard evidence and access
 
 **Concepts & Definitions:**
 
-Compare architectures with the same corpus snapshot, eligible evidence, base model where possible, prompt objective, answer set, and load. Include retrieval/index work, input tokens, cached prefixes, latency tails, failures, and evaluator costs. A large advertised context window does not prove robust evidence use; retrieval may miss evidence that full context contains; full context may dilute or misorder evidence that retrieval isolates.
+Matched comparison:
+
+- Hold fixed: corpus snapshot, eligible evidence, base model where possible, prompt objective, answer set, and load.
+- Count: retrieval/index work, input tokens, cached prefixes, latency tails, failures, and evaluator costs.
+- A large advertised context window does not prove robust evidence use.
+- Retrieval may miss evidence that full context contains; full context may dilute or misorder evidence that retrieval isolates.
 
 A useful engineering decision is constrained rather than ideological:
 
 $$
-U(route)=Q(route)-\lambda_L L(route)-\lambda_C C(route),
+U(\rho)=Q(\rho)-\lambda_L L(\rho)-\lambda_C C(\rho),
 $$
 
 subject to hard access, safety, freshness, and consistency constraints.
 
-where $Q$ is a unitless quality score, $L$ is a latency (seconds), $C$ is a cost (USD), and $\lambda_L$ (per second) and $\lambda_C$ (per USD) convert latency and cost into quality units, so every term of $U$ is unitless. $\lambda_L$ answers "how much quality would we give up to save one second?" Note: in this lesson $L$ means latency, not the visibility lag $L_{visible}$ of Lesson 10.2, and $Q$ means quality, not document `Q` of the Lesson 10.2 ledger.
+where:
+- $\rho$: a candidate route (RAG, long context, hybrid, ...);
+- $U$: route utility (unitless);
+- $Q$: quality score (unitless);
+- $L$: latency (s);
+- $C$: cost (USD);
+- $\lambda_L$ (s$^{-1}$), $\lambda_C$ (USD$^{-1}$): convert latency and cost into quality units, so every term of $U$ is unitless. $\lambda_L$ answers "how much quality would we give up to save one second?"
+- Note: here $L$ means latency, not the visibility lag $L_{\text{vis}}$ of Lesson 10.2, and $Q$ means quality, not document `Q` of the Lesson 10.2 ledger.
 
 This is a product-specific heuristic: quality definition and weights are not universal. Published comparisons through 2025 report different task-dependent outcomes, which is evidence against a universal winner (**O**, CLM-015).
 
-Self-RAG, corrective RAG, and hybrid routing demonstrate adaptive mechanism families. They add evaluator/router errors, correlated self-judgment, extra model or search calls, new source-quality risks, latency, and cost. Treat them as workload-dependent/frontier until calibrated on the target service (**O**, CLM-016).
+Self-RAG, corrective RAG, and hybrid routing demonstrate adaptive mechanism families (**O**, CLM-016):
+
+- They add evaluator/router errors, correlated self-judgment, extra model or search calls, new source-quality risks, latency, and cost.
+- Treat them as workload-dependent/frontier until calibrated on the target service.
 
 **Worked Example — route decision with hard constraints and declared weights** (all values synthetic, invented for this exercise; they are not measurements of any model or product).
 
@@ -534,7 +840,9 @@ Setup: four routes evaluated on the same 400 questions, the same source snapshot
 - $L$: p95 end-to-end latency in seconds, including retrieval, router calls, and queueing.
 - $C$: mean cost per query in USD, including index, router, and generation work.
 - Hard constraints (pass/fail, not traded off): access violations $=0$; stale-answer rate $\le1\%$; $L\le4.0$ s; $Q\ge0.80$.
-- Utility among feasible routes: $U=Q-\lambda_L L-\lambda_C C$ with $\lambda_L=0.02\ \text{s}^{-1}$ and $\lambda_C=5\ \text{USD}^{-1}$. In words: one second of p95 latency is worth 0.02 of $Q$, and 0.01 USD per query is worth 0.05 of $Q$. These weights are a product choice.
+- Utility among feasible routes: $U=Q-\lambda_L L-\lambda_C C$ with $\lambda_L=0.02\ \text{s}^{-1}$ and $\lambda_C=5\ \text{USD}^{-1}$.
+  - In words: one second of p95 latency is worth 0.02 of $Q$; 0.01 USD per query is worth 0.05 of $Q$.
+  - These weights are a product choice.
 
 | Route | $Q$ | $L$ (s) | $C$ (USD) | Stale rate | Access violations | Feasible? | $U$ |
 |---|---:|---:|---:|---:|---:|---|---:|
@@ -545,14 +853,43 @@ Setup: four routes evaluated on the same 400 questions, the same source snapshot
 
 Steps:
 
-How a $U$ cell is computed (RAG row): $\lambda_L L=0.02\times2.1=0.042$; $\lambda_C C=5\times0.004=0.020$; $U=0.82-0.042-0.020=0.758$. The other rows follow the same pattern.
+How a $U$ cell is computed (RAG row); the other rows follow the same pattern:
+- $\lambda_L L = 0.02 \times 2.1 = 0.042$.
+- $\lambda_C C = 5 \times 0.004 = 0.020$.
+- $U = 0.82 - 0.042 - 0.020 = 0.758$.
 
-1. Apply hard constraints first. LC fails latency. Cached LC fails freshness, even though its utility would be 0.756. A route that fails a hard constraint is rejected whatever its utility.
+1. Apply hard constraints first.
+   - LC fails latency.
+   - Cached LC fails freshness, even though its utility would be 0.756.
+   - A route that fails a hard constraint is rejected whatever its utility.
+
+   ```mermaid
+   flowchart TD
+       R["Candidate routes"] --> H{"All hard constraints pass?<br/>access = 0 · stale ≤ 1% · L ≤ 4.0 s · Q ≥ 0.80"}
+       H -- no --> X["Reject: LC (L), LC cached (stale)"]
+       H -- yes --> U["Rank by U: RAG 0.758 · Hybrid 0.728"]
+       U --> S["Select RAG"] --> W["Record weights + sensitivity"]
+   ```
+   - Legend: LC = long context; $L$ = p95 latency (s); $Q$ = quality fraction; $U$ = unitless utility; access = access violations; stale = stale-answer rate.
+
 2. Compare utilities of the feasible routes: RAG 0.758, Hybrid 0.728. **RAG is selected**, although Hybrid has the higher quality.
-3. Sensitivity: Hybrid ties RAG when $0.778-0.004\lambda_C=0.788-0.012\lambda_C$, that is at $\lambda_C=1.25\ \text{USD}^{-1}$. Derivation: hold $\lambda_L=0.02$ fixed and leave $\lambda_C$ free. RAG: $Q-\lambda_L L=0.82-0.042=0.778$, so $U_{RAG}=0.778-0.004\lambda_C$. Hybrid: $0.86-0.072=0.788$, so $U_{Hyb}=0.788-0.012\lambda_C$. Setting them equal gives $(0.012-0.004)\lambda_C=0.788-0.778$, so $\lambda_C=0.010/0.008=1.25$. If the product values cost at less than 1.25 per USD, Hybrid wins. The decision depends on a weight, so the weight must be recorded with the decision.
-4. Uncertainty: with 400 questions, the standard error of a proportion near 0.82 is about $\sqrt{0.82\times0.18/400}\approx0.019$. The 0.04 gap between RAG and Hybrid needs a paired interval (Module 15) before it is treated as real. (Formula: for a proportion $\hat p$ measured on $n$ questions, $SE=\sqrt{\hat p(1-\hat p)/n}$; here $\hat p=0.82$, $n=400$. For scale only: if the two routes were scored on independent question sets, the SE of the difference would be about $\sqrt{0.0192^2+0.0173^2}\approx0.026$, so the gap is roughly 1.5 SE. Because both routes answer the same 400 questions, the paired interval uses the per-question differences instead, which is why it is the right test.)
+3. Sensitivity: hold $\lambda_L = 0.02$ fixed and leave $\lambda_C$ free.
+   - RAG: $Q - \lambda_L L = 0.82 - 0.042 = 0.778$, so $U_{\text{RAG}} = 0.778 - 0.004\lambda_C$.
+   - Hybrid: $0.86 - 0.072 = 0.788$, so $U_{\text{Hyb}} = 0.788 - 0.012\lambda_C$.
+   - Tie: $(0.012 - 0.004)\lambda_C = 0.788 - 0.778$, so $\lambda_C = 0.010/0.008 = 1.25\ \text{USD}^{-1}$.
+   - If the product values cost at less than 1.25 per USD, Hybrid wins. The decision depends on a weight, so the weight must be recorded with the decision.
+4. Uncertainty: for a proportion $\hat p$ measured on $n$ questions, $SE = \sqrt{\hat p(1 - \hat p)/n}$.
+   - With $\hat p = 0.82$, $n = 400$: $SE = \sqrt{0.82 \times 0.18/400} \approx 0.019$.
+   - The 0.04 gap between RAG and Hybrid needs a paired interval (Module 15) before it is treated as real.
+   - For scale only: if the two routes were scored on independent question sets, the SE of the difference would be about $\sqrt{0.0192^2 + 0.0173^2} \approx 0.026$, so the gap is roughly 1.5 SE.
+   - Because both routes answer the same 400 questions, the paired interval uses the per-question differences instead, which is why it is the right test.
 
-Interpretation and limits: the example shows the order of operations (constraints, then utility, then sensitivity). It does not show that RAG beats hybrid routing in general. Retrieval misses weaken RAG; evidence dilution or position sensitivity can weaken full context; a router adds its own errors. Per-slice results (no-answer, temporal, access-restricted, long noisy documents) can reverse the aggregate ranking, so the selected route still needs a fallback.
+Interpretation and limits:
+
+- The example shows the order of operations: constraints, then utility, then sensitivity.
+- It does not show that RAG beats hybrid routing in general.
+- Retrieval misses weaken RAG; evidence dilution or position sensitivity can weaken full context; a router adds its own errors.
+- Per-slice results (no-answer, temporal, access-restricted, long noisy documents) can reverse the aggregate ranking, so the selected route still needs a fallback.
 
 **Knowledge Check:**
 1. Why is advertised context length insufficient evidence for long-context quality?
@@ -561,7 +898,11 @@ Interpretation and limits: the example shows the order of operations (constraint
 **Guided Practice:** Run matched RAG, full-context, and hybrid routes under equal eligibility and load; test no-answer, noisy-long-document, temporal, and access slices. Then recompute the table decision with the latency constraint relaxed to $L\le7.0$ s.
 
 **Feedback Contract:**
-- *Expected Output*: a matched frontier, route calibration/errors, full cost and latency, hard-constraint checks, fallback, and rollback. For the relaxed constraint: LC becomes feasible with $U=0.88-0.130-0.150=0.600$ ($0.02\times6.5=0.130$, $5\times0.030=0.150$), which is still the lowest feasible utility, so RAG remains selected. Feasible is not the same as preferred.
+- *Expected Output*: a matched frontier, route calibration/errors, full cost and latency, hard-constraint checks, fallback, and rollback. For the relaxed constraint:
+  - $\lambda_L L=0.02\times6.5=0.130$.
+  - $\lambda_C C=5\times0.030=0.150$.
+  - LC becomes feasible with $U=0.88-0.130-0.150=0.600$, still the lowest feasible utility, so RAG remains selected.
+  - Feasible is not the same as preferred.
 - *Common Failure*: comparing unequal corpora or models; or folding a hard constraint into the utility, so that a large quality gain "pays for" stale or unauthorized answers.
 - *Diagnostic Hint*: list every route you rejected and the single reason. If the reason is a utility number, check that the route passed all hard constraints first.
 - *Concept to Revisit*: hard constraints versus weighted utility; matched comparison conditions.
@@ -580,28 +921,82 @@ Interpretation and limits: the example shows the order of operations (constraint
 - [Enabling Large Language Models to Generate Text with Citations](https://arxiv.org/abs/2305.14627) — Gao et al. (EMNLP 2023).
 - [FreshLLMs](https://arxiv.org/abs/2310.03214) — Vu et al. (2023).
 
-*Scope:* each paper supports only its own models, corpora, retrievers, prompts, and metrics. For ALCE, §3.3 and Figure 3 (arXiv v2) were read in full on 2026-09-30 for the citation recall/precision definitions used in Lesson 10.5. The other four entries were not re-read in this revision and keep their earlier access dates.
+*Scope:*
 
-**RECOMMENDED BASELINE (course position, not a surveyed industry default):** stable document/version identity with an atomic acceptance rule, query-visible freshness probes, versioned tombstones, request/context/citation lineage, explicit conflict policy, claim-level support checks, staged diagnosis, and matched end-to-end evaluation. These follow from the derivations in Lessons 10.1–10.5 (**D**, CLM-005, CLM-006, CLM-007, CLM-018). This module has no evidence about how widely they are deployed; registry entries that carry the label "CURRENT DEFAULT" mean this recommended baseline and nothing more.
+- Each paper supports only its own models, corpora, retrievers, prompts, and metrics.
+- ALCE: §3.3 and Figure 3 (arXiv v2) read in full on 2026-09-30 for the citation recall/precision definitions used in Lesson 10.5.
+- The other four entries were not re-read in this revision and keep their earlier access dates.
 
-**ONE RUNTIME'S DOCUMENTED BEHAVIOR:** Elasticsearch — [refresh parameter](https://www.elastic.co/docs/reference/elasticsearch/rest-apis/refresh-parameter), [optimistic concurrency control](https://www.elastic.co/docs/reference/elasticsearch/rest-apis/optimistic-concurrency-control), and the [index API](https://www.elastic.co/docs/api/doc/elasticsearch/operation/operation-index) (external versioning, `if_seq_no`/`if_primary_term`, `op_type=create`). The last two were opened on 2026-09-30. They describe one store and are not a default for vector databases in general.
+**RECOMMENDED BASELINE (course position, not a surveyed industry default):**
 
-**WORKLOAD-DEPENDENT:** query rewrite/decomposition, context depth and order, compression, authority rules, citation granularity, long-context use, retrieval frequency, and route thresholds. Evidence that the RAG-versus-long-context outcome depends on task and setup: [Li et al. 2024](https://arxiv.org/abs/2407.16833) (EMNLP 2024 industry track) and [Li et al., arXiv 2501.01880](https://arxiv.org/abs/2501.01880) (submitted 2024-12-27). Both were checked at abstract level on 2026-09-30; their methods and result tables were not re-audited.
+- Components: stable document/version identity with an atomic acceptance rule, query-visible freshness probes, versioned tombstones, request/context/citation lineage, explicit conflict policy, claim-level support checks, staged diagnosis, and matched end-to-end evaluation.
+- These follow from the derivations in Lessons 10.1–10.5 (**D**, CLM-005, CLM-006, CLM-007, CLM-018).
+- This module has no evidence about how widely they are deployed; registry entries labelled "CURRENT DEFAULT" mean this recommended baseline and nothing more.
 
-**FRONTIER:** learned or self-reflective retrieval decisions ([Self-RAG](https://arxiv.org/abs/2310.11511)), corrective retrieval with an evidence evaluator ([CRAG](https://arxiv.org/abs/2401.15884)), and self-routing between RAG and long context (Self-Route in Li et al. 2024). A published mechanism is not an industry default. `TODO_VERIFY`: no 2025–2026 primary source on task-specific context orchestration was opened for this revision, so the module makes no claim about the state of that work in 2026.
+**ONE RUNTIME'S DOCUMENTED BEHAVIOR:** Elasticsearch:
 
-**LEGACY / INSUFFICIENT:** one-shot static top-k stuffing; “indexed” equated with query-visible; newest/frequent source automatically trusted; citation marker treated as support; answer score used as the only RAG metric; RAG or long context declared universally superior.
+- [refresh parameter](https://www.elastic.co/docs/reference/elasticsearch/rest-apis/refresh-parameter).
+- [optimistic concurrency control](https://www.elastic.co/docs/reference/elasticsearch/rest-apis/optimistic-concurrency-control).
+- [index API](https://www.elastic.co/docs/api/doc/elasticsearch/operation/operation-index):
+  - external versioning;
+  - `if_seq_no`/`if_primary_term`;
+  - `op_type=create`.
+
+- The last two were opened on 2026-09-30.
+- They describe one store and are not a default for vector databases in general.
+
+**WORKLOAD-DEPENDENT:** query rewrite/decomposition, context depth and order, compression, authority rules, citation granularity, long-context use, retrieval frequency, and route thresholds.
+
+- Evidence that the RAG-versus-long-context outcome depends on task and setup: [Li et al. 2024](https://arxiv.org/abs/2407.16833) (EMNLP 2024 industry track) and [Li et al., arXiv 2501.01880](https://arxiv.org/abs/2501.01880) (submitted 2024-12-27).
+- Both checked at abstract level on 2026-09-30; methods and result tables not re-audited.
+
+**FRONTIER:** learned or self-reflective retrieval decisions ([Self-RAG](https://arxiv.org/abs/2310.11511)), corrective retrieval with an evidence evaluator ([CRAG](https://arxiv.org/abs/2401.15884)), and self-routing between RAG and long context (Self-Route in Li et al. 2024).
+
+- A published mechanism is not an industry default.
+- `TODO_VERIFY`: no 2025–2026 primary source on task-specific context orchestration was opened for this revision, so the module makes no claim about the state of that work in 2026.
+
+**LEGACY / INSUFFICIENT:**
+
+- one-shot static top-k stuffing;
+- “indexed” equated with query-visible;
+- newest/frequent source automatically trusted;
+- citation marker treated as support;
+- answer score used as the only RAG metric;
+- RAG or long context declared universally superior.
 
 **PRODUCTION SOURCE TRACE**
 
 - Repository: `deepset-ai/haystack`
 - Revision: `8a5406eea71a0fc19e94c4b9a5cd96df2158a45a`
-- Verified: 2026-09-26, static inspection only. On 2026-09-30, `answer_builder.py` and `document_writer.py` were re-read at the same revision (reference-pattern parsing and the `referenced` metadata flag in `AnswerBuilder.run`; `DuplicatePolicy` passed to the document store in `DocumentWriter.run`). `pipeline.py` and `prompt_builder.py` were not re-read, so the registry date for the whole trace is unchanged.
+- Verified: 2026-09-26, static inspection only.
+  - 2026-09-30: `answer_builder.py` and `document_writer.py` re-read at the same revision (reference-pattern parsing and the `referenced` metadata flag in `AnswerBuilder.run`; `DuplicatePolicy` passed to the document store in `DocumentWriter.run`).
+  - `pipeline.py` and `prompt_builder.py` were not re-read, so the registry date for the whole trace is unchanged.
 - Files/symbols: `Pipeline.run/_run_component`, `PromptBuilder.run`, `DocumentWriter.run`, and `AnswerBuilder.run` in the registry-recorded paths.
-- Execution: pipeline dispatch invokes component `run`; prompt variables are rendered; document writes delegate to the configured store; answer building parses reference indices and attaches document copies. No semantic citation-entailment validation was observed in that path (**O**, CLM-017).
-- Relation to Lesson 10.2: `DocumentWriter` exposes an ID-based `DuplicatePolicy` (`NONE`, `SKIP`, `OVERWRITE`, `FAIL`) and delegates to `document_store.write_documents`. No version comparison appears in this component. `OVERWRITE` is therefore last-writer-wins by ID at this layer, and `SKIP` keeps the first writer; the version acceptance rule has to come from the document store or from code the learner adds. Whether a given store backend adds version checks was not inspected.
+- Execution (**O**, CLM-017):
+
+  ```mermaid
+  flowchart LR
+      P["Pipeline.run / _run_component<br/>dispatch → component run"] --> PB["PromptBuilder.run<br/>render prompt variables"]
+      P --> DW["DocumentWriter.run<br/>DuplicatePolicy → store.write_documents"]
+      P --> AB["AnswerBuilder.run<br/>parse reference indices · attach doc copies<br/>set referenced flag"]
+  ```
+
+  - Legend: `DuplicatePolicy` = document-write duplicate policy; ID = document identity. Branches show dispatch targets, not a verified sequential execution order.
+  - No semantic citation-entailment validation was observed in that path.
+- Relation to Lesson 10.2:
+  - `DocumentWriter` exposes an ID-based `DuplicatePolicy` (`NONE`, `SKIP`, `OVERWRITE`, `FAIL`) and delegates to `document_store.write_documents`.
+  - No version comparison appears in this component.
+  - `OVERWRITE` is therefore last-writer-wins by ID at this layer; `SKIP` keeps the first writer.
+  - The version acceptance rule has to come from the document store or from code the learner adds.
+  - Whether a given store backend adds version checks was not inspected.
 - Scope: pinned Haystack behavior, not a general definition of RAG orchestration or consistency.
-- **Trace practice (the 2h `source_trace` effort):** at the pinned revision, follow `DocumentWriter.run` to the `write_documents` call and `AnswerBuilder.run` to the point where the `referenced` flag is set. Answer in writing: (1) which component decides what happens on a duplicate ID, and does it see a version? (2) what input would make `AnswerBuilder` mark a document as referenced although it does not support the sentence? Expected answers: (1) the policy value is passed through and the store decides; this component compares no version; (2) any reply that contains an in-range reference number matching the pattern; the flag is set per reply from the pattern match alone, with no claim-to-document mapping and no entailment check. A common error is to conclude that the framework "handles deduplication" or "validates citations" from the names of the parameters.
+- **Trace practice (the 2h `source_trace` effort):** at the pinned revision, follow `DocumentWriter.run` to the `write_documents` call and `AnswerBuilder.run` to the point where the `referenced` flag is set. Answer in writing:
+  1. Which component decides what happens on a duplicate ID, and does it see a version?
+  2. What input would make `AnswerBuilder` mark a document as referenced although it does not support the sentence?
+  - Expected answers:
+    1. The policy value is passed through and the store decides; this component compares no version.
+    2. Any reply that contains an in-range reference number matching the pattern; the flag is set per reply from the pattern match alone, with no claim-to-document mapping and no entailment check.
+  - Common error: concluding that the framework "handles deduplication" or "validates citations" from the names of the parameters.
 
 ### LAYER 2: ENGINEERING PRACTICE LAYER
 
@@ -612,10 +1007,20 @@ All labs follow `PREDICT → BUILD → MEASURE → EXPLAIN → BREAK → IMPROVE
 ### LAB A — Incremental Index Visibility and Delete Convergence
 
 - **Objective:** build a versioned change ledger and prove query-visible update/delete convergence across representations, replicas, and caches.
-- **Pre-Registered Hypothesis:** worker acknowledgement will precede full read visibility in at least one injected delay/failure case; an atomic version-acceptance rule with retained tombstones will converge under every injected order, while a check-then-write or last-writer-wins baseline will fail at least one trace.
+- **Pre-Registered Hypothesis:**
+  - Worker acknowledgement will precede full read visibility in at least one injected delay/failure case.
+  - An atomic version-acceptance rule with retained tombstones will converge under every injected order.
+  - A check-then-write or last-writer-wins baseline will fail at least one trace.
 - **Independent Variables:** event order/duplication/delay/failure, representation, refresh, replica/cache state, and rollback.
 - **Dependent Variables:** visibility distributions, stale/partial reads, version monotonicity, access violations, idempotence, and recovery time.
-- **Break & Falsify:** replay the Lesson 10.2 traces (`v2,v1,v2`; duplicate create; delete then delayed upsert), race two concurrent duplicates, collect a tombstone before a delayed upsert arrives, lag caches/replicas, refill a cache from a lagging replica, time out one branch, and verify fallback state is explicit. Any final state that differs from the acceptance table, or any answer that mixes two versions of one document, falsifies the design. Data is a synthetic fixture unless you state its source.
+- **Break & Falsify:**
+  - Replay the Lesson 10.2 traces (`v2,v1,v2`; duplicate create; delete then delayed upsert).
+  - Race two concurrent duplicates.
+  - Collect a tombstone before a delayed upsert arrives.
+  - Lag caches/replicas; refill a cache from a lagging replica.
+  - Time out one branch and verify fallback state is explicit.
+  - Falsified by: any final state that differs from the acceptance table, or any answer that mixes two versions of one document.
+  - Data is a synthetic fixture unless you state its source.
 - **Alignment:** Lessons 10.1 and 10.2.
 - **Effort Estimate:** 4.5h.
 
@@ -654,13 +1059,23 @@ All labs follow `PREDICT → BUILD → MEASURE → EXPLAIN → BREAK → IMPROVE
 ### Incident 10.1 — Fresh Answer Metric, Stale and Unsupported Production Answers
 
 **Incident Symptoms:**
-After an incremental-index release, average answer accuracy improves, but some tenants receive deleted policies, recent updates are absent for minutes, contradictory versions are blended, and citations open valid documents that do not support the attached claims.
+After an incremental-index release, average answer accuracy improves, but some tenants see:
+
+- deleted policies returned;
+- recent updates absent for minutes;
+- contradictory versions blended;
+- citations that open valid documents which do not support the attached claims.
 
 **Diagnostic Protocol (Task):**
 1. **Form Competing Hypotheses:** source polling lag, parse/embed failure, unrefreshed write, replica/alias/cache skew, retry reordering, incomplete tombstone fanout, rewrite drift, retrieval loss, context dilution, parametric bias, generator misuse, reference binding, or evaluator error.
 2. **Identify Missing Evidence:** event/version logs, representation state/high-watermarks, route/cache/replica identity, original/transformed queries, candidates, exact context/order, prompt/model, claims/citations, timeout/fallback state, and stage timing.
 3. **Design Discriminating Measurements:** probe each representation and replica, replay pinned snapshots, disable transformations/caches one at a time, and substitute oracle candidates/context/bindings.
-4. **Rank Explanations:** locate the earliest available → visible → retrieved → selected → used → supported divergence and preserve interacting causes.
+4. **Rank Explanations:** locate the earliest divergence in the chain below and preserve interacting causes.
+
+   ```mermaid
+   flowchart LR
+       A[available] --> V[visible] --> R[retrieved] --> S[selected] --> U[used] --> P[supported]
+   ```
 5. **Intervene:** gate/rollback the smallest supported stage, converge deletes/replicas/caches, repair transformation/context/binding, or abstain on unresolved partial state.
 6. **Remeasure:** repeat freshness/stale/partial distributions, access/deletion invariants, claim support/citation completeness, latency, abstention, and user utility.
 
@@ -729,16 +1144,38 @@ Submit one replayable source-event-to-answer trace, visibility/deletion tests, q
 
 Reviewers use these to check decisions and arithmetic. A submission with different declared inputs is checked against its own inputs.
 
-- **Events 1–9** under the Lesson 10.2 acceptance rule: 1 ACCEPT (`doc-7` live v4); 2 ACCEPT (v5); 3 STALE; 4 ACCEPT as tombstone v8, whatever lower version was stored; 5 ACCEPT; 6 DUPLICATE; 7 STALE, because v7 < tombstone v8; 8 CONFLICT, same version with a different hash, so `doc-11` stays at `hA` and an alert is raised; 9 ACCEPT (`doc-7` live v6).
-- **Tombstone retention:** event 7 arrives 390 s after the delete, and the declared replay window is 900 s. A design that collects tombstones at the 300 s delete deadline resurrects `doc-9`. Retention must be at least 900 s plus the convergence check.
-- **Delete convergence for `doc-9`:** the lexical path stops returning it at 11 s and the vector path at 200 s. Both are within the 300 s constraint, but between 11 s and 200 s the routes disagree. The submission must either apply a tombstone overlay at read time or report that window as a partial delete. Calling it "refresh lag" is wrong: the cause is a failed branch.
-- **Query at 420 s:** the representations disagree only on `doc-7` (lexical v6, vector v5). With no retained generations, pinning to the older state is impossible. Acceptable decisions: wait for the vector index within the deadline; or exclude `doc-7` and mark the answer partial if it was needed; or abstain. Combining v5 chunks with v6 text violates the consistency constraint.
+- **Events 1–9** under the Lesson 10.2 acceptance rule:
+  1. ACCEPT (`doc-7` live v4).
+  2. ACCEPT (v5).
+  3. STALE.
+  4. ACCEPT as tombstone v8, whatever lower version was stored.
+  5. ACCEPT.
+  6. DUPLICATE.
+  7. STALE, because v7 < tombstone v8.
+  8. CONFLICT, same version with a different hash, so `doc-11` stays at `hA` and an alert is raised.
+  9. ACCEPT (`doc-7` live v6).
+- **Tombstone retention:**
+  - Event 7 arrives $400-10=390$ s after the delete; the declared replay window is 900 s.
+  - A design that collects tombstones at the 300 s delete deadline resurrects `doc-9`.
+  - Retention must be at least 900 s plus the convergence check.
+- **Delete convergence for `doc-9`:**
+  - The lexical path stops returning it at 11 s and the vector path at 200 s; both are within the 300 s constraint.
+  - Between 11 s and 200 s the routes disagree. The submission must either apply a tombstone overlay at read time or report that window as a partial delete.
+  - Calling it "refresh lag" is wrong: the cause is a failed branch.
+- **Query at 420 s:**
+  - The representations disagree only on `doc-7` (lexical v6, vector v5).
+  - With no retained generations, pinning to the older state is impossible.
+  - Acceptable decisions: wait for the vector index within the deadline; or exclude `doc-7` and mark the answer partial if it was needed; or abstain.
+  - Combining v5 chunks with v6 text violates the consistency constraint.
 - **Conflict fixture:** 90 EUR cited to S3 at 2026-03-15. At 2026-04-15 the answer is 90 EUR under rule 4 as written, or UNRESOLVED (120 EUR and 90 EUR) under the stricter variant. Either is accepted if the variant is declared; 150 EUR is not.
 - **Citation arithmetic:** for a table shaped like Lesson 10.5 Answer 1, correctness $2/3$, support completeness $2/4$, coverage $3/4$.
 
 ### Rubric Dimensions
 
-- **Idempotency and Read Consistency** (Deliverables 2–3): *Insufficient* says stable IDs and versions make retries safe, or uses a watermark as if it were a read guarantee. *Competent* states the acceptance rule, names the atomic mechanism, decides events 1–9 correctly, keeps tombstones past the replay window, and gives a consistent decision for the 420 s query. *Strong* also tests concurrent duplicates and collection-before-replay, and shows which store capability (conditional write, retained generation) each guarantee depends on.
+- **Idempotency and Read Consistency** (Deliverables 2–3):
+  - *Insufficient*: says stable IDs and versions make retries safe, or uses a watermark as if it were a read guarantee.
+  - *Competent*: states the acceptance rule, names the atomic mechanism, decides events 1–9 correctly, keeps tombstones past the replay window, and gives a consistent decision for the 420 s query.
+  - *Strong*: also tests concurrent duplicates and collection-before-replay, and shows which store capability (conditional write, retained generation) each guarantee depends on.
 - **Lineage:** *Insufficient* stores final prompt only. *Competent* preserves stable IDs/versions and transformations. *Strong* reproduces eligibility, order, claims, citations, caches, and failures.
 - **Freshness:** *Insufficient* equates write success with visibility. *Competent* measures declared endpoints. *Strong* tests clocks, high-watermarks, retries, partial state, deletes, and rollback.
 - **Context:** *Insufficient* changes top-k only. *Competent* measures opportunity/order/noise/truncation. *Strong* uses matched stage ablations and workload slices.
@@ -764,11 +1201,28 @@ Reviewers use these to check decisions and arithmetic. A submission with differe
 
 ### Exit Criteria
 
-A learner passes when they can demonstrate query-visible freshness rather than ingestion success; survive duplicate/reordered updates, partial failure, cache/replica lag, and deletes; reproduce an answer from immutable lineage; identify rewrite and context-order failures; preserve unresolved contradictions; distinguish citation syntax, correctness, and completeness; trace a current implementation without generalizing it; and defend a workload-specific route under quality, latency, cost, freshness, access, and abstention constraints.
+A learner passes when they can:
+
+1. demonstrate query-visible freshness rather than ingestion success;
+2. survive duplicate/reordered updates, partial failure, cache/replica lag, and deletes;
+3. reproduce an answer from immutable lineage;
+4. identify rewrite and context-order failures;
+5. preserve unresolved contradictions;
+6. distinguish citation syntax, correctness, and completeness;
+7. trace a current implementation without generalizing it;
+8. defend a workload-specific route under quality, latency, cost, freshness, access, and abstention constraints.
 
 ### Module Wrap-Up (Final Mental Model Reconstruction)
 
-RAG is a versioned evidence-control loop. Preserve identity across every transformation, measure visibility at the query boundary, treat cache/fallback state as part of the read contract, treat context as constrained selection, keep contradictions explicit, require claim-level support, and choose architecture from matched evidence rather than fashion.
+RAG is a versioned evidence-control loop:
+
+- Preserve identity across every transformation.
+- Measure visibility at the query boundary.
+- Treat cache/fallback state as part of the read contract.
+- Treat context as constrained selection.
+- Keep contradictions explicit.
+- Require claim-level support.
+- Choose architecture from matched evidence rather than fashion.
 
 ### Cost & Telemetry Hook
 

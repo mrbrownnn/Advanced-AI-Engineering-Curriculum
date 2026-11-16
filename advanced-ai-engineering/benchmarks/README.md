@@ -18,7 +18,13 @@ benchmarks/
 
 **Results are append-only evidence. Never overwrite inconvenient results.**
 
-Every benchmark result is a data point. Unexpected results are often more informative than expected ones. If a result contradicts your hypothesis, that is signal — record it, explain it, learn from it.
+Every benchmark result is a data point.
+
+- Unexpected results are often more informative than expected ones.
+- If a result contradicts your hypothesis, that is signal:
+  - Record it.
+  - Explain it.
+  - Learn from it.
 
 ## Quick Reference
 

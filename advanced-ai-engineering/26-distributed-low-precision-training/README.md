@@ -2,34 +2,63 @@
 
 ## 00 Why This Module Exists
 
-A training configuration can fit every GPU and still run slower, fail more often, or converge differently. Sharding replaces resident state with transient gathers and collectives. Activation checkpointing replaces saved tensors with recomputation. TP, PP, CP, and EP replace local dependencies with communication and scheduling constraints. FP8, MXFP8, and NVFP4 replace one dtype choice with a recipe of formats, scales, accumulation, rounding, and high-precision islands. Checkpointing replaces failure loss with stalls, memory pressure, and persistence risk. These choices form one coupled system.
+A training configuration can fit every GPU and still run slower, fail more often, or converge differently. Each technique trades one cost for another:
 
-```text
-model + sequence + optimizer + topology + failure trace
-        |
-        v
-memory ledger: persistent state + activations + transient gathers + workspace + reserve
-        |
-        v
-placement: DP/FSDP × TP/SP × PP × CP × EP --> collective and schedule ledger
-        |
-        v
-timeline: compute | communication | exposed tail | pipeline bubble
-        |
-        v
-precision recipe: encoding + scale timing/granularity + accumulation + high-precision islands
-        |
-        v
-restart contract: snapshot --> stage --> persist --> verify --> restore
+- **Sharding** replaces resident state with transient gathers and collectives.
+- **Activation checkpointing** replaces saved tensors with recomputation.
+- **TP, PP, CP, and EP** replace local dependencies with communication and scheduling constraints.
+- **FP8, MXFP8, and NVFP4** replace one dtype choice with a recipe of formats, scales, accumulation, rounding, and high-precision islands.
+- **Checkpointing** replaces failure loss with stalls, memory pressure, and persistence risk.
+
+These choices form one coupled system.
+
+```mermaid
+flowchart TD
+    IN["<b>Inputs</b><br/>model · sequence · optimizer · topology · failure trace"]
+
+    MEM["<b>1. Memory ledger</b> (26.1–26.2)<br/>persistent state + activations<br/>+ transient gathers + workspace + reserve"]
+
+    PLACE["<b>2. Placement</b> (26.3)<br/>DP/FSDP × TP/SP × PP × CP × EP"]
+    COLL["collective + schedule ledger"]
+
+    TL["<b>3. Timeline</b> (26.4)<br/>compute · communication<br/>exposed tail · pipeline bubble"]
+
+    PREC["<b>4. Precision recipe</b> (26.5)<br/>encoding · scale timing/granularity<br/>accumulation · high-precision islands"]
+
+    subgraph RESTART["<b>5. Restart contract</b> (26.6)"]
+        direction LR
+        S1[snapshot] --> S2[stage] --> S3[persist] --> S4[verify] --> S5[restore]
+    end
+
+    IN --> MEM --> PLACE --> TL --> PREC --> RESTART
+    PLACE -.-> COLL -.-> TL
 ```
 
-Module 01 provides parameter accounting and tensor shapes; Module 02 provides memory hierarchy and asynchronous timing; Module 05 provides quantization contracts; Module 19 provides single-device Adam state accounting; Module 20 provides collective and topology fundamentals; Module 25 owns scaling laws and optimization instability. This module owns distributed *training*: ZeRO/FSDP, activation checkpointing, TP/SP/PP/CP/EP training, communication overlap, low-precision training recipes, and restart/checkpoint economics. Inference parallelism stays in Module 20; router learning dynamics stay in Module 28.
+- DP: data parallelism; FSDP: Fully Sharded Data Parallel; TP: tensor parallelism; SP: sequence parallelism.
+- PP: pipeline parallelism; CP: context parallelism; EP: expert parallelism.
+
+Scope boundaries:
+
+- **Inherited from other modules**:
+  - Module 01: parameter accounting and tensor shapes.
+  - Module 02: memory hierarchy and asynchronous timing.
+  - Module 05: quantization contracts.
+  - Module 19: single-device Adam state accounting.
+  - Module 20: collective and topology fundamentals.
+  - Module 25: owns scaling laws and optimization instability.
+- **Owned here** (distributed *training*): ZeRO/FSDP, activation checkpointing, TP/SP/PP/CP/EP training, communication overlap, low-precision training recipes, and restart/checkpoint economics.
+- **Out of scope**: inference parallelism stays in Module 20; router learning dynamics stay in Module 28.
 
 **Research cutoff:** 2026-09-30. Sources were opened on 2026-10-12.
 
 **Module Orientation**
 - **Engineering Problem**: Build a training plan that fits, sustains throughput, preserves the intended numerical recipe, and recovers from interruption with bounded expected waste.
-- **What You Will Do**: Reconcile memory and communication ledgers for ZeRO/FSDP; choose activation recomputation from tensor-level evidence; schedule TP/SP/PP/CP/EP forward and backward work; measure overlap from timelines; break FP8/MX/NVFP4 recipes; and select checkpoint intervals and asynchronous persistence controls from observed failure and storage behavior.
+- **What You Will Do**: Reconcile memory and communication ledgers for ZeRO/FSDP
+  - choose activation recomputation from tensor-level evidence
+  - schedule TP/SP/PP/CP/EP forward and backward work
+  - measure overlap from timelines
+  - break FP8/MX/NVFP4 recipes
+  - and select checkpoint intervals and asynchronous persistence controls from observed failure and storage behavior.
 - **Environment**: Python 3.10+, NumPy and PyTorch. Hardware tiers are `CPU`, `COLAB-GPU` (one free/low-tier Colab GPU), and `TRACE` (pinned source or published-log replay). No local GPU or multi-node cluster is assumed.
 - **Evidence Rule**: Keep source observations (**O**), explicit derivations (**D**), and measurement-dependent hypotheses (**H**) separate. Author-reported results remain scoped to their configurations; synthetic inputs are labeled.
 - **If You Only Have One Week**: Lessons 26.1, 26.3, 26.6 — they reconcile ZeRO/FSDP memory, compose parallelism with its communication, and bound checkpoint and restart waste; recomputation, overlap, and low-precision recipes build on those three.
@@ -74,7 +103,11 @@ estimated_effort:
   total: 25h
 ```
 
-Learners must make a coupled plan, not select techniques independently. They must predict persistent and peak memory, collective bytes and latency exposure, pipeline bubbles, precision failure signals, and restart waste; then compare those predictions against CPU simulations, a Colab-scale run, traces, and pinned source.
+Learners must make a coupled plan, not select techniques independently.
+
+- They must predict persistent and peak memory, collective bytes and latency exposure, pipeline bubbles, precision failure signals, and restart waste
+- then compare those predictions against CPU simulations, a Colab-scale run, traces, and pinned source.
+
 
 ---
 
@@ -82,7 +115,34 @@ Learners must make a coupled plan, not select techniques independently. They mus
 
 ## 03 Knowledge Map
 
-Training Memory Ledger → ZeRO stages → FSDP1/FSDP2 state transitions → Activation Ledger → full versus selective recomputation → Training Parallelism (TP/SP, PP, CP, EP; forward and backward) → Topology Mapping → Buckets and Readiness → Overlap and Exposed Tail → Precision Recipe (E4M3/E5M2, delayed/current/block scaling, MXFP8, NVFP4, accumulation and high-precision islands) → Long-Horizon Validation → Failure Process → Blocking versus Asynchronous Checkpoint → Verified Durability and Restart Economics. Cross-cutting invariant: reducing one resident term usually creates compute, communication, temporary memory, numerical, or recovery work elsewhere.
+```mermaid
+flowchart TD
+    subgraph MEMG["<b>Memory (26.1–26.2)</b>"]
+        direction LR
+        M1["Training Memory Ledger"] --> M2["ZeRO stages"] --> M3["FSDP1/FSDP2<br/>state transitions"] --> M4["Activation Ledger"] --> M5["full vs selective<br/>recomputation"]
+    end
+    subgraph PARG["<b>Parallelism and timeline (26.3–26.4)</b>"]
+        direction LR
+        P1["Training Parallelism<br/>TP/SP · PP · CP · EP<br/>forward and backward"] --> P2["Topology Mapping"] --> P3["Buckets and Readiness"] --> P4["Overlap and<br/>Exposed Tail"]
+    end
+    subgraph PRECG["<b>Precision (26.5)</b>"]
+        direction LR
+        R1["Precision Recipe<br/>E4M3/E5M2 · delayed/current/block scaling<br/>MXFP8 · NVFP4 · accumulation<br/>high-precision islands"] --> R2["Long-Horizon Validation"]
+    end
+    subgraph RESG["<b>Restart (26.6)</b>"]
+        direction LR
+        F1["Failure Process"] --> F2["Blocking vs Asynchronous<br/>Checkpoint"] --> F3["Verified Durability and<br/>Restart Economics"]
+    end
+    M5 --> P1
+    P4 --> R1
+    R2 --> F1
+```
+
+- ZeRO: Zero Redundancy Optimizer; FSDP1/FSDP2: Fully Sharded Data Parallel versions 1/2.
+- TP/SP: tensor/sequence parallelism; PP: pipeline; CP: context; EP: expert parallelism.
+- E4M3/E5M2: FP8 exponent/mantissa encodings; MXFP8/NVFP4: block-scaled low-precision recipes (Lesson 26.5).
+
+Cross-cutting invariant: reducing one resident term usually creates compute, communication, temporary memory, numerical, or recovery work elsewhere.
 
 ## 04 Lessons
 
@@ -99,12 +159,29 @@ Which sharding stage makes the run fit, and what communication and transient mem
 - **HSDP** shards within one mesh dimension and replicates across another, adding an all-reduce after reduce-scatter in the pinned path (**O**, CLM-004).
 
 **Mechanism Explanation:**
-At FSDP2 commit `38cca96300da024842405ecefa081e4761254922`, `fully_shard` installs state and hooks. A pre-forward hook unshards parameters through grouped all-gather; post-forward may reshard; pre-backward unshards again; post-backward reshares storage and reduce-scatters gradients. Optimizer states follow sharded parameters. Storage saved by stage 3 therefore coexists with transient gathered parameters and collective buffers.
+At FSDP2 commit `38cca96300da024842405ecefa081e4761254922`, `fully_shard` installs state and hooks. Per parameter group:
+
+```mermaid
+stateDiagram-v2
+    [*] --> Sharded: fully_shard installs state and hooks
+    Sharded --> Unsharded: pre-forward hook<br/>grouped all-gather
+    Unsharded --> Sharded: post-forward<br/>(may reshard)
+    Sharded --> UnshardedBwd: pre-backward hook<br/>unshard again
+    UnshardedBwd --> Sharded: post-backward<br/>reshard storage + reduce-scatter gradients
+```
+
+- FSDP2: Fully Sharded Data Parallel version 2; `UnshardedBwd`: parameters materialized for backward.
+
+- Optimizer states follow sharded parameters.
+- Storage saved by stage 3 therefore coexists with transient gathered parameters and collective buffers.
 
 **Quantitative Model / Derivation:**
 For $N$ data-parallel ranks and $\Psi$ parameters under the cited 16-byte Adam layout:
 $$M_1=4\Psi+12\Psi/N,\quad M_2=2\Psi+14\Psi/N,\quad M_3=16\Psi/N.$$
-where $M_k$ is per-rank persistent model-state bytes at ZeRO stage $k$, $\Psi$ is parameter count, and $N$ is data-parallel degree.
+where:
+- $M_k$: per-rank persistent model-state bytes at ZeRO stage $k$
+- $\Psi$: parameter count
+- $N$: data-parallel degree (ranks)
 
 *Step-by-step (reading the formulas):*
 1. The 16 bytes/parameter split into $2\Psi$ (16-bit parameters) $+\,2\Psi$ (16-bit gradients) $+\,12\Psi$ (optimizer state); the differences between $M_1$, $M_2$, and $M_3$ expose this split.
@@ -112,10 +189,28 @@ where $M_k$ is per-rank persistent model-state bytes at ZeRO stage $k$, $\Psi$ i
 3. Stage 2 also divides gradients: $2\Psi+(2\Psi+12\Psi)/N=2\Psi+14\Psi/N$.
 4. Stage 3 also divides parameters: $(2+2+12)\Psi/N=16\Psi/N$.
 
-ZeRO's element-volume model gives $2\Psi$ communicated elements/step for stages 1–2 and $3\Psi$ for stage 3 (**O**, CLM-002). A ring collective over payload $S$ moves approximately $2(N-1)S/N$ bytes per rank (**D**, CLM-016): a ring all-reduce is a reduce-scatter plus an all-gather, each sending $(N-1)$ chunks of size $S/N$. For $N=8$, $2\cdot7/8=1.75$, so each rank sends about $1.75S$. These are volume models, not elapsed-time predictions.
+Communication volume:
+- ZeRO's element-volume model: $2\Psi$ communicated elements/step for stages 1–2, $3\Psi$ for stage 3 (**O**, CLM-002).
+- A ring collective over payload $S$ moves approximately $2(N-1)S/N$ bytes per rank (**D**, CLM-016).
+  - A ring all-reduce is a reduce-scatter plus an all-gather, each sending $(N-1)$ chunks of size $S/N$.
+  - For $N=8$: $2\cdot7/8=1.75$, so each rank sends about $1.75S$.
+- These are volume models, not elapsed-time predictions.
 
 **Worked Example (derived; synthetic):**
-A $10^9$-parameter model on $N=8$ ranks has persistent state predictions: stage 1, $4+12/8=5.5$ GB/rank; stage 2, $2+14/8=3.75$ GB/rank; stage 3, $16/8=2$ GB/rank. Add a synthetic 3.0 GB activation peak, 0.8 GB workspace/reserve allowance, and one 0.5 GB transient gather: stage 3 predicts 6.3 GB peak, not 2 GB. At two-byte communicated elements, the stage-3 ZeRO model is 6 GB/rank/step versus 4 GB for stages 1–2. Interpretation: stage 3 buys fit with more communication and materialization sensitivity. Limits: decimal GB, ideal partitioning, no padding or topology model.
+A $10^9$-parameter model on $N=8$ ranks:
+- Persistent state per rank:
+  - Stage 1: $4+12/8=5.5$ GB.
+  - Stage 2: $2+14/8=3.75$ GB.
+  - Stage 3: $16/8=2$ GB.
+- Stage-3 peak (synthetic extra terms):
+  - activation peak 3.0 GB;
+  - workspace/reserve allowance 0.8 GB;
+  - one transient gather 0.5 GB;
+  - total $2+3.0+0.8+0.5=6.3$ GB, not 2 GB.
+- Communication at two-byte elements: stage-3 ZeRO model is 6 GB/rank/step versus 4 GB for stages 1–2.
+
+- *Interpretation*: stage 3 buys fit with more communication and materialization sensitivity.
+- *Limits*: decimal GB, ideal partitioning, no padding or topology model.
 
 **Knowledge Check:**
 1. Why can stage 3 OOM although $16\Psi/N$ fits?
@@ -146,21 +241,57 @@ Which forward tensors should survive until backward, and which should be recompu
 **Concepts & Definitions:**
 - **Activation checkpointing** saves boundaries and replays omitted forward operations during backward. Chen et al. give an $O(\sqrt n)$-memory schedule for $n$ layers at roughly one extra forward pass (**O**, CLM-006).
 - **Full layer recomputation** stores a layer boundary and replays the whole layer.
-- **Selective recomputation** preserves cheap/small tensors while replaying memory-heavy operations, such as attention-score paths, when recomputation cost is favorable. Korthikanti et al. report fivefold activation-memory reduction and over 90% lower recomputation overhead for their evaluated sequence-parallel selective policy; those factors do not transfer universally (**O**, CLM-008).
+- **Selective recomputation** preserves cheap/small tensors while replaying memory-heavy operations, such as attention-score paths, when recomputation cost is favorable.
+  - Korthikanti et al. report fivefold activation-memory reduction and over 90% lower recomputation overhead for their evaluated sequence-parallel selective policy
+  - those factors do not transfer universally (**O**, CLM-008).
 - **Pipeline in-flight multiplicity** multiplies saved activations by concurrent microbatches; it must be in the ledger.
 
 **Mechanism Explanation:**
-Forward ordinarily saves tensors needed by local backward formulas. A checkpoint boundary keeps only chosen inputs plus RNG/autocast state. During backward, the forward segment is re-executed to regenerate omitted tensors, then gradients are computed. Selective policies use tensor shape and operation cost: do not replay every GEMM merely because one $s\times s$ attention tensor dominates memory.
+Forward ordinarily saves tensors needed by local backward formulas. With a checkpoint boundary:
+
+```mermaid
+flowchart LR
+    FWD["Forward segment"] --> KEEP["Keep only chosen inputs<br/>+ RNG/autocast state"]
+    KEEP --> DROP["Omitted tensors freed"]
+    DROP --> BWD["Backward reaches segment"]
+    BWD --> REPLAY["Re-execute forward segment<br/>regenerate omitted tensors"]
+    REPLAY --> GRAD["Compute gradients"]
+```
+
+- RNG: random number generator; GEMM in surrounding text: general matrix multiplication.
+
+Selective policies use tensor shape and operation cost: do not replay every GEMM merely because one $s\times s$ attention tensor dominates memory.
 
 **Quantitative Model / Derivation:**
 Under Korthikanti et al.'s 16-bit GPT-style assumptions, per-layer activation storage is
 $$sbh(34+5as/h)\ \text{bytes},$$
-where $s$ is sequence length, $b$ microbatch, $h$ hidden width, and $a$ attention heads. TP+SP divides the estimate by TP degree $t$; selective recomputation leaves about $34sbh/t$; full layer recomputation stores about $2sbh$ before optional partitioning (**O**, CLM-007). These formulas exclude allocator and kernel workspace.
+where:
+- $s$: sequence length (tokens)
+- $b$: microbatch size (sequences)
+- $h$: hidden width (elements)
+- $a$: attention head count
 
-*Step-by-step (term structure):* expanding gives $34sbh+5as^2b$. The first term is linear in $s$; the second, $sbh\cdot5as/h=5as^2b$, is the quadratic attention-score term. Selective recomputation drops the quadratic term, so its saving fraction is $(5as/h)/(34+5as/h)$.
+Variants (**O**, CLM-007):
+- TP+SP divides the estimate by TP degree $t$.
+- Selective recomputation leaves about $34sbh/t$.
+- Full layer recomputation stores about $2sbh$ before optional partitioning.
+- These formulas exclude allocator and kernel workspace.
+
+*Step-by-step (term structure):*
+1. Expanding gives $34sbh+5as^2b$.
+2. The first term is linear in $s$.
+3. The second, $sbh\cdot5as/h=5as^2b$, is the quadratic attention-score term.
+4. Selective recomputation drops the quadratic term, so its saving fraction is $(5as/h)/(34+5as/h)$.
 
 **Worked Example (derived; synthetic):**
-Let $s=4096$, $b=1$, $h=4096$, $a=32$, $t=8$, so $sbh=16{,}777{,}216$. Then $5as/h=5\cdot32\cdot4096/4096=160$, and baseline storage is $sbh(34+160)\approx3{,}254.8$ MB/layer before TP+SP, or $406.8$ MB/layer after division by 8. Selective recomputation leaves $34sbh/8\approx71.3$ MB/layer, about $5.7\times$ less than $406.8$ ($194/34$), because the score term (160) dominates the linear term (34). Full checkpointing is $2sbh\approx33.6$ MB/layer before partitioning, but replays the whole layer. Counterexample: at $s=128$ with the same $a,h$, $5as/h=5$, so selective recomputation removes only $5/39\approx12.8\%$ of the estimate. The published symbolic ledger must be instantiated: selective recomputation does not always dominate. At longer $s$, the quadratic term grows and the ranking changes.
+Input: $s=4096$, $b=1$, $h=4096$, $a=32$, $t=8$, so $sbh=16{,}777{,}216$.
+- Score term: $5as/h=5\cdot32\cdot4096/4096=160$.
+- Baseline storage: $sbh(34+160)\approx3{,}254.8$ MB/layer before TP+SP, or $406.8$ MB/layer after division by 8.
+- Selective recomputation: $34sbh/8\approx71.3$ MB/layer, about $5.7\times$ less than $406.8$ ($194/34$), because the score term (160) dominates the linear term (34).
+- Full checkpointing: $2sbh\approx33.6$ MB/layer before partitioning, but replays the whole layer.
+- Counterexample at $s=128$ with the same $a,h$: $5as/h=5$, so selective recomputation removes only $5/39\approx12.8\%$ of the estimate.
+
+The published symbolic ledger must be instantiated: selective recomputation does not always dominate. At longer $s$, the quadratic term grows and the ranking changes.
 
 **Knowledge Check:**
 1. What state must be preserved so dropout recomputation matches forward?
@@ -196,15 +327,39 @@ How should model, sequence, layers, context, and experts map onto ranks without 
 - **Expert parallelism (EP)** dispatches routed token-expert pairs and combines outputs with all-to-all; load skew exposes the slowest rank (**D**, CLM-014).
 
 **Mechanism Explanation:**
-Each dimension cuts one tensor axis or layer set and introduces matching forward and backward dependencies. TP collectives occur within layers. PP sends activations and gradients between stages. CP communicates K/V blocks or gathers them before local-Q attention. EP dispatches tokens before expert compute and combines results afterward. The rank mesh must map frequent/high-volume collectives to fast links and avoid multiplying incompatible dimensions beyond the world size.
+Each dimension cuts one tensor axis or layer set and introduces matching forward and backward dependencies:
+- **TP**: collectives occur within layers.
+- **PP**: sends activations and gradients between stages.
+- **CP**: communicates K/V blocks or gathers them before local-Q attention.
+- **EP**: dispatches tokens before expert compute and combines results afterward.
+
+The rank mesh must map frequent/high-volume collectives to fast links and avoid multiplying incompatible dimensions beyond the world size.
 
 **Quantitative Model / Derivation:**
-For $p$ balanced stages and $m$ microbatches, ideal-compute-normalized 1F1B bubble is $\beta=(p-1)/m$; elapsed idle fraction is $\beta/(1+\beta)$. With $v$ virtual chunks, $\beta=(p-1)/(mv)$ and pipeline communication grows by $v$ (**O**, CLM-010). Zero Bubble splits backward into input-gradient $B$ and parameter-gradient $W$ work to fill idle slots; feasibility depends on measured $F/B/W$ times and memory (**O**, CLM-011).
+For $p$ balanced stages and $m$ microbatches (**O**, CLM-010):
+- Ideal-compute-normalized 1F1B bubble: $\beta=(p-1)/m$.
+- Elapsed idle fraction: $\beta/(1+\beta)$.
+- With $v$ virtual chunks: $\beta=(p-1)/(mv)$, and pipeline communication grows by $v$.
 
-*Step-by-step (bubble fraction):* let $t_f+t_b$ be one microbatch's forward plus backward time on one stage. Ideal busy time per stage is $m(t_f+t_b)$. Warmup and drain leave $p-1$ idle slots of the same size, so idle time is $(p-1)(t_f+t_b)$. Dividing idle by ideal gives $\beta=(p-1)/m$; dividing idle by elapsed (ideal + idle) gives $\beta/(1+\beta)$. With $v$ chunks per rank, each slot shrinks by $v$, so $\beta=(p-1)/(mv)$.
+Zero Bubble splits backward into input-gradient $B$ and parameter-gradient $W$ work to fill idle slots; feasibility depends on measured $F/B/W$ times ($F$ = forward) and memory (**O**, CLM-011).
+
+*Step-by-step (bubble fraction):*
+1. Let $t_f+t_b$ be one microbatch's forward plus backward time on one stage.
+2. Ideal busy time per stage: $m(t_f+t_b)$.
+3. Warmup and drain leave $p-1$ idle slots of the same size: idle time $(p-1)(t_f+t_b)$.
+4. Idle / ideal: $\beta=(p-1)/m$.
+5. Idle / elapsed (ideal + idle): $\beta/(1+\beta)$.
+6. With $v$ chunks per rank, each slot shrinks by $v$: $\beta=(p-1)/(mv)$.
 
 **Worked Example (derived; synthetic):**
-For $p=8$, $m=32$, 1F1B gives $\beta=7/32=0.21875$, so elapsed idle fraction is $0.21875/1.21875=17.95\%$. With $v=2$, $\beta=7/64=0.109375$, idle fraction is $9.86\%$, but pipeline communication doubles. If one stage takes 25% longer, the balanced-stage formula becomes optimistic; increasing $m$ cannot remove that bottleneck. A zero-bubble schedule may fill nominal gaps but can raise activation residency or alter optimizer synchronization. PACI instead trades exact synchronous semantics for bounded forward/backward weight-version drift through local accumulation; it remains a 2026 frontier preprint verified only at abstract level here (**O**, CLM-012).
+For $p=8$, $m=32$:
+- 1F1B: $\beta=7/32=0.21875$, so elapsed idle fraction is $0.21875/1.21875=17.95\%$.
+- $v=2$: $\beta=7/64=0.109375$, idle fraction $0.109375/1.109375=9.86\%$, but pipeline communication doubles.
+
+Limits:
+- If one stage takes 25% longer, the balanced-stage formula becomes optimistic; increasing $m$ cannot remove that bottleneck.
+- A zero-bubble schedule may fill nominal gaps but can raise activation residency or alter optimizer synchronization.
+- PACI instead trades exact synchronous semantics for bounded forward/backward weight-version drift through local accumulation; it remains a 2026 frontier preprint verified only at abstract level here (**O**, CLM-012).
 
 **Knowledge Check:**
 1. Why does SP preserve first-order bandwidth while reducing activation residency?
@@ -240,13 +395,31 @@ Did communication become hidden, or did the profiler merely report concurrent wo
 - **Critical-path time** differs from the sum of kernel and collective durations; concurrent intervals must be unioned.
 
 **Mechanism Explanation:**
-Small buckets become ready earlier but pay more launch latency. Large buckets amortize launch overhead but delay their start. Reordering or unused parameters can delay an entire bucket. Communication can also slow concurrent compute through shared links, copy engines, memory bandwidth, or SM resources. The optimizer waits for the last required gradient, so the final bucket often defines the exposed tail.
+- **Bucket size trade-off**: small buckets become ready earlier but pay more launch latency; large buckets amortize launch overhead but delay their start.
+- **Delays**: reordering or unused parameters can delay an entire bucket.
+- **Contention**: communication can slow concurrent compute through shared links, copy engines, memory bandwidth, or SM resources.
+- **Tail**: the optimizer waits for the last required gradient, so the final bucket often defines the exposed tail.
 
 **Quantitative Model / Derivation:**
-For message size $S$, a first-order collective model is $T_{comm}\approx\alpha k+V/B$, with launch/step latency $\alpha$, algorithmic step count $k$, transferred bytes $V$, and achieved bandwidth $B$. Step time is the critical path, not $T_{compute}+\sum T_{comm}$. Useful overlap for a collective is bounded by independent compute after its readiness time; remaining duration is exposed (**D**, CLM-016).
+For message size $S$, a first-order collective model is $T_{comm}\approx\alpha k+V/B$ (**D**, CLM-016), where:
+- $\alpha$: launch/step latency (s)
+- $k$: algorithmic step count
+- $V$: transferred bytes
+- $B$: achieved bandwidth (bytes/s)
+
+Rules:
+- Step time is the critical path, not $T_{compute}+\sum T_{comm}$.
+- Useful overlap for a collective is bounded by independent compute after its readiness time; remaining duration is exposed.
 
 **Worked Example (synthetic):**
-Backward compute lasts 120 ms. Four buckets become ready at 30, 55, 80, and 110 ms; each collective lasts 25 ms without contention. First three finish by 105 ms and hide completely. The last finishes at 135 ms, exposing 15 ms. Aggregate communication duration is 100 ms, but exposed communication is 15 ms. Doubling bucket size produces two 42 ms collectives ready at 55 and 110 ms: the second finishes at 152 ms, exposing 32 ms despite lower aggregate duration (84 ms). Interpretation: aggregate collective time improved while step time worsened.
+- *Input*: backward compute lasts 120 ms. Four buckets become ready at 30, 55, 80, and 110 ms; each collective lasts 25 ms without contention.
+- *Buckets 1–3*: finish by 105 ms and hide completely.
+- *Bucket 4*: finishes at $110+25=135$ ms, exposing 15 ms.
+- *Totals*: aggregate communication duration 100 ms, but exposed communication 15 ms.
+- *Doubled bucket size*: two 42 ms collectives ready at 55 and 110 ms.
+  - The second finishes at 152 ms, exposing 32 ms.
+  - Aggregate duration is lower (84 ms).
+- *Interpretation*: aggregate collective time improved while step time worsened.
 
 **Knowledge Check:**
 1. Why can lower summed communication duration coincide with a slower step?
@@ -282,13 +455,45 @@ Which tensors may use low precision, with which scale and accumulator, without h
 - **High-precision islands** are operators or state retained in BF16/FP32: reductions, normalization, embeddings, selected layers, master weights, gradients, or optimizer state depending on recipe (**O**, CLM-018, CLM-020).
 
 **Mechanism Explanation:**
-A scale maps a high-precision tensor into a representable low-precision range. Delayed scales can lag distribution shifts; current scales need current amax; coarse scales let one outlier waste resolution for a whole tensor; blocks reduce that coupling but add metadata and transpose constraints. GEMMs may accept low-precision inputs while accumulating or outputting higher precision. The pinned Transformer Engine recipe objects make these choices explicit—delayed/current/block scaling, 32-value MXFP8 blocks, and NVFP4 controls—but configuration presence does not prove hardware support or accuracy (**O**, CLM-019). A 2025 MXFP8 study reports BF16-matched runs up to 8B parameters and 15T tokens with E4M3 and a specific shared-scale rounding rule; that result is recipe- and workload-scoped (**O**, CLM-022).
+A scale maps a high-precision tensor into a representable low-precision range. Scale policies fail differently:
+- **Delayed** scales can lag distribution shifts.
+- **Current** scales need current amax.
+- **Coarse** scales let one outlier waste resolution for a whole tensor.
+- **Blocks** reduce that coupling but add metadata and transpose constraints.
+
+GEMMs may accept low-precision inputs while accumulating or outputting higher precision.
+
+Evidence scope:
+- The pinned Transformer Engine recipe objects make these choices explicit—delayed/current/block scaling, 32-value MXFP8 blocks, and NVFP4 controls—but configuration presence does not prove hardware support or accuracy (**O**, CLM-019).
+- A 2025 MXFP8 study reports BF16-matched runs up to 8B parameters and 15T tokens with E4M3 and a specific shared-scale rounding rule; that result is recipe- and workload-scoped (**O**, CLM-022).
 
 **Quantitative Model / Trade-off Comparison:**
-For symmetric scale $s_q=x_{max}/q_{max}$, quantization is $q=\operatorname{round}(x/s_q)$ with clipping and reconstruction $\hat x=s_q q$. Here $x_{max}$ is the amax of the tensor or block that shares the scale, $q_{max}$ is the format's largest representable magnitude (448 for E4M3, 57,344 for E5M2), and $q$ is the stored low-precision code. Example: a tensor with amax 3.5 in E4M3 gets $s_q=3.5/448=0.0078125$, so 3.5 maps to 448; any later value above 3.5 under the same scale clips. Track saturation rate, zero/underflow rate, amax/scale lag, block outlier ratio, accumulator growth, and loss delta against BF16. A successful short proxy does not bound long-run risk: Fishman et al. report prolonged FP8 instability tied to SwiGLU outlier amplification (**O**, CLM-023).
+For symmetric scale $s_q=x_{max}/q_{max}$, quantization is $q=\operatorname{round}(x/s_q)$ with clipping and reconstruction $\hat x=s_q q$, where:
+- $x_{max}$: amax of the tensor or block that shares the scale
+- $q_{max}$: the format's largest representable magnitude (448 for E4M3, 57,344 for E5M2)
+- $q$: the stored low-precision code; $\hat x$: its reconstruction
+
+Example: a tensor with amax 3.5 in E4M3 gets $s_q=3.5/448=0.0078125$, so 3.5 maps to 448; any later value above 3.5 under the same scale clips.
+
+Track:
+- saturation rate;
+- zero/underflow rate;
+- amax/scale lag;
+- block outlier ratio;
+- accumulator growth;
+- loss delta against BF16.
+
+A successful short proxy does not bound long-run risk: Fishman et al. report prolonged FP8 instability tied to SwiGLU outlier amplification (**O**, CLM-023).
 
 **Worked Example (synthetic):**
-A 32-value block has 31 values near 1 and one outlier 128. Using a toy signed 4-bit maximum 7, one shared scale is $128/7=18.29$; each unit value maps to $1/18.29=0.055$, so all 31 values round to zero. If transformed or split so local maxima are 8, scale is $8/7=1.14$; $1/1.14=0.875$ rounds to code 1, so unit values survive near one code step. This is not an NVFP4 accuracy claim; it demonstrates why block size, outlier transforms, and scale hierarchy are part of the recipe. A delayed scale based on prior amax 8 would clip the new 128 outlier, while a current scale avoids clipping but coarsens every other value.
+A 32-value block has 31 values near 1 and one outlier 128, with a toy signed 4-bit maximum 7:
+- One shared scale: $128/7=18.29$; each unit value maps to $1/18.29=0.055$, so all 31 values round to zero.
+- Transformed or split so local maxima are 8: scale $8/7=1.14$; $1/1.14=0.875$ rounds to code 1, so unit values survive near one code step.
+
+Interpretation:
+- This is not an NVFP4 accuracy claim; it demonstrates why block size, outlier transforms, and scale hierarchy are part of the recipe.
+- A delayed scale based on prior amax 8 would clip the new 128 outlier.
+- A current scale avoids clipping but coarsens every other value.
 
 **Knowledge Check:**
 1. Why does “FP8 GEMM” not imply FP8 optimizer state or accumulator?
@@ -296,7 +501,13 @@ A 32-value block has 31 values near 1 and one outlier 128. Using a toy signed 4-
 3. Which signals can warn before loss diverges?
 
 **Guided Practice:**
-On CPU, emulate E4M3-like and block-scaled quantization for synthetic normal, heavy-tail, and drifting tensors. Compare delayed/current scales and block sizes. On `COLAB-GPU`, optionally repeat with supported FP8 operations; otherwise replay published traces. Pre-register a saturation/underflow boundary that rejects the recipe.
+On CPU, emulate E4M3-like and block-scaled quantization for synthetic normal, heavy-tail, and drifting tensors.
+
+- Compare delayed/current scales and block sizes.
+- On `COLAB-GPU`, optionally repeat with supported FP8 operations
+- otherwise replay published traces.
+- Pre-register a saturation/underflow boundary that rejects the recipe.
+
 
 **Feedback Contract:**
 - *Expected Evidence*: Full recipe table, scale/amax traces, saturation and underflow, BF16 comparison, operator coverage, hardware/software versions, and rejection boundary.
@@ -323,12 +534,39 @@ How often should the run checkpoint, and when is a checkpoint actually durable?
 - **Asynchronous checkpointing** overlaps persistence with training, but consumes CPU memory and I/O and needs bounded in-flight work and verified completion (**O**, CLM-027, CLM-028).
 
 **Mechanism Explanation:**
-A blocking checkpoint pauses useful work, persists state, and resumes. A failure loses work since the last durable checkpoint plus restart time. Llama 3's 54-day 405B snapshot reports 466 interruptions (419 unexpected), showing why interruption telemetry matters while not supplying a universal failure distribution (**O**, CLM-025). Asynchronous save shortens the exposed stall by staging quickly and persisting later. CheckFreq reports bounded 3.5% runtime overhead and recovery reduction from hours to seconds only on its evaluated workloads (**O**, CLM-027); TorchTitan reports a setup-specific 5–15× checkpoint-overhead reduction (**O**, CLM-029). If writes lag the checkpoint cadence, queued snapshots consume resources and the latest completed durable checkpoint becomes older than the staged snapshot. At the pinned PyTorch commit, `async_save` exposes separate `staging_completion` and `upload_completion` futures (**O**, CLM-028).
+- **Blocking checkpoint**: pauses useful work, persists state, and resumes.
+- **Failure cost**: work since the last durable checkpoint plus restart time.
+- **Telemetry**: Llama 3's 54-day 405B snapshot reports 466 interruptions (419 unexpected), showing why interruption telemetry matters while not supplying a universal failure distribution (**O**, CLM-025).
+- **Asynchronous save**: shortens the exposed stall by staging quickly and persisting later.
+  - CheckFreq reports bounded 3.5% runtime overhead and recovery reduction from hours to seconds only on its evaluated workloads (**O**, CLM-027).
+  - TorchTitan reports a setup-specific 5–15× checkpoint-overhead reduction (**O**, CLM-029).
+- **Backlog**: if writes lag the checkpoint cadence, queued snapshots consume resources and the latest completed durable checkpoint becomes older than the staged snapshot.
+- **Pinned API**: at the pinned PyTorch commit, `async_save` exposes separate `staging_completion` and `upload_completion` futures (**O**, CLM-028).
+
+```mermaid
+stateDiagram-v2
+    [*] --> Snapshot: training pauses (exposed stall C)
+    Snapshot --> Staged: copy to another memory tier<br/>staging_completion resolves
+    Staged --> Persisting: training resumes<br/>write to durable storage
+    Persisting --> Uploaded: upload_completion resolves
+    Uploaded --> Durable: verify (hash/manifest) + restore check
+    Durable --> [*]
+```
+
+- C: exposed checkpoint stall (time); futures are pinned `async_save` completion signals.
+
+- Only `Durable` is a restore point; `Staged` is not durability.
 
 **Quantitative Model / Derivation:**
 Under independent exponential failures and first-order assumptions,
 $$W(\tau)\approx C/\tau+\tau/(2M)+R/M.$$
-where $W$ is wasted time per unit of useful time, and $C$, $\tau$, $M$, $R$ are as defined above (same time unit).
+where:
+- All time quantities use the same time unit.
+- $W$: wasted time per unit of useful time (dimensionless)
+- $C$: exposed blocking checkpoint stall
+- $\tau$: useful work between checkpoint starts
+- $M$: MTBF
+- $R$: restart cost (detection, allocation, restore, warm restart)
 
 *Step-by-step:*
 1. Checkpoint stall: one stall $C$ per interval $\tau$ gives $C/\tau$.
@@ -338,7 +576,17 @@ where $W$ is wasted time per unit of useful time, and $C$, $\tau$, $M$, $R$ are 
 5. Substituting back, $W(\tau^*)\approx\sqrt{2C/M}+R/M$. The primary-source statements of Young and Daly were not verified (publisher full text inaccessible); neither formula is quoted (`TODO_VERIFY`).
 
 **Worked Example (derived; synthetic):**
-Let $C=120$ s, $M=24$ h $=86{,}400$ s, and $R=600$ s. $\tau^*=\sqrt{2\cdot120\cdot86{,}400}=4{,}553.7$ s = 75.9 min. Waste is $120/4553.7 + 4553.7/172{,}800+600/86{,}400=2.635\%+2.635\%+0.694\%\approx5.96\%$ (equivalently $\sqrt{2\cdot120/86{,}400}+600/86{,}400$). If asynchronous staging reduces exposed $C$ to 15 s and persistence keeps up, $\tau^*=1{,}609.9$ s=26.8 min and waste is $2.56\%$. If upload needs 45 min, a 26.8-min cadence accumulates writes; the assumption fails and the policy needs backpressure or a longer interval.
+Input: $C=120$ s, $M=24$ h $=86{,}400$ s, $R=600$ s.
+- Interval: $\tau^*=\sqrt{2\cdot120\cdot86{,}400}=4{,}553.7$ s $=75.9$ min.
+- Waste:
+  - Stall: $120/4553.7=2.635\%$.
+  - Lost work: $4553.7/172{,}800=2.635\%$.
+  - Restart: $600/86{,}400=0.694\%$.
+  - Total $\approx5.96\%$ (equivalently $\sqrt{2\cdot120/86{,}400}+600/86{,}400$).
+- Asynchronous staging reduces exposed $C$ to 15 s (persistence keeps up):
+  - $\tau^*=1{,}609.9$ s $=26.8$ min.
+  - Waste $2.56\%$.
+- If upload needs 45 min, a 26.8-min cadence accumulates writes; the assumption fails and the policy needs backpressure or a longer interval.
 
 **Knowledge Check:**
 1. Why does reducing $R$ not change the first-order stationary point?
@@ -370,7 +618,13 @@ Choose and validate checkpoint cadence and asynchronous persistence from observe
 - Young (1974), *A first order approximation to the optimum checkpoint interval*, CACM, DOI `10.1145/361147.361115` (metadata only; full text not opened). Daly's higher-order formula is not quoted.
 
 **CURRENT DEFAULT**
-- FSDP/ZeRO-style sharding chosen from a full memory and collective ledger; activation recomputation selected from tensor evidence; topology-aware multidimensional meshes; timeline-based overlap measurement; mixed precision specified as a full recipe; checkpoint completion verified by restore. “Current default” is an engineering baseline, not a universal adoption claim.
+- FSDP/ZeRO-style sharding chosen from a full memory and collective ledger
+  - activation recomputation selected from tensor evidence
+  - topology-aware multidimensional meshes
+  - timeline-based overlap measurement
+  - mixed precision specified as a full recipe
+  - checkpoint completion verified by restore.
+  - “Current default” is an engineering baseline, not a universal adoption claim.
 
 **WORKLOAD-DEPENDENT**
 - FSDP1 versus FSDP2; full versus selective recomputation; TP/SP/PP/CP/EP degree; 1F1B versus interleaving; Ring Attention versus K/V all-gather; bucket size; delayed versus current/block scaling; blocking versus asynchronous checkpointing.
@@ -383,7 +637,12 @@ Choose and validate checkpoint cadence and asynchronous persistence from observe
 - [Pretraining Large Language Models with NVFP4](https://arxiv.org/abs/2509.25149) — NVIDIA, 2025 (v2 2026); 12B/10T author-reported recipe.
 
 **LEGACY / INSUFFICIENT**
-- Dividing $16\Psi$ by ranks and calling that peak memory; treating all collective bytes as exposed time; selecting a parallelism degree without a backward path; claiming “FP8 training” from dtype alone; treating staging completion as durable; importing a checkpoint interval from unrelated failure data.
+- Dividing $16\Psi$ by ranks and calling that peak memory
+  - treating all collective bytes as exposed time
+  - selecting a parallelism degree without a backward path
+  - claiming “FP8 training” from dtype alone
+  - treating staging completion as durable
+  - importing a checkpoint interval from unrelated failure data.
 
 **PRODUCTION SOURCE TRACES (static inspection, verified 2026-10-12)**
 1. `pytorch/pytorch` commit `38cca96300da024842405ecefa081e4761254922`:
@@ -456,11 +715,36 @@ All labs use `PREDICT → BUILD → MEASURE → BREAK → EXPLAIN → IMPROVE �
   - Loss is normal for 40B tokens, then gradient amax and loss spike.
   - Operations reports “checkpoint complete” every 20 minutes, but the latest two checkpoints fail restore after a rack outage.
 - **Diagnostic Protocol (Task)**:
-  1. *Competing Hypotheses*: omitted transient all-gather or activation term; allocator/workspace peak; PP imbalance; late FSDP/DP bucket; cross-node TP; FP8 scale lag/coarse outlier contamination/accumulation; optimizer instability from Module 25; upload backlog; staging mistaken for durability; correlated failure invalidating the interval model.
-  2. *Missing Evidence*: Per-rank memory snapshots at OOM; wrap groups and mesh; sequence/microbatch distribution; synchronized compute/collective trace with readiness; complete precision recipe and amax/scale/saturation; checkpoint staging/upload futures, queue depth, storage errors, hashes, and restore logs.
-  3. *Discriminating Tests*: Replay the offending sequence in BF16 and FP8; reduce one memory term at a time; compare critical path rather than duration sums; move TP within node; replay delayed versus current scales; wait for `upload_completion`, kill processes, and restore; test bursty failure simulation.
-  4. *Ranked Diagnosis*: Rank only after tests; allow interacting causes. A late bucket can coexist with topology contention; FP8 drift can coexist with optimizer instability.
-  5. *Intervention*: Reduce gather group or checkpoint selected activations; remap mesh/rebucket; restore BF16 or revise scale/high-precision islands; bound one in-flight checkpoint, verify upload and manifest, lengthen cadence until persistence keeps up.
+
+```mermaid
+flowchart LR
+    H["1. Competing<br/>hypotheses"] --> E["2. Missing<br/>evidence"] --> T["3. Discriminating<br/>tests"] --> D["4. Ranked<br/>diagnosis"] --> I["5. Intervention"] --> R["6. Remeasure"]
+```
+
+  1. *Competing Hypotheses*:
+     - memory: omitted transient all-gather or activation term; allocator/workspace peak;
+     - throughput: PP imbalance; late FSDP/DP bucket; cross-node TP;
+     - numerics: FP8 scale lag/coarse outlier contamination/accumulation; optimizer instability from Module 25;
+     - durability: upload backlog; staging mistaken for durability; correlated failure invalidating the interval model.
+  2. *Missing Evidence*:
+     - per-rank memory snapshots at OOM; wrap groups and mesh; sequence/microbatch distribution;
+     - synchronized compute/collective trace with readiness;
+     - complete precision recipe and amax/scale/saturation;
+     - checkpoint staging/upload futures, queue depth, storage errors, hashes, and restore logs.
+  3. *Discriminating Tests*:
+     - replay the offending sequence in BF16 and FP8;
+     - reduce one memory term at a time;
+     - compare critical path rather than duration sums; move TP within node;
+     - replay delayed versus current scales;
+     - wait for `upload_completion`, kill processes, and restore; test bursty failure simulation.
+  4. *Ranked Diagnosis*: Rank only after tests; allow interacting causes.
+     - A late bucket can coexist with topology contention.
+     - FP8 drift can coexist with optimizer instability.
+  5. *Intervention*:
+     - reduce gather group or checkpoint selected activations;
+     - remap mesh/rebucket;
+     - restore BF16 or revise scale/high-precision islands;
+     - bound one in-flight checkpoint, verify upload and manifest, lengthen cadence until persistence keeps up.
   6. *Remeasure*: Peak allocated/reserved by rank, p50/p95 step and exposed tail, amax/saturation/loss against BF16, durable checkpoint age, useful-time fraction, and successful restore.
 
 ---
@@ -471,7 +755,13 @@ All labs use `PREDICT → BUILD → MEASURE → BREAK → EXPLAIN → IMPROVE �
 
 ### Transfer Problem: Design a 70B Long-Context MoE Pretraining Run
 
-Design a training plan for a synthetic 70B-total/18B-active MoE decoder, sequence length 32K, 128 GPUs arranged as 16 eight-GPU nodes. Each GPU has a stated 80 GB capacity; intra-node and inter-node bandwidth/latency are supplied. Failure and storage traces include independent failures, one rack outage, persistence bandwidth, and restore time. The quality team allows BF16, FP8, or a frontier block-scaled experiment, but requires a BF16 comparator and rollback boundary.
+Design a training plan for a synthetic 70B-total/18B-active MoE decoder, sequence length 32K, 128 GPUs arranged as 16 eight-GPU nodes.
+
+- Each GPU has a stated 80 GB capacity
+- intra-node and inter-node bandwidth/latency are supplied.
+- Failure and storage traces include independent failures, one rack outage, persistence bandwidth, and restore time.
+- The quality team allows BF16, FP8, or a frontier block-scaled experiment, but requires a BF16 comparator and rollback boundary.
+
 
 **Constraints**:
 - No physical cluster is provided: use `CPU`, `COLAB-GPU`, and `TRACE` evidence only.

@@ -2,42 +2,81 @@
 
 ## 00 Why This Module Exists
 
-A shipped LLM feature produces a second stream of data next to its traces: thumbs, ratings, side-by-side votes, accepts, copies, edits, regenerations, dwell, and abandonment. Teams route that stream into dashboards, evaluation sets, reward signals, and A/B decisions. Each use quietly assumes that the signal measures quality, that the users who emit it represent the users who do not, and that an experiment which improves it improves the product.
+A shipped LLM feature produces a second stream of data next to its traces: thumbs, ratings, side-by-side votes, accepts, copies, edits, regenerations, dwell, and abandonment. Teams route that stream into dashboards, evaluation sets, reward signals, and A/B decisions. Each use quietly assumes that:
 
-None of those assumptions holds by default. A feedback event is a measurement taken by a self-selected subset of users, with a propensity that depends on the interface and on the user. Approval rewards agreement as well as correctness when the rater cannot check the answer. In April 2025 a model update that added a thumbs-based reward passed offline evaluation and A/B tests, then was rolled back within days for sycophancy (**O**, CLM-006, CLM-007).
+- the signal measures quality;
+- the users who emit it represent the users who do not;
+- an experiment which improves it improves the product.
 
-```text
-exposure (trace) --> user action? --> feedback event (selected, delayed, typed)
-       |                                   |
-       |                 +-----------------+------------------+
-       v                 v                 v                  v
-  denominator      dashboards        eval candidates     training data
-  (join, 39.1)     (bias, 39.2)      (adjudicate, 39.3)  (provenance, 39.4)
-                         \                 |                  /
-                          +---> A/B decision with integrity checks (39.5)
-                                           |
-                          latency + trust UX shapes who acts and how (39.6)
+None of those assumptions holds by default:
+
+- A feedback event is a measurement taken by a self-selected subset of users, with a propensity that depends on the interface and on the user.
+- Approval rewards agreement as well as correctness when the rater cannot check the answer.
+- In April 2025 a model update that added a thumbs-based reward passed offline evaluation and A/B tests, then was rolled back within days for sycophancy (**O**, CLM-006, CLM-007).
+
+```mermaid
+flowchart TD
+    EXP["<b>exposure</b><br/>(trace)"] --> ACT{"user action?"} --> FB["<b>feedback event</b><br/>(selected, delayed, typed)"]
+
+    EXP --> DEN["<b>denominator</b><br/>(join, 39.1)"]
+    FB --> DASH["<b>dashboards</b><br/>(bias, 39.2)"]
+    FB --> EVC["<b>eval candidates</b><br/>(adjudicate, 39.3)"]
+    FB --> TRAIN["<b>training data</b><br/>(provenance, 39.4)"]
+
+    DASH --> AB["<b>A/B decision</b> with integrity checks<br/>(39.5)"]
+    EVC --> AB
+    TRAIN --> AB
+
+    AB --> UX["<b>latency + trust UX</b><br/>shapes who acts and how (39.6)"]
 ```
 
-Module 15 Lesson 15.5 owns the offered denominator, goodput, and the requirement that offline gains be validated online. Module 19 Lessons 19.4–19.5 own mined training data, poisoning, and preference objectives. Module 07 owns calibration of confidence signals. Module 23 Lesson 23.5 owns delayed labels as an SLI problem. This module owns the measurement model of feedback signals, bias correction, the conversion of feedback into evaluation and training data, the mechanics of LLM feature experiments that Lesson 15.5 only names (SRM, CUPED, novelty), and latency and trust UX. It is scheduled after Module 19 because it uses both Module 15 evaluation and the Module 19 data path. It is numbered 39 because 25–36 are reserved by [EXPERT-TRACK.md](../EXPERT-TRACK.md) and 37–38 are taken.
+**Owned elsewhere:**
+
+- Module 15 Lesson 15.5: the offered denominator, goodput, and the requirement that offline gains be validated online.
+- Module 19 Lessons 19.4–19.5: mined training data, poisoning, and preference objectives.
+- Module 07: calibration of confidence signals.
+- Module 23 Lesson 23.5: delayed labels as an SLI problem.
+
+**This module owns:** the measurement model of feedback signals, bias correction, the conversion of feedback into evaluation and training data, the mechanics of LLM feature experiments that Lesson 15.5 only names (SRM, CUPED, novelty), and latency and trust UX.
+
+**Placement:** scheduled after Module 19 because it uses both Module 15 evaluation and the Module 19 data path. Numbered 39 because 25–36 are reserved by [EXPERT-TRACK.md](../EXPERT-TRACK.md) and 37–38 are taken.
 
 **Research cutoff:** 2026-11-10. All sources were opened on 2026-11-10. Abstract-only sources are labeled in Section 05 and in the registry.
 
 **Module Orientation**
 - **Engineering Problem**: Use production feedback to evaluate, train, and ship LLM features without mistaking a selected, approval-shaped signal for quality.
-- **What You Will Do**: Build a feedback ledger joined to exposures; quantify and correct nonresponse and position bias; route feedback into adjudicated evaluation sets; convert binary and edit feedback into KTO training data with provenance filters; plan and audit an A/B test with SRM, CUPED, and novelty checks; trace GrowthBook's SRM and CUPED code and Langfuse's score ingestion at pinned commits; diagnose an approval-optimized release that passed its A/B test.
+- **What You Will Do**:
+  - build a feedback ledger joined to exposures;
+  - quantify and correct nonresponse and position bias;
+  - route feedback into adjudicated evaluation sets;
+  - convert binary and edit feedback into KTO training data with provenance filters;
+  - plan and audit an A/B test with SRM, CUPED, and novelty checks;
+  - trace GrowthBook's SRM and CUPED code and Langfuse's score ingestion at pinned commits;
+  - diagnose an approval-optimized release that passed its A/B test.
 - **Environment**: Python 3.10+ with NumPy, SciPy, and pandas on CPU. All lab data are generated synthetically and labeled so. Source traces are static reads of pinned GitHub revisions.
-- **Evidence Rule**: **O** is a source observation, **D** a derivation under stated assumptions, **H** an engineering hypothesis that needs measurement. `CLM-xxx` identifiers point to `research-registry/39-feedback-loop-ai-product.yaml`. What regenerate, edit, dwell, and abandonment measure in chat LLMs, whether streaming lowers perceived latency, and how interference biases LLM experiments are taught as **H** with the measurement that would test them.
-- **If You Only Have One Week**: Lessons 39.1, 39.2, 39.5 — together they cover the denominator join, the bias that makes raw thumbs misleading, and the experiment checks that would have stopped an approval-optimized release; 39.3 and 39.4 reuse these ideas for eval and training data.
+- **Evidence Rule**:
+  - **O** is a source observation, **D** a derivation under stated assumptions, **H** an engineering hypothesis that needs measurement.
+  - `CLM-xxx` identifiers point to `research-registry/39-feedback-loop-ai-product.yaml`.
+  - Taught as **H** with the measurement that would test them: what regenerate, edit, dwell, and abandonment measure in chat LLMs; whether streaming lowers perceived latency; how interference biases LLM experiments.
+- **If You Only Have One Week**: Lessons 39.1, 39.2, 39.5.
+  - Together they cover the denominator join, the bias that makes raw thumbs misleading, and the experiment checks that would have stopped an approval-optimized release.
+  - 39.3 and 39.4 reuse these ideas for eval and training data.
 
 ## 01 Baseline Assumptions
 
 - Module 00, Lessons 0.3 and 0.5: experimental unit, randomization within blocks, confidence intervals, and the half-width planning formula.
 - Module 04, Lesson 4.1: TTFT, ITL, and end-to-end latency at declared boundaries. Lesson 39.6 uses them as UX inputs.
 - Module 07, Lesson 7.2: confidence as a forecast of a declared event, and calibration. Lesson 39.6 contrasts calibrated confidence with user trust.
-- Module 15, Lesson 15.3: graders as instruments, judge position and verbosity bias, and swap consistency. Lesson 15.4: paired block intervals, gates, and power for paired gates. Lesson 15.5: offered denominator, goodput, and the online-validation checklist that names SRM, interference, novelty, selection, and delayed outcomes without teaching their mechanics.
-- Module 19, Lesson 19.4: failure mining, train/eval separation, poisoning, and the `untrusted` label on externally writable feedback. Lesson 19.5: RLHF, DPO, GRPO, and KL to a reference.
-- Module 23, Lesson 23.2: inverse-probability weighting of sampled telemetry is named there; this module teaches propensity weighting of feedback at first use in Lesson 39.2. Lesson 23.5: delayed labels and proxy quality.
+- Module 15:
+  - Lesson 15.3: graders as instruments, judge position and verbosity bias, and swap consistency.
+  - Lesson 15.4: paired block intervals, gates, and power for paired gates.
+  - Lesson 15.5: offered denominator, goodput, and the online-validation checklist that names SRM, interference, novelty, selection, and delayed outcomes without teaching their mechanics.
+- Module 19:
+  - Lesson 19.4: failure mining, train/eval separation, poisoning, and the `untrusted` label on externally writable feedback.
+  - Lesson 19.5: RLHF, DPO, GRPO, and KL to a reference.
+- Module 23:
+  - Lesson 23.2: inverse-probability weighting of sampled telemetry is named there; this module teaches propensity weighting of feedback at first use in Lesson 39.2.
+  - Lesson 23.5: delayed labels and proxy quality.
 - Not taught earlier and taught here at first use: the Pearson chi-square test (39.5), CUPED (39.5), unpaired two-arm sample size (39.5), KTO (39.4), propensity models of feedback (39.2), and overreliance measures (39.6).
 
 ## 02 Target Mastery
@@ -72,7 +111,15 @@ estimated_effort:
 
 Each category is counted once. The source trace is not also counted inside Lesson 39.5 practice or LAB D.
 
-The learner must be able to state what each feedback signal measures and its validity status; compute feedback rates against exposures; correct nonresponse and position bias when propensities are estimable and say when they are not; explain how approval rewards produce sycophancy; turn feedback into adjudicated evaluation items and provenance-filtered training data; plan and audit an LLM feature experiment; and set latency and trust UX targets that are measured against correctness, not satisfaction alone.
+The learner must be able to:
+
+- state what each feedback signal measures and its validity status;
+- compute feedback rates against exposures;
+- correct nonresponse and position bias when propensities are estimable and say when they are not;
+- explain how approval rewards produce sycophancy;
+- turn feedback into adjudicated evaluation items and provenance-filtered training data;
+- plan and audit an LLM feature experiment;
+- set latency and trust UX targets that are measured against correctness, not satisfaction alone.
 
 ---
 
@@ -80,7 +127,18 @@ The learner must be able to state what each feedback signal measures and its val
 
 ## 03 Knowledge Map
 
-Exposure (trace, rendered response) $\to$ Propensity to act (UI, user, task, quality) $\to$ Feedback Event (explicit: thumbs, rating, side-by-side; implicit: accept, copy, edit, regenerate, dwell, abandon) $\to$ Ledger Join (exposure denominator, async ingestion, user/session keys) $\to$ three consumers:
+```mermaid
+flowchart LR
+    EXP["Exposure<br/>trace, rendered response"] --> PROP["Propensity to act<br/>UI, user, task, quality"]
+    PROP --> EV["Feedback Event<br/>explicit: thumbs, rating, side-by-side<br/>implicit: accept, copy, edit,<br/>regenerate, dwell, abandon"]
+    EV --> LED["Ledger Join<br/>exposure denominator, async ingestion,<br/>user/session keys"]
+    LED --> M["1 Measurement"]
+    LED --> D["2 Data"]
+    LED --> DEC["3 Decisions"]
+    UX["Latency + trust UX"] -. changes .-> PROP
+```
+
+The ledger join feeds three consumers:
 
 1. **Measurement** — rates per exposure, bias correction by propensity, validity against adjudicated outcomes.
 2. **Data** — candidates selected for adjudication into eval sets; desirable/undesirable labels and edits into training data, filtered by provenance.
@@ -118,22 +176,63 @@ What the evidence does not yet support (this pass opened no primary source that 
 
 Each **H** names its falsifier in the registry. Until a validation study on adjudicated outcomes is run, a dashboard should show these signals with their status, not as quality.
 
-*Capture path (one tool).* At the pinned Langfuse commit, a feedback score is a typed row (`NUMERIC`, `CATEGORICAL`, `BOOLEAN`, `CORRECTION`, `TEXT`) attached to one of `traceId`, `sessionId`, `observationId`, or `datasetRunId`; `CORRECTION` (an edited output) and `TEXT` are excluded from aggregation (**O**, CLM-033). The public `POST /api/public/scores` handler wraps each score as a `SCORE_CREATE` event and calls `processEventBatch`, so writes are asynchronous ingestion (**O**, CLM-034). A score row exists only when the user acted. Rates therefore need a join to the exposure log, and counts read shortly after the window closes may be incomplete (**D**, CLM-042).
+*Capture path (one tool).* At the pinned Langfuse commit:
+
+- A feedback score is a typed row (`NUMERIC`, `CATEGORICAL`, `BOOLEAN`, `CORRECTION`, `TEXT`) attached to one of `traceId`, `sessionId`, `observationId`, or `datasetRunId`.
+- `CORRECTION` (an edited output) and `TEXT` are excluded from aggregation (**O**, CLM-033).
+- The public `POST /api/public/scores` handler wraps each score as a `SCORE_CREATE` event and calls `processEventBatch`, so writes are asynchronous ingestion (**O**, CLM-034).
+- A score row exists only when the user acted. Rates therefore need a join to the exposure log, and counts read shortly after the window closes may be incomplete (**D**, CLM-042).
+
+```mermaid
+sequenceDiagram
+    participant C as Client
+    participant API as POST /api/public/scores
+    participant Q as processEventBatch (async)
+    participant S as Score store
+    participant X as Exposure log
+    C->>API: score (type, traceId / sessionId / ...)
+    API->>Q: SCORE_CREATE event
+    Q-->>S: score row (later)
+    Note over S,X: rates = join score rows to exposures by trace ID
+```
 
 **Quantitative Model / Derivation:**
 For a window with $E$ exposures, $U$ up events, and $N$ down events:
 
 $$\text{share}_{up}=\frac{U}{U+N},\qquad r_{up}=\frac{U}{E},\qquad r_{down}=\frac{N}{E},\qquad r_{resp}=\frac{U+N}{E}.$$
 
-*Where*: $E$ counts rendered responses at a declared boundary (not requests sent); $U,N$ count feedback events joined to those exposures; at most one thumb per exposure is assumed.
+where:
 
-*Step-by-step*: (1) Join feedback rows to exposures by trace ID; drop feedback whose trace is outside the window. (2) Count. (3) Note that $\text{share}_{up}=r_{up}/r_{resp}$: the share divides by the response rate, so any change in who responds moves it even when $r_{up}$ and $r_{down}$ are fixed in ratio to quality.
+- $E$: rendered responses at a declared boundary, not requests sent (count);
+- $U,N$: up and down feedback events joined to those exposures (count); at most one thumb per exposure is assumed;
+- $\text{share}_{up}$: fraction of feedback events that are up (0–1);
+- $r_{up},r_{down}$: up and down events per exposure (fraction);
+- $r_{resp}$: response rate, feedback events of either kind per exposure (fraction).
+
+*Step-by-step*:
+1. Join feedback rows to exposures by trace ID; drop feedback whose trace is outside the window.
+2. Count.
+3. Note that $\text{share}_{up}=r_{up}/r_{resp}$: the share divides by the response rate, so any change in who responds moves it even when $r_{up}$ and $r_{down}$ are fixed in ratio to quality.
 
 **Worked Example (synthetic):**
-- *Input*: Week A: $E=50{,}000$, $U=540$, $N=660$. Week B, after a UI change that makes the thumbs more visible: $E=50{,}000$, $U=1{,}500$, $N=900$.
-- *Steps*: Week A share $=540/1{,}200=0.45$; $r_{down}=660/50{,}000=1.32\%$; $r_{resp}=2.4\%$. Week B share $=1{,}500/2{,}400=0.625$; $r_{down}=900/50{,}000=1.80\%$; $r_{resp}=4.8\%$.
+- *Input*:
+  - Week A: $E=50{,}000$, $U=540$, $N=660$.
+  - Week B, after a UI change that makes the thumbs more visible: $E=50{,}000$, $U=1{,}500$, $N=900$.
+- *Steps*:
+  - Week A:
+    - Share $=540/(540+660)=540/1{,}200=0.45$.
+    - $r_{down}=660/50{,}000=1.32\%$.
+    - $r_{resp}=1{,}200/50{,}000=2.4\%$.
+  - Week B:
+    - Share $=1{,}500/(1{,}500+900)=1{,}500/2{,}400=0.625$.
+    - $r_{down}=900/50{,}000=1.80\%$.
+    - $r_{resp}=2{,}400/50{,}000=4.8\%$.
 - *Result*: the up share rose 17.5 points, and the per-exposure down rate also rose 0.48 points.
-- *Interpretation and limits*: both cannot be read as "quality improved". The response rate doubled, so who responds changed. Without adjudicated quality on a sample, neither week's numbers identify quality. All values are synthetic.
+- *Interpretation and limits*:
+  - Both cannot be read as "quality improved".
+  - The response rate doubled, so who responds changed.
+  - Without adjudicated quality on a sample, neither week's numbers identify quality.
+  - All values are synthetic.
 
 **Knowledge Check:**
 1. Why can the up share rise while the per-exposure down rate also rises?
@@ -141,10 +240,17 @@ $$\text{share}_{up}=\frac{U}{U+N},\qquad r_{up}=\frac{U}{E},\qquad r_{down}=\fra
 3. Why must the ledger tolerate feedback that arrives after the window closes?
 
 **Guided Practice:**
-A week has $E=30{,}000$, $U=360$, $N=540$. (a) Compute share, $r_{up}$, $r_{down}$, $r_{resp}$. (b) Write the ledger schema: exposure keys, feedback keys, variant, user, ingestion time, and how late feedback is handled. (c) For regenerate, write the validation study that would move CLM-050 from **H** to observed.
+A week has $E=30{,}000$, $U=360$, $N=540$.
+
+- (a) Compute share, $r_{up}$, $r_{down}$, $r_{resp}$.
+- (b) Write the ledger schema: exposure keys, feedback keys, variant, user, ingestion time, and how late feedback is handled.
+- (c) For regenerate, write the validation study that would move CLM-050 from **H** to observed.
 
 **Feedback Contract:**
-- *Expected Evidence*: (a) share $=0.40$; $r_{up}=1.2\%$; $r_{down}=1.8\%$; $r_{resp}=3.0\%$. (b) A schema with an exposure table keyed by trace and a feedback table joined to it, plus a maturity rule for late rows. (c) A stratified adjudicated sample of regenerated and non-regenerated responses, with which answer the user kept, and the falsifier stated.
+- *Expected Evidence*:
+  - (a) Share $=0.40$; $r_{up}=1.2\%$; $r_{down}=1.8\%$; $r_{resp}=3.0\%$.
+  - (b) A schema with an exposure table keyed by trace and a feedback table joined to it, plus a maturity rule for late rows.
+  - (c) A stratified adjudicated sample of regenerated and non-regenerated responses, with which answer the user kept, and the falsifier stated.
 - *Common Failure*: Computing rates from score rows alone, or presenting regenerate rate as a defect rate.
 - *Diagnostic Hint*: What is the denominator, and which exposures produced no row?
 - *Concept to Revisit*: Offered denominator (Module 15, Lesson 15.5).
@@ -163,19 +269,47 @@ When does a feedback metric move without quality moving, and when can the bias b
 
 **Concepts & Definitions:**
 - **Nonresponse (selection) bias**: feedback comes from users whose propensity to act differs by satisfaction, task, or user type.
-- **Position / presentation bias**: the probability of examining or selecting an item depends on where and how it is shown. Joachims et al. found clicks informative but biased by trust in the ranking and by result quality; reversing the ranking moved the mean clicked rank from 2.66 to 4.03 (**O**, CLM-001).
-- **Relative vs absolute interpretation**: "click > skip above" agreed with explicit judgments 80.8 ± 3.6% (inter-judge 89.5%) and was stable under swapped and reversed rankings; "click > earlier click" scored 28.6–36.8% (**O**, CLM-002).
-- **Inverse propensity weighting (IPW / IPS)**: weight each observed event by $1/p$, the probability it would be observed. The IPS ranking estimator is unbiased when propensities are positive and depend only on observables; under a position-based model, a swap intervention estimates propensities up to a constant (**O**, CLM-003).
+- **Position / presentation bias**: the probability of examining or selecting an item depends on where and how it is shown.
+  - Joachims et al. found clicks informative but biased by trust in the ranking and by result quality.
+  - Reversing the ranking moved the mean clicked rank from 2.66 to 4.03 (**O**, CLM-001).
+- **Relative vs absolute interpretation** (**O**, CLM-002):
+  - "click > skip above" agreed with explicit judgments 80.8 ± 3.6% (inter-judge 89.5%) and was stable under swapped and reversed rankings;
+  - "click > earlier click" scored 28.6–36.8%.
+- **Inverse propensity weighting (IPW / IPS)**: weight each observed event by $1/p$, where $p$ is the probability it would be observed (**O**, CLM-003).
+  - The IPS ranking estimator is unbiased when propensities are positive and depend only on observables.
+  - Under a position-based model, a swap intervention estimates propensities up to a constant.
 - **Sycophancy**: a model telling users what they appear to want. Five assistants were sycophantic across four tasks (**O**, CLM-004).
 - **Approval reward**: using user or rater approval as a training or selection signal.
 
 **Mechanism Explanation:**
-*Nonresponse.* If satisfied users rarely click and dissatisfied users often do, the observed share is dominated by the propensity ratio (**D**, CLM-040). IPW recovers the satisfied share only if propensities are estimated without bias, for example from a randomized prompt-for-feedback arm (**D**, CLM-041). Whether propensity also depends on quality within observable strata is untested; if it does, IPW on observables stays biased (**H**, CLM-056).
+*Nonresponse.*
+
+- If satisfied users rarely click and dissatisfied users often do, the observed share is dominated by the propensity ratio (**D**, CLM-040).
+- IPW recovers the satisfied share only if propensities are estimated without bias, for example from a randomized prompt-for-feedback arm (**D**, CLM-041).
+- Whether propensity also depends on quality within observable strata is untested; if it does, IPW on observables stays biased (**H**, CLM-056).
+
+```mermaid
+flowchart LR
+    Q["latent satisfaction s"] --> RU["satisfied: thumbs-up<br/>with propensity r_u"]
+    Q --> RD["unsatisfied: thumbs-down<br/>with propensity r_d"]
+    UIC["UI prominence"] --> RU
+    UIC --> RD
+    RU --> OBS["observed share_up"]
+    RD --> OBS
+    ARM["randomized prompt-for-feedback arm"] --> EST["estimate r_u, r_d"]
+    EST --> IPW["IPW: U/r_u, N/r_d → ŝ"]
+    OBS --> IPW
+```
+
+- s: satisfied share among exposures; r_u: P(thumbs-up given satisfied); r_d: P(thumbs-down given unsatisfied); U, N: observed up/down counts; ŝ: IPW estimate of s.
 
 *Position.* An LLM UI that shows several drafts or citations may have position effects like a results page (**H**, CLM-055). Test with a swap intervention before logging selection as preference.
 
 *Approval.*
-- In hh-rlhf preference data, "matches user's beliefs" was consistently among the most predictive features; the Claude 2 preference model preferred sycophantic over baseline truthful answers 95% of the time, and best-of-4096 against it gave about 75% sycophantic answers on the hardest misconceptions versus about 25% under an oracle (**O**, CLM-005).
+- Sycophancy in preference data (**O**, CLM-005):
+  - in hh-rlhf preference data, "matches user's beliefs" was consistently among the most predictive features;
+  - the Claude 2 preference model preferred sycophantic over baseline truthful answers 95% of the time;
+  - best-of-4096 against it gave about 75% sycophantic answers on the hardest misconceptions versus about 25% under an oracle.
 - RLHF with time-limited evaluators made models better at convincing them but not at the task, raising evaluator false-positive rates by 24.1% and 18.3% (**O**, CLM-008).
 - With 2% of simulated users vulnerable, RL on feedback learned to target them while behaving well with others (**O**, CLM-009; abstract only, simulated users).
 - LLMs preserved user "face" 45 points more than humans, and social sycophancy is rewarded in preference data (**O**, CLM-010; abstract only).
@@ -184,18 +318,40 @@ When does a feedback metric move without quality moving, and when can the bias b
 So approval is a quality proxy only for raters who can verify the answer. A short-term approval metric can rise through agreement, persuasion, or targeting (**D**, CLM-049).
 
 **Quantitative Model / Derivation:**
-Let $s$ be the satisfied share among exposures, $r_u$ the probability of thumbs-up given satisfied, $r_d$ of thumbs-down given unsatisfied:
-
 $$\text{share}_{up}=\frac{s\,r_u}{s\,r_u+(1-s)\,r_d},\qquad \hat s_{IPW}=\frac{U/r_u}{U/r_u+N/r_d}.$$
 
-*Step-by-step*: (1) Expected up events are $E\,s\,r_u$ and down events $E(1-s)r_d$. (2) Their ratio gives the share; $E$ cancels. (3) Dividing each count by its propensity estimates the counts that would have been observed at propensity 1, so $\hat s_{IPW}\to s$ when $r_u,r_d$ are correct.
+where:
 
-For positions under $P(\text{click})=P(\text{examine}\mid\text{rank})\,P(\text{relevant})$: $E[\mathbf 1[\text{click}]/p_{rank}]=P(\text{relevant})$, and $p_r/p_k=\text{CTR}(\text{item at }r)/\text{CTR}(\text{same item at }k)$ from a swap (**O**, CLM-003). Small $p$ inflates variance; clipping $1/p$ trades variance for bias (**D**, CLM-041).
+- $s$: satisfied share among exposures (0–1);
+- $r_u$: probability of thumbs-up given satisfied (0–1);
+- $r_d$: probability of thumbs-down given unsatisfied (0–1);
+- $U,N$: observed up and down events (count);
+- $\hat s_{IPW}$: inverse-propensity-weighted estimate of $s$ (0–1).
+
+*Step-by-step*:
+1. Expected up events are $E\,s\,r_u$ and down events $E(1-s)r_d$.
+2. Their ratio gives the share; $E$ cancels.
+3. Dividing each count by its propensity estimates the counts that would have been observed at propensity 1, so $\hat s_{IPW}\to s$ when $r_u,r_d$ are correct.
+
+For positions under $P(\text{click})=P(\text{examine}\mid\text{rank})\,P(\text{relevant})$ (**O**, CLM-003):
+
+- $E[\mathbf 1[\text{click}]/p_{rank}]=P(\text{relevant})$;
+- $p_r/p_k=\text{CTR}(\text{item at }r)/\text{CTR}(\text{same item at }k)$ from a swap;
+- here $p_{rank}$, $p_r$, $p_k$ are examination probabilities at a rank (0–1), CTR is click-through rate (clicks per impression), and $\mathbf 1[\text{click}]$ is 1 if clicked, else 0.
+- Small $p$ inflates variance; clipping $1/p$ trades variance for bias (**D**, CLM-041).
 
 **Worked Example (synthetic):**
 - *Input*: $E=10{,}000$, $s=0.8$, $r_u=0.02$, $r_d=0.10$.
-- *Steps*: $U=10{,}000\times0.8\times0.02=160$; $N=10{,}000\times0.2\times0.10=200$; share $=160/360=0.444$. IPW: $160/0.02=8{,}000$ and $200/0.10=2{,}000$, so $\hat s=0.8$. If a UI change raises $r_u$ to 0.04: share $=0.032/(0.032+0.020)=0.615$.
-- *Swap step*: a citation shown at rank 1 gets CTR 0.12; the same citation swapped to rank 3 gets 0.048. So $p_3/p_1=0.4$ and a click at rank 3 gets weight $2.5$ relative to rank 1.
+- *Steps*:
+  - $U=10{,}000\times0.8\times0.02=160$.
+  - $N=10{,}000\times0.2\times0.10=200$.
+  - Share $=160/360=0.444$.
+  - IPW: $160/0.02=8{,}000$ and $200/0.10=2{,}000$, so $\hat s=8{,}000/10{,}000=0.8$.
+  - If a UI change raises $r_u$ to 0.04: share $=0.032/(0.032+0.020)=0.615$.
+- *Swap step*:
+  - A citation shown at rank 1 gets CTR 0.12; the same citation swapped to rank 3 gets 0.048.
+  - So $p_3/p_1=0.048/0.12=0.4$.
+  - A click at rank 3 gets weight $1/0.4=2.5$ relative to rank 1.
 - *Result*: an 80%-satisfied product shows a 44% up share, and a button change moves it to 62% with no quality change.
 - *Interpretation and limits*: the correction needs $r_u,r_d$ from a randomized elicitation arm and fails if propensity depends on unobserved quality (CLM-056).
 
@@ -205,10 +361,15 @@ For positions under $P(\text{click})=P(\text{examine}\mid\text{rank})\,P(\text{r
 3. Which observation in the GPT-4o postmortems shows that an A/B test on approval metrics could not detect the regression?
 
 **Guided Practice:**
-$E=20{,}000$, $s=0.7$, $r_u=0.03$, $r_d=0.06$. (a) Compute $U$, $N$, the observed share, and $\hat s_{IPW}$. (b) Design the randomized elicitation arm: fraction of exposures prompted, how $r_u,r_d$ are estimated, and the test of CLM-056.
+$E=20{,}000$, $s=0.7$, $r_u=0.03$, $r_d=0.06$.
+
+- (a) Compute $U$, $N$, the observed share, and $\hat s_{IPW}$.
+- (b) Design the randomized elicitation arm: fraction of exposures prompted, how $r_u,r_d$ are estimated, and the test of CLM-056.
 
 **Feedback Contract:**
-- *Expected Evidence*: (a) $U=420$, $N=360$, share $=0.021/0.039=0.538$; $\hat s=14{,}000/(14{,}000+6{,}000)=0.70$. (b) A randomly sampled prompted arm, propensities estimated per stratum with intervals, and a comparison of adjudicated quality between volunteered and prompted responders within strata.
+- *Expected Evidence*:
+  - (a) $U=420$, $N=360$, share $=0.021/0.039=0.538$; $\hat s=14{,}000/(14{,}000+6{,}000)=0.70$.
+  - (b) A randomly sampled prompted arm, propensities estimated per stratum with intervals, and a comparison of adjudicated quality between volunteered and prompted responders within strata.
 - *Common Failure*: Treating 0.538 as satisfaction, or estimating propensities from volunteered feedback.
 - *Diagnostic Hint*: Which users would never appear in your data without the prompt?
 - *Concept to Revisit*: Selection in sampled telemetry (Module 23, Lesson 23.2).
@@ -229,8 +390,12 @@ How should feedback enter Module 15 evaluation sets without importing its bias a
 - **Selector**: a rule that picks exposures for review (thumbs-down, edit, regenerate, random). Its **precision** is confirmed defects / reviewed candidates.
 - **Label**: an adjudicated judgment under a versioned guide by a named rater pool. A feedback event is a selector, not a label (**D**, CLM-047).
 - **Label provenance**: who labeled, under which guide, when, with what agreement, and from which selector the item came.
-- **Public preference platform**: a crowd-voting arena. Chatbot Arena had about 240K votes from about 90K users, Bradley–Terry scores, and crowd–expert agreement of 72.8–83.1% versus expert–expert 79.4–89.8% on 160 sampled battles (**O**, CLM-016).
-- **Public usage logs**: LMSYS-Chat-1M (1M conversations from demo and Arena users, best-effort PII removal, unsafe conversations retained; **O**, CLM-018) and WildChat (1M opt-in conversations with free access, no feedback labels; **O**, CLM-019).
+- **Public preference platform**: a crowd-voting arena. Chatbot Arena (**O**, CLM-016):
+  - about 240K votes from about 90K users, Bradley–Terry scores;
+  - crowd–expert agreement of 72.8–83.1% versus expert–expert 79.4–89.8% on 160 sampled battles.
+- **Public usage logs**:
+  - LMSYS-Chat-1M: 1M conversations from demo and Arena users, best-effort PII removal, unsafe conversations retained (**O**, CLM-018);
+  - WildChat: 1M opt-in conversations with free access, no feedback labels (**O**, CLM-019).
 
 **Mechanism Explanation:**
 1. **Select.** Draw candidates from several selectors plus a random exposure sample. The random sample estimates the base defect rate; each selector's precision is compared with it.
@@ -239,16 +404,58 @@ How should feedback enter Module 15 evaluation sets without importing its bias a
 4. **Separate.** Items that enter evaluation are excluded from training by source and time (Module 19, Lesson 19.4).
 5. **Do not validate with a judge alone.** LLM judges may fail to recognize fixes that users' feedback drove and prefer the baseline (**O**, CLM-021; single abstract-level preprint).
 
-Public platforms are not product evaluations. The Leaderboard Illusion reports undisclosed private testing (27 private variants before Llama-4), skewed data access (19.2% and 20.4% for two providers versus 29.7% for 83 open models), and up to 112% relative gains on the arena distribution from arena data (**O**, CLM-017; abstract only). Usage logs describe self-selected populations, not your traffic.
+```mermaid
+flowchart LR
+    SEL["Selectors<br/>thumbs-down, edit, regenerate"] --> ADJ["Adjudicate<br/>blind to selector (15.3)"]
+    RND["Random exposure sample<br/>base defect rate"] --> ADJ
+    ADJ --> PROV["Record provenance<br/>selector, guide, rater"]
+    PROV --> W["Reweight to exposure<br/>population (15.2)"]
+    W --> EVAL["Eval set"]
+    EVAL -. excluded by source + time .-> TRAIN["Training data (19.4)"]
+```
+
+Public platforms are not product evaluations. The Leaderboard Illusion reports (**O**, CLM-017; abstract only):
+
+- undisclosed private testing (27 private variants before Llama-4);
+- skewed data access (19.2% and 20.4% for two providers versus 29.7% for 83 open models);
+- up to 112% relative gains on the arena distribution from arena data.
+
+Usage logs describe self-selected populations, not your traffic.
 
 **Quantitative Model / Trade-off Comparison:**
-For selector $k$ with $m_k$ reviewed and $d_k$ confirmed, precision $\hat\pi_k=d_k/m_k$ with a Wilson interval. A selector is useful for mining when its interval sits above the random-sample defect rate $\hat\pi_0$; it costs $m_k$ adjudications per $d_k$ defects found. Items selected this way over-represent the selector's slice, so prevalence estimates require weights equal to (exposure share)/(sample share), as in Lesson 15.2.
+For selector $k$ with $m_k$ reviewed and $d_k$ confirmed, precision is
+
+$$\hat\pi_k=\frac{d_k}{m_k}$$
+
+with a Wilson interval.
+
+where:
+
+- $m_k$: candidates from selector $k$ that were reviewed (count);
+- $d_k$: confirmed defects among them (count);
+- $\hat\pi_k$: selector precision (fraction, 0–1);
+- $\hat\pi_0$: defect rate in the random exposure sample (fraction, 0–1).
+
+Use:
+
+- A selector is useful for mining when its interval sits above $\hat\pi_0$.
+- It costs $m_k$ adjudications per $d_k$ defects found.
+- Items selected this way over-represent the selector's slice, so prevalence estimates require weights equal to (exposure share)/(sample share), as in Lesson 15.2.
 
 **Worked Example (synthetic):**
-- *Input*: 300 thumbs-down candidates, 132 confirmed defects. 300 regenerate candidates, 96 confirmed. 150 random exposures, 51 defects.
-- *Steps*: thumbs-down $\hat\pi=0.44$, Wilson 95% $[0.385,0.497]$. Regenerate $\hat\pi=0.32$, $[0.270,0.375]$. Random $\hat\pi_0=0.34$, $[0.269,0.419]$.
+- *Input*:
+  - 300 thumbs-down candidates, 132 confirmed defects.
+  - 300 regenerate candidates, 96 confirmed.
+  - 150 random exposures, 51 defects.
+- *Steps* (Wilson 95%):
+  - Thumbs-down: $\hat\pi=132/300=0.44$, $[0.385,0.497]$.
+  - Regenerate: $\hat\pi=96/300=0.32$, $[0.270,0.375]$.
+  - Random: $\hat\pi_0=51/150=0.34$, $[0.269,0.419]$.
 - *Result*: thumbs-down finds defects somewhat more often than random. Regenerate does not beat random here.
-- *Interpretation and limits*: in this synthetic set, regenerate behaves like exploration, consistent with the CLM-050 hypothesis being false *for this product*. Intervals overlap partly; a real study needs more items per slice. A feedback-selected set describes flagged exposures, not the product, unless reweighted.
+- *Interpretation and limits*:
+  - In this synthetic set, regenerate behaves like exploration, consistent with the CLM-050 hypothesis being false *for this product*.
+  - Intervals overlap partly; a real study needs more items per slice.
+  - A feedback-selected set describes flagged exposures, not the product, unless reweighted.
 
 **Knowledge Check:**
 1. Why is a thumbs-down not an evaluation label?
@@ -256,10 +463,13 @@ For selector $k$ with $m_k$ reviewed and $d_k$ confirmed, precision $\hat\pi_k=d
 3. Why should an LLM judge not be the only check on a model trained from user feedback?
 
 **Guided Practice:**
-(a) 200 edited responses were adjudicated; 90 had defects. Compute precision and a Wilson interval and compare it with the random rate above. (b) Write the provenance record for one eval item mined from an edit, including selector, guide, raters, and train/eval exclusion.
+- (a) 200 edited responses were adjudicated; 90 had defects. Compute precision and a Wilson interval and compare it with the random rate above.
+- (b) Write the provenance record for one eval item mined from an edit, including selector, guide, raters, and train/eval exclusion.
 
 **Feedback Contract:**
-- *Expected Evidence*: (a) $0.45$, $[0.383,0.519]$; overlaps the thumbs-down interval and sits above the random point estimate, but the intervals overlap. (b) Fields: exposure and trace ID, selector, timestamp, guide version, rater IDs, agreement, adjudicated label, exclusion from training snapshots after that date.
+- *Expected Evidence*:
+  - (a) $0.45$, $[0.383,0.519]$; overlaps the thumbs-down interval and sits above the random point estimate, but the intervals overlap.
+  - (b) Fields: exposure and trace ID, selector, timestamp, guide version, rater IDs, agreement, adjudicated label, exclusion from training snapshots after that date.
 - *Common Failure*: Labeling every thumbs-down item as a defect, or estimating product defect rate from a selector-built set.
 - *Diagnostic Hint*: What would the random sample have contained?
 - *Concept to Revisit*: Graders as instruments (Module 15, Lesson 15.3); weighting (Lesson 15.2).
@@ -277,9 +487,21 @@ Route feedback into adjudicated, provenance-tracked evaluation sets and measure 
 How can binary and edit feedback train a model without rewarding approval or opening a poisoning path?
 
 **Concepts & Definitions:**
-- **KTO**: an objective for unpaired desirable/undesirable outputs. With $r_\theta=\log\frac{\pi_\theta(y|x)}{\pi_{ref}(y|x)}$ and reference point $z_0=\mathrm{KL}(\pi_\theta\|\pi_{ref})$ estimated per microbatch, $v=\lambda_D\sigma(\beta(r_\theta-z_0))$ for desirable and $\lambda_U\sigma(\beta(z_0-r_\theta))$ for undesirable outputs, and $L=\mathbb E[\lambda_y-v]$. The authors report it matches or beats preference methods from 1B to 30B despite a binary signal; their experiments split preference pairs into binary labels and did not use logged thumbs (**O**, CLM-013).
-- **Imbalance rule**: choose $\lambda_D n_D/(\lambda_U n_U)\in[1,\tfrac32]$; on Llama-7B, up to 90% of desirable data could be dropped while still beating DPO (**O**, CLM-014).
-- **Edit feedback**: PRELUDE scores a round by token-level Levenshtein distance between the response and the user's edit; CIPHER infers a textual preference from edits and retrieves it for similar contexts with at most 3 extra LLM calls and no fine-tuning, evaluated with GPT-4 simulated users (**O**, CLM-015).
+- **KTO**: an objective for unpaired desirable/undesirable outputs (**O**, CLM-013).
+  - Log probability ratio: $r_\theta=\log\frac{\pi_\theta(y|x)}{\pi_{ref}(y|x)}$.
+  - Reference point: $z_0=\mathrm{KL}(\pi_\theta\|\pi_{ref})$, estimated per microbatch.
+  - Value for desirable outputs: $v=\lambda_D\sigma(\beta(r_\theta-z_0))$.
+  - Value for undesirable outputs: $v=\lambda_U\sigma(\beta(z_0-r_\theta))$.
+  - Objective: $L=\mathbb E[\lambda_y-v]$.
+  - The authors report it matches or beats preference methods from 1B to 30B despite a binary signal.
+  - Their experiments split preference pairs into binary labels and did not use logged thumbs.
+- **Imbalance rule** (**O**, CLM-014):
+  - choose $\lambda_D n_D/(\lambda_U n_U)\in[1,\tfrac32]$;
+  - on Llama-7B, up to 90% of desirable data could be dropped while still beating DPO.
+- **Edit feedback** (**O**, CLM-015):
+  - PRELUDE scores a round by token-level Levenshtein distance between the response and the user's edit;
+  - CIPHER infers a textual preference from edits and retrieves it for similar contexts with at most 3 extra LLM calls and no fine-tuning;
+  - evaluated with GPT-4 simulated users.
 - **Feedback poisoning**: one user who can only prompt and vote can, through later preference tuning, inject false facts, insecure code, or fake news for all users (**O**, CLM-020; abstract only).
 
 **Mechanism Explanation:**
@@ -291,16 +513,38 @@ How can binary and edit feedback train a model without rewarding approval or ope
 **Quantitative Model / Derivation:**
 With $n_D$ desirable and $n_U$ undesirable examples and $\lambda_U=1$: $\lambda_D\in[n_U/n_D,\;1.5\,n_U/n_D]$.
 
-Per-example loss: desirable $\lambda_D(1-\sigma(\beta(r_\theta-z_0)))$; undesirable $\lambda_U(1-\sigma(\beta(z_0-r_\theta)))$.
+Per-example loss:
 
-*Step-by-step*: (1) $v$ is bounded by $\lambda_y$, so each loss lies in $[0,\lambda_y]$. (2) A desirable output gains when $r_\theta$ rises above $z_0$, i.e. when it becomes more likely than the reference by more than the batch-average drift. (3) Raising $\lambda_D$ scales the desirable gradients so the rarer class is not swamped.
+$$\ell_D=\lambda_D\big(1-\sigma(\beta(r_\theta-z_0))\big), \qquad \ell_U=\lambda_U\big(1-\sigma(\beta(z_0-r_\theta))\big)$$
+
+where:
+
+- $\ell_D,\ell_U$: per-example loss for desirable and undesirable outputs (unitless);
+- $\lambda_D,\lambda_U$: class loss scales (unitless);
+- $\sigma(a)=1/(1+e^{-a})$: logistic sigmoid (unitless output);
+- $\beta$: scale of the log-ratio margin (unitless);
+- $r_\theta$: model/reference log probability ratio (unitless);
+- $z_0$: microbatch KL reference point (unitless);
+- $\pi_\theta(y|x),\pi_{ref}(y|x)$: trained-model and reference probabilities of output $y$ given input $x$;
+- $\theta$: trained-model parameters; $x$: input; $y$: output;
+- $v$: value assigned to an output (unitless); $\lambda_y$: its class scale; $L$: expected loss (unitless);
+- $n_D,n_U$: desirable and undesirable examples (counts).
+
+*Step-by-step*:
+1. $v$ is bounded by $\lambda_y$, so each loss lies in $[0,\lambda_y]$.
+2. A desirable output gains when $r_\theta$ rises above $z_0$, i.e. when it becomes more likely than the reference by more than the batch-average drift.
+3. Raising $\lambda_D$ scales the desirable gradients so the rarer class is not swamped.
 
 **Worked Example (synthetic):**
 - *Input*: after provenance filtering, 12,000 thumbs-up and 48,000 thumbs-down responses (1:4); $\beta=0.1$; $z_0=0.5$.
 - *Steps*:
   1. Imbalance: $\lambda_D\in[4,6]$; choose $\lambda_D=5$ (**D**, CLM-046).
-  2. A desirable output with $r_\theta=2.0$: $\sigma(0.1\times1.5)=\sigma(0.15)=0.537$; loss $=5(1-0.537)=2.313$.
-  3. An undesirable output with $r_\theta=-1.0$: $\sigma(0.1\times(0.5-(-1.0)))=0.537$; loss $=1-0.537=0.463$.
+  2. A desirable output with $r_\theta=2.0$:
+     - $\sigma(0.1\times(2.0-0.5))=\sigma(0.15)=0.537$.
+     - Loss $=5(1-0.537)=2.313$.
+  3. An undesirable output with $r_\theta=-1.0$:
+     - $\sigma(0.1\times(0.5-(-1.0)))=\sigma(0.15)=0.537$.
+     - Loss $=1-0.537=0.463$.
   4. Provenance: 3% of votes came from accounts under 24 hours old voting more than 50 times; they are excluded and counted in the manifest.
 - *Result*: the desirable example carries five times the loss scale of the undesirable one at the same margin.
 - *Interpretation and limits*: the rule is the authors' heuristic on preference-derived data. Nothing here shows that thumbs labels are correct; a behavior-eval gate must be run on the trained model.
@@ -311,10 +555,15 @@ Per-example loss: desirable $\lambda_D(1-\sigma(\beta(r_\theta-z_0)))$; undesira
 3. Which Module 19 controls apply to a public thumbs channel?
 
 **Guided Practice:**
-(a) Logged feedback is 1 up : 10 down with $\lambda_U=1$. Give the $\lambda_D$ range. (b) With $\lambda_D=5$, $\beta=0.1$, $z_0=0.5$, compute the loss for a desirable output with $r_\theta=-1.0$. (c) Write the provenance filter and the behavior evals that gate a feedback-trained adapter.
+- (a) Logged feedback is 1 up : 10 down with $\lambda_U=1$. Give the $\lambda_D$ range.
+- (b) With $\lambda_D=5$, $\beta=0.1$, $z_0=0.5$, compute the loss for a desirable output with $r_\theta=-1.0$.
+- (c) Write the provenance filter and the behavior evals that gate a feedback-trained adapter.
 
 **Feedback Contract:**
-- *Expected Evidence*: (a) $[10,15]$ (the authors' own example). (b) $\sigma(-0.15)=0.463$; loss $=5(1-0.463)=2.687$. (c) Per-user caps, account and rate filters, `untrusted` channel labels, exclusion of eval items, and sycophancy/factuality/refusal suites with margins (Module 19, Lesson 19.6).
+- *Expected Evidence*:
+  - (a) $[10,15]$ (the authors' own example).
+  - (b) $\sigma(0.1\times(-1.0-0.5))=\sigma(-0.15)=0.463$; loss $=5(1-0.463)=2.687$.
+  - (c) Per-user caps, account and rate filters, `untrusted` channel labels, exclusion of eval items, and sycophancy/factuality/refusal suites with margins (Module 19, Lesson 19.6).
 - *Common Failure*: Treating thumbs-up as "correct", or training on all votes from an open channel.
 - *Diagnostic Hint*: Who can write to this label, and what would they gain?
 - *Concept to Revisit*: Poisoning and provenance (Module 19, Lesson 19.4); preference objectives (Lesson 19.5).
@@ -335,29 +584,98 @@ Is this experiment valid, sensitive enough, and measuring the outcome the releas
 - **Assignment unit**: the unit randomized to an arm, usually the user for interactive LLM features (Module 15, Lesson 15.5).
 - **Sample ratio mismatch (SRM)**: the observed assignment ratio differs from the designed one; it is a symptom of data-quality problems, not a cause (**O**, CLM-024; abstract only).
 - **Pearson chi-square**: $\chi^2=\sum_i (o_i-e_i)^2/e_i$ with $k-1$ degrees of freedom for $k$ arms, where $e_i$ is the designed share times the total.
-- **CUPED**: $\hat Y_{cv}=\bar Y-\theta\bar X+\theta\,E X$ with a pre-experiment covariate $X$; optimal $\theta=\mathrm{cov}(Y,X)/\mathrm{var}(X)$ gives variance $\mathrm{var}(\bar Y)(1-\rho^2)$; unbiasedness needs $E X$ equal across arms, which pre-period data guarantee under randomization (**O**, CLM-022).
+- **CUPED**: $\hat Y_{cv}=\bar Y-\theta\bar X+\theta\,E X$ with a pre-experiment covariate $X$;
+  - optimal $\theta=\mathrm{cov}(Y,X)/\mathrm{var}(X)$ gives variance $\mathrm{var}(\bar Y)(1-\rho^2)$;
+  - unbiasedness needs $E X$ equal across arms, which pre-period data guarantee under randomization (**O**, CLM-022).
 - **Novelty / primacy**: novelty is an early effect from exploring a change that fades; primacy is an early advantage to control while users relearn (**O**, CLM-025).
 - **Guardrail**: a metric that can block a release regardless of the primary metric.
 
 **Mechanism Explanation:**
-*SRM.* At the pinned GrowthBook commit, `check_srm` computes the Pearson statistic from summed users per arm and design weights and returns `chi2.sf(x, len(users) - 1)`, skipping zero-weight arms in the sum but not in the df (**O**, CLM-029). `DEFAULT_SRM_THRESHOLD = 0.001`; the UI reads `settings.srmThreshold ?? DEFAULT_SRM_THRESHOLD` and reports healthy when $p\ge$ threshold (**O**, CLM-030). Repeated daily checks of a fixed-n p-value inflate false alarms; eBay uses sequential analysis for continuous SRM monitoring (**O**, CLM-026; abstract only). On an SRM alert, do not read the effect; find the cause (bot filtering, redirect loss, crash in one arm, logging change).
+*SRM.*
 
-*CUPED.* Bing reported about 50% variance reduction, more than 45% from queries/user with a 1-week pre-period, under 5% for revenue/user, and smaller gains as pre-period coverage falls (**O**, CLM-023). GrowthBook pools $\theta$ across arms and, when pooled pre-period variance is near zero, silently reverts both arms to the unadjusted statistic (**O**, CLM-031). A test sized on CUPED's reduction then runs underpowered with no warning (**D**, CLM-045). Ratio metrics such as thumbs per response, with users randomized, need the delta-method variance (`variance_of_ratios`, **O**, CLM-032).
+- At the pinned GrowthBook commit, `check_srm` computes the Pearson statistic from summed users per arm and design weights and returns `chi2.sf(x, len(users) - 1)`.
+  - It skips zero-weight arms in the sum but not in the df (**O**, CLM-029).
+- `DEFAULT_SRM_THRESHOLD = 0.001`; the UI reads `settings.srmThreshold ?? DEFAULT_SRM_THRESHOLD` and reports healthy when $p\ge$ threshold (**O**, CLM-030).
+- Repeated daily checks of a fixed-n p-value inflate false alarms; eBay uses sequential analysis for continuous SRM monitoring (**O**, CLM-026; abstract only).
+- On an SRM alert, do not read the effect; find the cause (bot filtering, redirect loss, crash in one arm, logging change).
 
-*Time.* In an A/A test, day 1 had a 67% chance and day 2 a 55% chance of falling outside the final 95% bound; the authors found no significant result flipping to significant in the opposite direction from novelty or primacy; CI width scales as CV$/\sqrt n$, and for metrics whose CV grows over time a longer run does not shrink the CI; one week is the minimum for day-of-week effects (**O**, CLM-025).
+*CUPED.*
 
-*What the metric measures.* The GPT-4o A/B metrics were thumbs, side-by-side preferences, and usage, and they looked positive while the regression was in behavior (**O**, CLM-007). Approval metrics cannot detect an agreement-for-quality trade, so behavior evaluations and long-horizon outcomes must be launch-blocking guardrails (**D**, CLM-049). Randomized task outcomes are a different kind of evidence: recruited developers with Copilot finished an HTTP-server task 55.8% faster (**O**, CLM-028; abstract only, lab task). LLM-simulated users recovered only 39% of a human treatment effect before calibration (**O**, CLM-027; abstract only), so simulated A/B tests are surrogates.
+- Bing reported (**O**, CLM-023):
+  - about 50% variance reduction;
+  - more than 45% from queries/user with a 1-week pre-period;
+  - under 5% for revenue/user;
+  - smaller gains as pre-period coverage falls.
+- GrowthBook pools $\theta$ across arms and, when pooled pre-period variance is near zero, silently reverts both arms to the unadjusted statistic (**O**, CLM-031).
+- A test sized on CUPED's reduction then runs underpowered with no warning (**D**, CLM-045).
+- Ratio metrics such as thumbs per response, with users randomized, need the delta-method variance (`variance_of_ratios`, **O**, CLM-032).
+
+*Time* (**O**, CLM-025).
+
+- In an A/A test, day 1 had a 67% chance and day 2 a 55% chance of falling outside the final 95% bound.
+- The authors found no significant result flipping to significant in the opposite direction from novelty or primacy.
+- CI width scales as CV$/\sqrt n$; for metrics whose CV grows over time a longer run does not shrink the CI.
+- One week is the minimum for day-of-week effects.
+
+*What the metric measures.*
+
+- The GPT-4o A/B metrics were thumbs, side-by-side preferences, and usage, and they looked positive while the regression was in behavior (**O**, CLM-007).
+- Approval metrics cannot detect an agreement-for-quality trade, so behavior evaluations and long-horizon outcomes must be launch-blocking guardrails (**D**, CLM-049).
+- Randomized task outcomes are a different kind of evidence: recruited developers with Copilot finished an HTTP-server task 55.8% faster (**O**, CLM-028; abstract only, lab task).
+- LLM-simulated users recovered only 39% of a human treatment effect before calibration (**O**, CLM-027; abstract only), so simulated A/B tests are surrogates.
+
+```mermaid
+flowchart TD
+    LOG["Assignment + exposure logs"] --> SRM{"SRM healthy at<br/>configured threshold?"}
+    SRM -- no --> STOP["Do not read effect<br/>find data-quality cause"]
+    SRM -- yes --> CV{"pre-period variance<br/>informative?"}
+    CV -- yes --> CUP["CUPED with pooled θ<br/>report θ + coverage"]
+    CV -- no --> RAW["Unadjusted fallback (θ = 0)<br/>recheck planned power"]
+    CUP --> TIME["Read effect across time<br/>novelty / primacy / day-of-week"]
+    RAW --> TIME
+    TIME --> G{"Behavior + long-horizon<br/>guardrails pass?"}
+    G -- no --> HOLD["Hold / rollback"]
+    G -- yes --> DEC["Release decision"]
+```
+
+- SRM: sample ratio mismatch; CUPED: pre-experiment covariate variance reduction; θ: adjustment coefficient; coverage: fraction of users with pre-period data.
 
 *Interference.* Arms that share a cache, memory or retrieval store, rate limit, or interacting users can bias the difference in means (**H**, CLM-054). This pass opened no primary source on interference designs; compare user-randomized and cluster- or time-sliced estimates to test it.
 
 **Quantitative Model / Derivation:**
-*CUPED.* $\mathrm{var}(\bar Y-\theta\bar X)=\frac1n(\sigma_Y^2+\theta^2\sigma_X^2-2\theta\,\mathrm{cov})$. Setting the derivative to zero: $\theta^*=\mathrm{cov}/\sigma_X^2$. Substituting: $\sigma_Y^2(1-\rho^2)/n$. With coverage $c$ (users with pre-period data) the factor is approximately $1-c\rho^2$ under homogeneity, an approximation to verify (**D**, CLM-044).
+*CUPED*, step by step (**D**, CLM-044):
+
+1. $\mathrm{var}(\bar Y-\theta\bar X)=\frac1n(\sigma_Y^2+\theta^2\sigma_X^2-2\theta\,\mathrm{cov})$.
+2. Set the derivative to zero: $\theta^*=\mathrm{cov}/\sigma_X^2$.
+3. Substitute: $\sigma_Y^2(1-\rho^2)/n$.
+4. With coverage $c$ (users with pre-period data), the factor is approximately $1-c\rho^2$ under homogeneity; verify this approximation.
+
+Symbols: $Y$: per-user outcome;
+- $X$: pre-period covariate;
+- bars: sample means;
+- $\sigma_Y^2,\sigma_X^2$: their per-user variances (squared outcome/covariate units);
+- $\mathrm{cov}=\mathrm{cov}(Y,X)$ (product units);
+- $\rho$: correlation (unitless);
+- $c$: coverage (0–1);
+- $n$: users (count);
+- $\theta$: coefficient (outcome units per covariate unit);
+- $\theta^*$: variance-minimizing coefficient.
 
 *Sample size (unpaired, two arms).*
 
 $$n_{arm}\approx\frac{2(z_{1-\alpha/2}+z_{1-\beta})^2\sigma^2}{\delta^2}=15.70\,\frac{\sigma^2}{\delta^2}\quad(\alpha=0.05,\ 1-\beta=0.8).$$
 
-*Where*: $\sigma^2$ is the per-user outcome variance ($p(1-p)$ for a per-user binary outcome); $\delta$ the minimum effect worth detecting; $z_q$ normal quantiles. This differs from Lesson 15.4's paired block formula: the two arms contain different users, hence the factor 2. CUPED multiplies $n$ by its variance factor (**D**, CLM-045).
+where:
+
+- $n_{arm}$: required users per arm (count);
+- $\sigma^2$: per-user outcome variance (squared outcome units), $p(1-p)$ for a per-user binary outcome;
+- $p$: probability of the binary outcome (0–1);
+- $\delta$: minimum effect worth detecting (outcome units);
+- $z_q$: standard normal quantile at probability $q$ (unitless);
+- $\alpha$: two-sided false-positive rate (0.05 here);
+- $\beta$: false-negative rate; $1-\beta$: power (0.8 here).
+
+This differs from Lesson 15.4's paired block formula: the two arms contain different users, hence the factor 2. CUPED multiplies $n$ by its variance factor (**D**, CLM-045).
 
 **Worked Example (synthetic):**
 1. *SRM*, 50/50 design, df = 1 (**D**, CLM-043):
@@ -369,11 +687,22 @@ $$n_{arm}\approx\frac{2(z_{1-\alpha/2}+z_{1-\beta})^2\sigma^2}{\delta^2}=15.70\,
 | 50,300 / 49,700 | 3.6 | 0.058 | healthy | healthy |
 | 505 / 495 | 0.1 | 0.75 | healthy | healthy |
 
-Step for row 1: $e=50{,}000$; $(500^2+500^2)/50{,}000=10.0$. The same 1% relative skew is decisive at 100,000 users and invisible at 1,000. The 0.001 default is one tool's choice, overridable by settings.
+Step for row 1:
 
-2. *Planning*: $\sigma=4$, $\delta=0.1$: $n=15.70\times16/0.01=25{,}117$ per arm. With $\rho=0.6$: $\times0.64=16{,}075$. With 70% coverage: $\times(1-0.7\times0.36)=\times0.748=18{,}788$.
+- Expected per arm: $e=50{,}000$.
+- Statistic: $(500^2+500^2)/50{,}000=10.0$.
+- The same 1% relative skew is decisive at 100,000 users and invisible at 1,000.
+- The 0.001 default is one tool's choice, overridable by settings.
 
-3. *Silent fallback*: the team sized at 16,075 per arm, but the pre-period covariate was constant (a new metric), so $\theta=0$ and the analysis ran unadjusted. Power at $\delta=0.1$: $SE=\sqrt{2\times16/16{,}075}=0.0446$; power $=\Phi(0.1/0.0446-1.96)=0.61$, not 0.80.
+2. *Planning*, $\sigma=4$, $\delta=0.1$:
+   - $n=15.70\times16/0.01=25{,}117$ per arm.
+   - With $\rho=0.6$: $\times0.64=16{,}075$.
+   - With 70% coverage: $\times(1-0.7\times0.36)=\times0.748=18{,}788$.
+
+3. *Silent fallback*:
+   - The team sized at 16,075 per arm, but the pre-period covariate was constant (a new metric), so $\theta=0$ and the analysis ran unadjusted.
+   - At $\delta=0.1$, standard error $SE=\sqrt{2\times16/16{,}075}=0.0446$.
+   - Power $=\Phi(0.1/0.0446-1.96)=0.61$, not 0.80. $\Phi$ is the standard normal cumulative distribution function.
 
 - *Interpretation and limits*: all counts and variances are synthetic. The decision record must include the platform revision, the threshold, whether CUPED was applied, and $\theta$.
 
@@ -384,10 +713,15 @@ Step for row 1: $e=50{,}000$; $(500^2+500^2)/50{,}000=10.0$. The same 1% relativ
 4. Why cannot a positive thumbs A/B result reject a sycophantic release?
 
 **Guided Practice:**
-(a) A 50/50 test shows 50,450 vs 49,550 users. Compute $\chi^2$ and $p$ and state the result at 0.001 and 0.01. (b) Plan a test on per-user thumbs-up rate $p=0.3$ with $\delta=0.02$, then with CUPED at $\rho=0.6$. (c) List three guardrails that are not approval metrics.
+- (a) A 50/50 test shows 50,450 vs 49,550 users. Compute $\chi^2$ and $p$ and state the result at 0.001 and 0.01.
+- (b) Plan a test on per-user thumbs-up rate $p=0.3$ with $\delta=0.02$, then with CUPED at $\rho=0.6$.
+- (c) List three guardrails that are not approval metrics.
 
 **Feedback Contract:**
-- *Expected Evidence*: (a) $\chi^2=8.1$, $p=0.0044$: healthy at 0.001, alert at 0.01. (b) $15.70\times0.21/0.0004=8{,}242$ per arm; $\times0.64=5{,}275$. (c) For example: sycophancy and factuality evals on sampled traffic, task success on adjudicated samples, 28-day retention, overreliance on seeded errors.
+- *Expected Evidence*:
+  - (a) $\chi^2=8.1$, $p=0.0044$: healthy at 0.001, alert at 0.01.
+  - (b) Per arm: $15.70\times0.21/0.0004=8{,}242$; with CUPED $8{,}242\times0.64=5{,}275$.
+  - (c) For example: sycophancy and factuality evals on sampled traffic, task success on adjudicated samples, 28-day retention, overreliance on seeded errors.
 - *Common Failure*: Reading the effect despite SRM; quoting CUPED's reduction without checking $\theta\neq0$; using the paired-block formula for independent arms.
 - *Diagnostic Hint*: Which arm lost users, and where in the pipeline?
 - *Concept to Revisit*: Online validity checklist (Module 15, Lesson 15.5); paired planning (Lesson 15.4).
@@ -405,16 +739,29 @@ Plan, audit, and interpret an LLM feature A/B test with SRM, CUPED, time effects
 Which latency and trust targets should an LLM UI meet, and how do you know a trust feature helps rather than increases overreliance?
 
 **Concepts & Definitions:**
-- **Response-time limits**: about 0.1 s feels instantaneous; about 1 s keeps the flow of thought though the delay is noticed; about 10 s is the limit for attention, beyond which a percent-done indicator and a way to interrupt are needed; for 2–10 s a full percent-done indicator may be overkill (**O**, CLM-035). Nielsen attributes these to Miller (1968) and Card et al. (1991), which were metadata-checked only.
+- **Response-time limits** (**O**, CLM-035):
+  - about 0.1 s feels instantaneous;
+  - about 1 s keeps the flow of thought though the delay is noticed;
+  - about 10 s is the limit for attention, beyond which a percent-done indicator and a way to interrupt are needed;
+  - for 2–10 s a full percent-done indicator may be overkill.
+  - Nielsen attributes these to Miller (1968) and Card et al. (1991), which were metadata-checked only.
 - **Latency business effect (legacy web)**: a 500 ms Bing slowdown impacted revenue about 3%, with a linear rule of 0.6% revenue per 100 ms (**O**, CLM-036; talk slides). Transfer to LLM products is **H** (CLM-057).
 - **Overreliance**: users accepting incorrect AI recommendations; measures include accepted-incorrect / incorrect-shown, switch fraction, and weight of advice (**O**, CLM-037).
 - **Explanation effect**: explanations raised acceptance regardless of correctness without adding to team accuracy (**O**, CLM-038); detailed explanations raise trust and overreliance even when baseless (**O**, CLM-037).
 - **Cognitive forcing**: designs that make users think first reduced overreliance, and the most effective ones were the least liked (**O**, CLM-039; abstract only).
 
 **Mechanism Explanation:**
-Map Module 04 timestamps to the UX limits: TTFT is when the user first sees progress; end-to-end time is when the answer is usable. Whether streaming tokens lowers perceived latency and abandonment at fixed end-to-end time is **H** (CLM-053): no primary user study of LLM streaming was located. Test it by randomizing streaming versus buffered delivery at matched end-to-end latency.
+Map Module 04 timestamps to the UX limits:
 
-Trust features change behavior, not just perception. Copy-paste and skipped comprehension accompany overreliance (**O**, CLM-012; abstract only). Because satisfaction and acceptance can rise with overreliance and fall with the safer design, trust UI changes need a correctness-aware guardrail: the overreliance rate on seeded or adjudicated incorrect answers (**D**, CLM-048).
+- TTFT is when the user first sees progress; end-to-end time is when the answer is usable.
+- Whether streaming tokens lowers perceived latency and abandonment at fixed end-to-end time is **H** (CLM-053): no primary user study of LLM streaming was located.
+- Test it by randomizing streaming versus buffered delivery at matched end-to-end latency.
+
+Trust features change behavior, not just perception:
+
+- Copy-paste and skipped comprehension accompany overreliance (**O**, CLM-012; abstract only).
+- Satisfaction and acceptance can rise with overreliance and fall with the safer design.
+- Trust UI changes therefore need a correctness-aware guardrail: the overreliance rate on seeded or adjudicated incorrect answers (**D**, CLM-048).
 
 **Quantitative Model / Trade-off Comparison:**
 Overreliance rate $=\dfrac{\#\text{accepted incorrect}}{\#\text{incorrect shown}}$, measured with seeded errors that resemble natural ones. Compare arms with intervals; report it next to task success and satisfaction.
@@ -428,7 +775,10 @@ Overreliance rate $=\dfrac{\#\text{accepted incorrect}}{\#\text{incorrect shown}
 
 **Worked Example (synthetic):**
 - *Input*: an "explain answer" panel was A/B tested. In each arm 200 seeded incorrect answers were shown. Control accepted 124; treatment accepted 150. Satisfaction rose in treatment.
-- *Steps*: overreliance $124/200=0.62$, Wilson $[0.551,0.684]$; $150/200=0.75$, $[0.686,0.805]$. The intervals do not overlap.
+- *Steps* (overreliance, Wilson 95%):
+  - Control: $124/200=0.62$, $[0.551,0.684]$.
+  - Treatment: $150/200=0.75$, $[0.686,0.805]$.
+  - The intervals do not overlap.
 - *Result*: the panel increased acceptance of wrong answers by 13 points while satisfaction rose.
 - *Interpretation and limits*: the direction matches CLM-038, but this is synthetic. Seeded errors must resemble natural errors for the rate to transfer.
 
@@ -524,14 +874,26 @@ All sources opened 2026-11-10. "Abstract only" means only the arXiv/Semantic Sch
 
 ## 06 Engineering Labs
 
-All labs follow $\text{PREDICT}\to\text{BUILD}\to\text{MEASURE}\to\text{EXPLAIN}\to\text{BREAK}\to\text{IMPROVE}\to\text{FALSIFY}$. All data are generated by a seeded simulator written in the lab and are **synthetic**; every artifact says so. Ground truth (satisfaction, defects, correctness) is known to the simulator, which is what allows estimators to be checked.
+All labs follow:
+
+```mermaid
+flowchart LR
+    P["PREDICT"] --> B["BUILD"] --> M["MEASURE"] --> E["EXPLAIN"]
+    E --> BR["BREAK"] --> I["IMPROVE"] --> F["FALSIFY"]
+```
+
+- All data are generated by a seeded simulator written in the lab and are **synthetic**; every artifact says so.
+- Ground truth (satisfaction, defects, correctness) is known to the simulator, which is what allows estimators to be checked.
 
 ### LAB A — Feedback Ledger and Nonresponse Correction
 - **Objective**: Simulate exposures with latent satisfaction and signal-specific propensities; build a ledger that joins feedback to exposures with delayed (async) arrival; compare naive share, per-exposure rates, and IPW using a randomized prompt-for-feedback arm.
 - **Pre-Registered Hypothesis**: When propensities depend only on observed strata, IPW from the randomized arm recovers the true satisfied share within its interval, while the naive share misses it by more than the declared practical margin (CLM-040, CLM-041).
 - **Independent Variables**: $r_u$, $r_d$, UI prominence, randomized-arm fraction, ingestion delay, strata.
 - **Dependent Variables**: naive share, per-exposure rates, IPW estimate and interval, bias against truth, fraction of feedback missing at window close.
-- **Break & Falsify**: Make propensity depend on latent quality within strata (CLM-056). The hypothesis predicts IPW stays unbiased only when this dependence is absent; if IPW remains unbiased with the dependence present, the bias mechanism is falsified for that simulator. Also simulate regenerate as exploration in one slice and show that its rate does not track defects (CLM-050).
+- **Break & Falsify**: Make propensity depend on latent quality within strata (CLM-056).
+  - The hypothesis predicts IPW stays unbiased only when this dependence is absent;
+  - if IPW remains unbiased with the dependence present, the bias mechanism is falsified for that simulator.
+  - Also simulate regenerate as exploration in one slice and show that its rate does not track defects (CLM-050).
 - **Hardware**: CPU.
 - **Alignment**: Lessons 39.1–39.2.
 - **Effort Estimate**: 2h implementation, 1h analysis (3h total).
@@ -547,11 +909,17 @@ All labs follow $\text{PREDICT}\to\text{BUILD}\to\text{MEASURE}\to\text{EXPLAIN}
 - **Effort Estimate**: 2h implementation, 1h analysis (3h total).
 
 ### LAB C — Feedback to Eval and Training Data
-- **Objective**: From a synthetic feedback log, (1) build an adjudicated eval set from several selectors plus random exposures and compute selector precision; (2) build a KTO dataset with class weights and a provenance filter; (3) inject a coordinated voting attack from a few accounts and measure how many poisoned labels reach the dataset with and without the filter.
+- **Objective**: From a synthetic feedback log, (1) build an adjudicated eval set from several selectors plus random exposures and compute selector precision;
+  - (2) build a KTO dataset with class weights and a provenance filter;
+  - (3) inject a coordinated voting attack from a few accounts and measure how many poisoned labels reach the dataset with and without the filter.
 - **Pre-Registered Hypothesis**: Thumbs-down precision exceeds the random defect rate; per-user caps and account filters cut poisoned labels in the training set by at least the declared fraction while removing few legitimate labels (CLM-047, CLM-020, CLM-046).
 - **Independent Variables**: selector, adjudication budget, $\lambda_D$, filter settings, attacker count and vote rate.
 - **Dependent Variables**: precision with intervals, eval set composition, class ratio, poisoned-label fraction, legitimate-label loss.
-- **Break & Falsify**: Give the attacker many low-rate accounts so per-user caps do not bind; report the filter's failure. Compute normalized edit cost on simulated edits that mix corrections and added content and show where it stops tracking violations (CLM-051). Optionally train a tiny KTO model on CPU; not required.
+- **Break & Falsify**: Give the attacker many low-rate accounts so per-user caps do not bind;
+  - report the filter's failure.
+  - Compute normalized edit cost on simulated edits that mix corrections and added content and show where it stops tracking violations (CLM-051).
+  - Optionally train a tiny KTO model on CPU;
+  - not required.
 - **Hardware**: CPU.
 - **Alignment**: Lessons 39.3–39.4.
 - **Effort Estimate**: 2.5h implementation, 1h analysis (3.5h total).
@@ -561,7 +929,11 @@ All labs follow $\text{PREDICT}\to\text{BUILD}\to\text{MEASURE}\to\text{EXPLAIN}
 - **Pre-Registered Hypothesis**: The toolkit flags injected SRM at the declared threshold, CUPED achieves about $1-\rho^2$ variance reduction when the covariate is informative, and a test sized on CUPED loses the predicted power when $\theta$ falls back to 0 (CLM-043, CLM-044, CLM-045).
 - **Independent Variables**: arm loss rate, pre-period correlation and coverage, constant covariate, novelty decay, approval-vs-quality trade in the treatment, shared-cache coupling between arms.
 - **Dependent Variables**: SRM $p$, variance ratio, realized power over replications, day-level effect curve, approval and quality metrics side by side, user- vs cluster-randomized estimates.
-- **Break & Falsify**: (1) A treatment raises simulated approval by increasing agreement while lowering correctness: show the approval A/B passes and the quality guardrail fails (CLM-049, CLM-007). (2) Couple arms through a shared cache and compare user- and cluster-randomized estimates (CLM-054); agreement within uncertainty falsifies interference for that coupling. (3) Simulate a trust-panel arm and report overreliance on seeded errors (CLM-048); simulate streaming at matched end-to-end time only as a design check for CLM-053, not as evidence.
+- **Break & Falsify**:
+  1. A treatment raises simulated approval by increasing agreement while lowering correctness: show the approval A/B passes and the quality guardrail fails (CLM-049, CLM-007).
+  2. Couple arms through a shared cache and compare user- and cluster-randomized estimates (CLM-054); agreement within uncertainty falsifies interference for that coupling.
+  3. Simulate a trust-panel arm and report overreliance on seeded errors (CLM-048).
+     - Simulate streaming at matched end-to-end time only as a design check for CLM-053, not as evidence.
 - **Hardware**: CPU.
 - **Alignment**: Lessons 39.5–39.6 and Incident 39.1.
 - **Effort Estimate**: 2.5h implementation, 1h analysis (3.5h total). The source trace is a separate 2h artifact (Section 09).
@@ -581,12 +953,39 @@ All labs follow $\text{PREDICT}\to\text{BUILD}\to\text{MEASURE}\to\text{EXPLAIN}
   - Trust-and-safety reports the assistant agrees with users' incorrect claims about billing policy.
   - The thumbs-up share is still higher than before launch.
 - **Diagnostic Protocol (Task)**:
-  1. *Formulate Competing Hypotheses*: approval reward selected for agreement (sycophancy) (CLM-049, CLM-007); nonresponse shift (the release changed who leaves feedback) (CLM-040); novelty inflating the early A/B effect (CLM-025); SRM hidden by a threshold override or by per-dimension checks; CUPED silently not applied, so the test was underpowered on guardrails (CLM-031); interference through a shared cache or memory store (CLM-054, **H**); unrelated traffic or policy change after launch; a poisoned feedback cohort (CLM-020).
+  1. *Formulate Competing Hypotheses*:
+     - approval reward selected for agreement (sycophancy) (CLM-049, CLM-007);
+     - nonresponse shift (the release changed who leaves feedback) (CLM-040);
+     - novelty inflating the early A/B effect (CLM-025);
+     - SRM hidden by a threshold override or by per-dimension checks;
+     - CUPED silently not applied, so the test was underpowered on guardrails (CLM-031);
+     - interference through a shared cache or memory store (CLM-054, **H**);
+     - unrelated traffic or policy change after launch;
+     - a poisoned feedback cohort (CLM-020).
   2. *Rank Initial Plausibility*: The pattern "approval up, verified outcomes down" fits the first hypothesis, but nonresponse shift and novelty also predict parts of it. Do not rank by narrative.
-  3. *Identify Missing Evidence*: per-exposure feedback rates and response rates by arm; the randomized prompt-for-feedback arm, if any; the SRM p-value and the threshold actually in settings; whether $\theta\neq0$ for each metric; day-by-exposure effects; adjudicated samples of billing answers from both arms; the training data manifest with feedback provenance; the reward mixture weights.
-  4. *Design Discriminating Tests*: Replay billing prompts with seeded incorrect user claims to both models and measure agreement rate (sycophancy eval). Recompute per-exposure rates and IPW share. Plot the effect against days since first exposure. Retrain with the feedback reward weight set to 0, holding all else fixed. Audit vote concentration by account. State what each result would falsify.
+  3.
+    - *Identify Missing Evidence*: per-exposure feedback rates and response rates by arm;
+    - the randomized prompt-for-feedback arm, if any;
+    - the SRM p-value and the threshold actually in settings;
+    - whether $\theta\neq0$ for each metric;
+    - day-by-exposure effects;
+    - adjudicated samples of billing answers from both arms;
+    - the training data manifest with feedback provenance;
+    - the reward mixture weights.
+  4.
+    - *Design Discriminating Tests*: Replay billing prompts with seeded incorrect user claims to both models and measure agreement rate (sycophancy eval).
+    - Recompute per-exposure rates and IPW share.
+    - Plot the effect against days since first exposure.
+    - Retrain with the feedback reward weight set to 0, holding all else fixed.
+    - Audit vote concentration by account.
+    - State what each result would falsify.
   5. *Execute Causal Diagnosis*: Rank causes from the test results. More than one may hold, for example sycophancy plus a nonresponse shift.
-  6. *Prescribe Immediate Mitigation & Long-Term Intervention*: Roll back. Make sycophancy, factuality, and verified-outcome metrics launch-blocking guardrails regardless of A/B approval (as OpenAI did, CLM-007). Cap and gate the feedback reward weight; require long-horizon outcomes before full rollout; add an opt-in or staged phase.
+  6.
+    - *Prescribe Immediate Mitigation & Long-Term Intervention*: Roll back.
+    - Make sycophancy, factuality, and verified-outcome metrics launch-blocking guardrails regardless of A/B approval (as OpenAI did, CLM-007).
+    - Cap and gate the feedback reward weight;
+    - require long-horizon outcomes before full rollout;
+    - add an opt-in or staged phase.
   7. *Remeasure*: Sycophancy agreement rate, adjudicated billing correctness, escalation and revert rates, per-exposure feedback rates, and IPW share, on the same definitions as before the incident.
 
 ---
@@ -638,9 +1037,15 @@ Submit a static trace at the pinned commits that maps:
 - Sample size for $\delta=0.01$: $15.70\times0.21/0.0001=32{,}966$ per arm; with CUPED at $\rho=0.55$, coverage 0.8: factor $1-0.8\times0.3025=0.758$, giving $24{,}988$ per arm.
 
 ### Rubric Dimensions
-- **Measurement Validity** (Deliverables 1–2): *Insufficient* reports thumbs share as quality. *Competent* joins exposures, separates share from rate, and labels signal validity. *Strong* also estimates propensities from a randomized arm with intervals and states the test for quality-dependent nonresponse.
-- **Data Provenance** (Deliverables 3–4): *Insufficient* uses feedback rows as labels or trains on all votes. *Competent* adjudicates with provenance, separates eval from training, and weights KTO classes. *Strong* measures selector precision against random and quantifies the filter's effect on a poisoning attempt.
-- **Experiment Integrity** (Deliverable 5): *Insufficient* reads effects without SRM or plans without variance. *Competent* runs SRM, plans size, applies CUPED, and plans for novelty. *Strong* detects a silent CUPED fallback, distinguishes paired from unpaired planning, and states interference as a tested hypothesis.
+- **Measurement Validity** (Deliverables 1–2): *Insufficient* reports thumbs share as quality.
+  - *Competent* joins exposures, separates share from rate, and labels signal validity.
+  - *Strong* also estimates propensities from a randomized arm with intervals and states the test for quality-dependent nonresponse.
+- **Data Provenance** (Deliverables 3–4): *Insufficient* uses feedback rows as labels or trains on all votes.
+  - *Competent* adjudicates with provenance, separates eval from training, and weights KTO classes.
+  - *Strong* measures selector precision against random and quantifies the filter's effect on a poisoning attempt.
+- **Experiment Integrity** (Deliverable 5): *Insufficient* reads effects without SRM or plans without variance.
+  - *Competent* runs SRM, plans size, applies CUPED, and plans for novelty.
+  - *Strong* detects a silent CUPED fallback, distinguishes paired from unpaired planning, and states interference as a tested hypothesis.
 - **Approval vs Quality** (Deliverables 5–6, Incident 39.1): *Insufficient* ships on a positive approval A/B. *Competent* adds non-approval guardrails. *Strong* makes behavior evals launch-blocking, measures overreliance with seeded errors, and defines long-horizon rollback triggers.
 - **Source Reasoning** (Section 09 artifact): *Insufficient* cites file names. *Competent* traces the call paths at the pinned commits. *Strong* connects each traced behavior (df, threshold override, pooled $\theta$, fallback, async ingestion) to a concrete way a report could mislead.
 - **Uncertainty Discipline** (all): *Insufficient* states hypotheses as facts. *Competent* labels O/D/H. *Strong* gives the measurement that would change each **H**.

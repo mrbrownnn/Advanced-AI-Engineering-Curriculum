@@ -4,22 +4,51 @@
 
 An evaluation score is not evidence until its decision, population, unit, system boundary, data, grader, uncertainty, and failure policy are explicit. Evaluation engineering builds that chain and keeps it reproducible as models, prompts, tools, traffic, and judges change.
 
-```text
-decision + risk tolerance
-          |
-population -> sampled/versioned items -> system under test -> outcomes
-          |                                  |                 |
-       slices                            attempts/effects    failures too
-          \__________________________________|_________________/
-                                             |
-                          graders -> estimates -> uncertainty
-                                             |
-                            gate -> shadow/canary/A-B -> decision
-                                             ^
-                         incidents, drift, fresh data, user outcomes
+```mermaid
+flowchart TD
+    DEC["<b>decision + risk tolerance</b>"]
+
+    subgraph SAMPLE[" "]
+        direction LR
+        POP["population"] --> ITEMS["sampled/versioned items"] --> SUT["system under test"] --> OUTC["outcomes"]
+    end
+
+    SL["slices"]
+    ATT["attempts/effects"]
+    FAILS["failures too"]
+
+    subgraph EST[" "]
+        direction LR
+        GR["graders"] --> ESTM["estimates"] --> UNC["uncertainty"]
+    end
+
+    subgraph REL[" "]
+        direction LR
+        GATE["gate"] --> ROLL["shadow/canary/A-B"] --> DEC2["<b>decision</b>"]
+    end
+
+    FB["incidents · drift · fresh data · user outcomes"]
+
+    DEC --> POP
+    POP --> SL
+    SUT --> ATT
+    OUTC --> FAILS
+    SL --> GR
+    ATT --> GR
+    FAILS --> GR
+    UNC --> GATE
+    FB --> ROLL
 ```
 
-This module owns the evaluation program: contracts, datasets, grader validation, human and LLM judging, statistical comparison, regression gates, benchmark freshness, end-to-end outcome accounting, and offline-to-online validity. Module 00 owns general evidence foundations; Module 07 owns behavioral calibration; Module 12 evaluates agent-loop behavior but owns loop mechanics; Module 16 deepens falsification and adversarial test design; Module 17 reuses the release statistics defined in Lesson 15.4; Module 23 owns production observability and SLO operations.
+This module owns the evaluation program: contracts, datasets, grader validation, human and LLM judging, statistical comparison, regression gates, benchmark freshness, end-to-end outcome accounting, and offline-to-online validity.
+
+Boundaries with other modules:
+- Module 00 owns general evidence foundations.
+- Module 07 owns behavioral calibration.
+- Module 12 evaluates agent-loop behavior but owns loop mechanics.
+- Module 16 deepens falsification and adversarial test design.
+- Module 17 reuses the release statistics defined in Lesson 15.4.
+- Module 23 owns production observability and SLO operations.
 
 **Research cutoff:** 2026-09-26 for claims unchanged since registry 1.0.0. Claims added or changed in registry 1.1.0 were checked against sources opened on 2026-10-01, with a landscape cutoff of 2026-09-30.
 
@@ -27,7 +56,10 @@ This module owns the evaluation program: contracts, datasets, grader validation,
 - **Engineering Problem**: Produce decision-relevant evidence whose population, measurement instrument, uncertainty, and release rule remain reproducible as the system changes.
 - **What You Will Do**: Specify an evaluation contract, build a versioned sliced dataset, calibrate graders, run paired dependence-aware comparisons, account for all terminal outcomes, trace the evaluation harness, and defend an offline-to-online release gate.
 - **Environment**: Python 3.10+ with NumPy and SciPy, immutable dataset/run manifests, deterministic and model-based graders, optional blinded human labels, and a statistical notebook or test harness.
-- **Evidence Rule**: **O** is a source observation, **D** is a derivation under stated assumptions, and **H** is an engineering hypothesis requiring telemetry. `CLM-xxx` identifiers point to `research-registry/15-evaluation-engineering.yaml`. Every dataset in this module's worked examples is **synthetic** and is labeled so; none is a measurement of a real system.
+- **Evidence Rule**:
+  - **O** is a source observation, **D** is a derivation under stated assumptions, and **H** is an engineering hypothesis requiring telemetry.
+  - `CLM-xxx` identifiers point to `research-registry/15-evaluation-engineering.yaml`.
+  - Every dataset in this module's worked examples is **synthetic** and is labeled so; none is a measurement of a real system.
 - **If You Only Have One Week**: Lessons 15.1, 15.3, 15.4 — they define the decision, unit, and estimand, treat graders as instruments, and turn paired uncertainty into a release gate; dataset lineage, online validity, and harness operations build on those three.
 
 ## 01 Baseline Assumptions
@@ -70,7 +102,16 @@ estimated_effort:
 
 Each category is counted once. The 2h source trace is the Section 09 artifact; it is not also counted inside Lesson 15.6 practice or LAB D.
 
-The learner must be able to define an evaluation estimand and population; build versioned datasets and slices; select and validate graders; run paired, dependence-aware comparisons; define release gates before seeing results; include failed and unfinished outcomes; connect offline evidence to online outcomes; trace a pinned harness; and diagnose a disagreement among benchmark, judge, system, and user metrics.
+The learner must be able to:
+- define an evaluation estimand and population;
+- build versioned datasets and slices;
+- select and validate graders;
+- run paired, dependence-aware comparisons;
+- define release gates before seeing results;
+- include failed and unfinished outcomes;
+- connect offline evidence to online outcomes;
+- trace a pinned harness;
+- diagnose a disagreement among benchmark, judge, system, and user metrics.
 
 ### LAYER 1: KNOWLEDGE / INSTRUCTIONAL LAYER
 
@@ -99,7 +140,16 @@ What population quantity is being estimated, at which independent unit, and for 
 - **Design effect**: the factor by which correlated rows inflate the variance of a mean relative to the same number of independent rows.
 
 **Mechanism Explanation:**
-Start with the decision: what change could the result authorize, block, or investigate? Then bind the target population and sampling frame, independent unit, system boundary, policy and model versions, outcomes, thresholds, uncertainty procedure, missingness, and exclusions **before** observing results (**D**, CLM-001). Request, turn, conversation, trajectory, user, and session are not interchangeable units (**D**, CLM-003).
+Start with the decision: what change could the result authorize, block, or investigate? Then bind, **before** observing results (**D**, CLM-001):
+- target population and sampling frame;
+- independent unit;
+- system boundary;
+- policy and model versions;
+- outcomes and thresholds;
+- uncertainty procedure;
+- missingness and exclusions.
+
+Request, turn, conversation, trajectory, user, and session are not interchangeable units (**D**, CLM-003).
 
 HELM is a reference for scenario and metric coverage, not a universal production suite. Its durable lesson is to expose which scenarios and desiderata are measured and which remain absent (**O**, CLM-002).
 
@@ -107,6 +157,12 @@ HELM is a reference for scenario and metric coverage, not a universal production
 When A and B run on the same independent blocks, compare paired differences:
 
 $$d_i=m_B(i)-m_A(i),\qquad \bar d=\frac{1}{n}\sum_i d_i.$$
+
+where:
+- $i$: paired-row index; $n$: number of paired rows (count)
+- $m_A(i),m_B(i)$: metric values of systems A and B on row $i$ (metric units)
+- $d_i$: paired difference on row $i$ (metric units, positive when B is better)
+- $\bar d$: mean paired difference over $n$ rows (metric units)
 
 Suppose $G$ independent blocks each hold $m$ rows with common variance $\sigma^2$ and correlation $\rho$ between rows of the same block. Then
 
@@ -141,7 +197,9 @@ The bracket is the design effect. It follows from summing $m$ variances and $m(m
 (a) A sample has 40 conversations with 6 turns each and assumed $\rho=0.3$. Compute the design effect and $n_{\text{eff}}$. (b) Write an evaluation contract for one release decision and identify every unit that could be confused with the independent block.
 
 **Feedback Contract:**
-- *Expected Output*: (a) design effect $=1+5\times0.3=2.5$; $n_{\text{eff}}=240/2.5=96$. (b) A contract naming population, frame, independent unit, boundary, estimand, versions, thresholds, and missingness. Knowledge check 1: turns share a user, topic, and earlier context, so their errors move together.
+- *Expected Output*:
+  - (a) Design effect $=1+5\times0.3=2.5$; $n_{\text{eff}}=240/2.5=96$.
+  - (b) A contract naming population, frame, independent unit, boundary, estimand, versions, thresholds, and missingness. Knowledge check 1: turns share a user, topic, and earlier context, so their errors move together.
 - *Typical Error*: answering $n_{\text{eff}}=240$, or treating repeated samples as new independent prompts.
 - *Diagnostic Hint*: What process generated the independent blocks? If you doubled rows per block, which new blocks did you sample?
 - *Concept to Revisit*: evaluation estimand and experimental unit (Module 00, Lesson 0.3).
@@ -167,16 +225,38 @@ How can a dataset support reproducible estimates without becoming an invisible d
 - **Protected holdout**: data withheld from routine inspection and optimization.
 
 **Mechanism Explanation:**
-Every item needs stable identity, origin/license, capture time, sampling probability or intended weight, split, version, deduplication lineage, tags, expected answer or rubric provenance, and exclusion history (**D**, CLM-004). Preserve a protected final holdout; routine regression sets become development data once teams inspect and optimize against them.
+Every item needs (**D**, CLM-004):
+- stable identity, origin/license, capture time;
+- sampling probability or intended weight;
+- split, version, deduplication lineage, tags;
+- expected answer or rubric provenance;
+- exclusion history.
+
+Preserve a protected final holdout; routine regression sets become development data once teams inspect and optimize against them.
 
 Choose tags and slices from risks and workload structure before results: task, language, locale, prompt/output length, user cohort, retrieval/tool path, policy class, traffic source, difficulty, and failure mode. Tiny slices need uncertainty, not confident rankings.
 
-LiveBench is a design example: recent sources, frequent refresh, objective grading, and diverse tasks limit contamination (**O**, CLM-012). “Contamination-limited” is the defensible claim. Fresh data does not prove absence of private leakage, tuning feedback, benchmark-specific adaptation, or production relevance.
+LiveBench is a design example: recent sources, frequent refresh, objective grading, and diverse tasks limit contamination (**O**, CLM-012).
+- “Contamination-limited” is the defensible claim.
+- Fresh data does not prove absence of private leakage, tuning feedback, benchmark-specific adaptation, or production relevance.
 
 Two different questions use slices, and they need different machinery:
 
 1. *What is the expected score on the target population?* This is a prevalence-weighted estimate. It needs a partition.
 2. *Is any protected subgroup unacceptably bad?* This is a set of critical-slice gates. It needs no partition and no prevalence weight.
+
+```mermaid
+flowchart TD
+    Q["Slice question"] --> Q1{"Expected score on<br/>target population?"}
+    Q --> Q2{"Any protected subgroup<br/>unacceptably bad?"}
+    Q1 --> D1{"Do tags overlap?"}
+    D1 -->|"no: slices partition"| P["Partition formula<br/>Σ w_s · m̂_s"]
+    D1 -->|"yes"| I["Item weights ω_i per cell<br/>(count each item once)"]
+    Q2 --> G["Critical-slice gate per slice<br/>m̂_s ≥ f_s, no weight"]
+```
+
+Legend:
+- $w_s$: target prevalence of slice $s$; $\hat m_s$: slice mean score; $\omega_i$: item weight; $f_s$: slice floor.
 
 **Quantitative Model / Derivation:**
 
@@ -184,13 +264,27 @@ Two different questions use slices, and they need different machinery:
 
 $$\hat m=\sum_{s=1}^{K} w_s\,\hat m_s$$
 
-estimates it (**D**, CLM-019). Here $K$ is the number of slices, $m$ is the per-item metric, $\hat m_s$ is the sample mean of $m$ over the items in $S_s$, and $w_s$ is the target share of slice $s$ (not its sample share). The identity fails if an item belongs to two slices, because that item's score enters two terms, or to none, because it enters no term.
+estimates it (**D**, CLM-019).
+
+where:
+- $K$: number of slices
+- $m$: per-item metric (metric units)
+- $\hat m_s$: sample mean of $m$ over the items in $S_s$
+- $w_s$: target share of slice $s$ (not its sample share; dimensionless)
+
+The identity fails if an item belongs to:
+- two slices, because that item's score enters two terms;
+- no slice, because it enters no term.
 
 *Item-level weighting.* When tags overlap, weight items instead of slices. Give item $i$ the weight $\omega_i=(\text{target share of its cell})/(\text{sample share of its cell})$ and compute
 
 $$\hat m=\frac{\sum_i \omega_i m_i}{\sum_i \omega_i}.$$
 
-where $m_i$ is item $i$'s score and $\omega_i$ its weight. Each item is counted once, however many tags it carries. When every item of a cell shares one weight, this equals the partition formula applied to cells (**D**, CLM-019).
+where:
+- $m_i$: item $i$'s score (metric units)
+- $\omega_i$: item $i$'s weight (dimensionless)
+
+Each item is counted once, however many tags it carries. When every item of a cell shares one weight, this equals the partition formula applied to cells (**D**, CLM-019).
 
 *Step-by-step (why the two forms agree).* Let cell $c$ have $n_c$ of the $N$ sampled items, sample share $n_c/N$, target share $w_c$, and cell mean $\hat m_c$. Every item in $c$ gets $\omega_i=w_c/(n_c/N)=Nw_c/n_c$.
 1. Numerator: $\sum_i\omega_i m_i=\sum_c \frac{Nw_c}{n_c}\sum_{i\in c}m_i=\sum_c Nw_c\,\hat m_c$.
@@ -209,10 +303,18 @@ where $m_i$ is item $i$'s score and $\omega_i$ its weight. Each item is counted 
 | N only | 2 | 1 | 0.50 |
 | L and N | 4 | 1 | 0.25 |
 
-- *Steps (wrong)*: treat "L", "N", and "neither" as slices. $\hat m_L=(3+1)/8=0.50$, $\hat m_N=(1+1)/6=0.333$, $\hat m_{\text{neither}}=0.90$. Sample shares are $8/20=0.4$, $6/20=0.3$, and $0.5$, which sum to 1.2. The sum $\sum w_s\hat m_s=0.20+0.10+0.45=0.75$. Dividing by 1.2 gives 0.625.
+- *Steps (wrong)*: treat "L", "N", and "neither" as slices.
+  - Slice scores: $\hat m_L=(3+1)/8=0.50$, $\hat m_N=(1+1)/6=0.333$, $\hat m_{\text{neither}}=0.90$.
+  - Sample shares: $8/20=0.4$, $6/20=0.3$, and $0.5$, which sum to 1.2.
+  - Weighted sum: $\sum w_s\hat m_s=0.20+0.10+0.45=0.75$.
+  - Normalized: $0.75/1.2=0.625$.
 - *Steps (right)*: count each item once. $(9+3+1+1)/20=0.70$.
 - *Result*: the true sample mean is 0.70. The overlapping-slice sum gives 0.75 and its normalized form gives 0.625. The four "L and N" items were counted twice: 24 item-counts for 20 items.
-- *Reweighting to a target*: suppose the target cell shares are 0.6, 0.2, 0.1, 0.1. The partition formula over cells gives $0.6\times0.90+0.2\times0.75+0.1\times0.50+0.1\times0.25=0.765$. The item weights are 1.2, 1.0, 1.0, 0.5 (target share / sample share: $0.6/0.5$, $0.2/0.2$, $0.1/0.1$, $0.1/0.2$), and $\sum\omega_i m_i/\sum\omega_i=(10.8+3+1+0.5)/(12+4+2+2)=15.3/20=0.765$. The two forms agree.
+- *Reweighting to a target*: suppose the target cell shares are 0.6, 0.2, 0.1, 0.1.
+  - Partition formula over cells: $0.6\times0.90+0.2\times0.75+0.1\times0.50+0.1\times0.25=0.765$.
+  - Item weights (target share / sample share): $0.6/0.5=1.2$, $0.2/0.2=1.0$, $0.1/0.1=1.0$, $0.1/0.2=0.5$.
+  - Item-weighted form: $\sum\omega_i m_i/\sum\omega_i=(10.8+3+1+0.5)/(12+4+2+2)=15.3/20=0.765$.
+  - The two forms agree.
 - *Interpretation / limits*: neither wrong number is biased in a predictable direction; the error depends on how the overlap cell scores. The target shares here are exercise assumptions.
 
 **Worked Example B — a gate is not a weight (synthetic):**
@@ -227,10 +329,23 @@ where $m_i$ is item $i$'s score and $\omega_i$ its weight. Each item is counted 
 3. Two critical slices overlap. Does that break the gates? Does it break the weighted estimate?
 
 **Guided Practice:**
-(a) 25 graded items carry tags V (voice) and T (tool path). Cells: neither 15 items with 12 passes; V only 5 with 4; T only 3 with 1; V and T 2 with 1. Compute the correct sample mean, the overlapping-slice sum, and its normalized form. Then reweight to target cell shares 0.5, 0.2, 0.2, 0.1. A floor of 0.60 applies to all T-tagged items; evaluate it. (b) Build a manifest, deduplication lineage, and freshness policy for a stratified sample.
+(a) 25 graded items carry tags V (voice) and T (tool path).
+- Cells: neither 15 items with 12 passes; V only 5 with 4; T only 3 with 1; V and T 2 with 1.
+- Compute the correct sample mean, the overlapping-slice sum, and its normalized form.
+- Then reweight to target cell shares 0.5, 0.2, 0.2, 0.1.
+- A floor of 0.60 applies to all T-tagged items; evaluate it.
+
+(b) Build a manifest, deduplication lineage, and freshness policy for a stratified sample.
 
 **Feedback Contract:**
-- *Expected Output*: (a) correct mean $18/25=0.72$; overlapping-slice sum $0.76$ with weights summing to 1.08; normalized $0.704$; reweighted $0.677$ by both forms; the T gate uses $(1+1)/5=0.40<0.60$ and fails. Knowledge check 3: overlap does not affect gates, because each gate reads only its own members; it does break $\sum w_s\hat m_s$. (b) Reproducible membership, weights, leakage audit, uncertainty by slice, and protected split policy.
+- *Expected Output*:
+  - (a) Arithmetic:
+    - Correct mean $18/25=0.72$.
+    - Overlapping-slice sum $0.76$ with weights summing to 1.08; normalized $0.704$.
+    - Reweighted $0.677$ by both forms.
+    - The T gate uses $(1+1)/5=0.40<0.60$ and fails.
+  - Knowledge check 3: overlap does not affect gates, because each gate reads only its own members; it does break $\sum w_s\hat m_s$.
+  - (b) Reproducible membership, weights, leakage audit, uncertainty by slice, and protected split policy.
 - *Typical Error*: using tag frequencies as weights when tags overlap, post-result exclusions, or reporting an aggregate that hides a failed gate.
 - *Diagnostic Hint*: Do your weights sum to one? Sum the per-slice item counts: do they equal the number of items?
 - *Concept to Revisit*: partition versus tag; critical-slice gate versus prevalence weight.
@@ -265,16 +380,54 @@ Use the strongest valid oracle for each construct (**D**, CLM-005):
 | LLM judge | Open-ended rubric at scale | Position, verbosity, self/preference, prompt and model drift |
 | Human/domain expert | Normative, ambiguous, high-risk judgment | Rater interpretation, fatigue, identity cues, disagreement |
 
-The MT-Bench/Chatbot Arena paper reports useful judge–human agreement in its settings and documents position, verbosity, self-enhancement, and reasoning limitations (**O**, CLM-006). A later study reports that position bias varies by judge and task (**O**, CLM-007). Therefore validate a judge against blinded, independently adjudicated labels; fix judge model, prompt, decoding, parser, and rubric; randomize and swap answer order; allow ties/abstention; and report confusion, consistency, disagreement, and slice behavior (**D**, CLM-008).
+Evidence on LLM judges:
+- The MT-Bench/Chatbot Arena paper reports useful judge–human agreement in its settings and documents position, verbosity, self-enhancement, and reasoning limitations (**O**, CLM-006).
+- A later study reports that position bias varies by judge and task (**O**, CLM-007).
 
-Human protocols require rubric examples and counterexamples, qualification, randomization/blinding where feasible, repeated labels, tie/abstain, disagreement analysis, adjudication, privacy, and worker well-being (**D**, CLM-009). Do not erase meaningful plural judgments by forcing consensus.
+Therefore (**D**, CLM-008):
+- validate a judge against blinded, independently adjudicated labels;
+- fix judge model, prompt, decoding, parser, and rubric;
+- randomize and swap answer order;
+- allow ties/abstention;
+- report confusion, consistency, disagreement, and slice behavior.
+
+```mermaid
+flowchart LR
+    REF["Blinded, independently<br/>adjudicated labels"] --> CMP["Compare judge vs labels"]
+    FIX["Fixed judge: model, prompt,<br/>decoding, parser, rubric"] --> RUN["Judge pairs<br/>(random order + swapped order,<br/>ties/abstain allowed)"]
+    RUN --> CMP
+    CMP --> REP["Report: confusion, swap consistency,<br/>disagreement, slice behavior"]
+    REP --> USE{"Errors bounded?"}
+    USE -->|"yes"| GATE["Judge may feed a gate"]
+    USE -->|"no"| NO["Judge must not control the gate"]
+```
+
+Human protocols require (**D**, CLM-009):
+- rubric examples and counterexamples;
+- qualification;
+- randomization/blinding where feasible;
+- repeated labels and tie/abstain;
+- disagreement analysis and adjudication;
+- privacy and worker well-being.
+
+Do not erase meaningful plural judgments by forcing consensus.
 
 **Quantitative Model / Derivation:**
 For $n$ pairwise judgments, the descriptive tie-adjusted preference rate is
 
 $$\hat p=\frac{W_B+0.5T}{n}.$$
 
-where $W_B$ is the number of pairs B wins, $T$ the number of ties, and $W_A$ the number A wins, with $n=W_A+W_B+T$. Each tie counts as half a win for each side, so $\hat p$ for B and the matching rate $(W_A+0.5T)/n$ for A sum to 1, and $\hat p=0.5$ means no net preference. Swap consistency $=(\text{verdicts unchanged after the swap})/n$.
+where:
+- $W_B$: number of pairs B wins (count)
+- $W_A$: number of pairs A wins (count)
+- $T$: number of ties (count)
+- $n=W_A+W_B+T$: number of pairwise judgments
+- $\hat p$: tie-adjusted preference rate for B (dimensionless, 0–1)
+
+Reading it:
+- Each tie counts as half a win for each side, so $\hat p$ for B and the matching rate $(W_A+0.5T)/n$ for A sum to 1.
+- $\hat p=0.5$ means no net preference.
+- Swap consistency $=(\text{verdicts unchanged after the swap})/n$.
 
 It is conditional on sampled items, presentation, judge/rater population, and protocol—not context-free model quality. Swapping order detects sensitivity but does not manufacture ground truth.
 
@@ -292,7 +445,9 @@ It is conditional on sampled items, presentation, judge/rater population, and pr
 (a) 30 pairs: B wins 14, A wins 10, 6 tie; 24 verdicts survive an order swap. Compute both statistics. (b) Calibrate exact/executable, semantic, two judge, and blinded human paths on one stratified sample; report disagreement rather than forcing consensus.
 
 **Feedback Contract:**
-- *Expected Output*: (a) $\hat p=(14+3)/30=0.567$; swap consistency $=24/30=0.80$. (b) Fixed grader versions/protocol, order assignment, ties, reference labels, slice error, uncertainty, latency, and cost. Knowledge check 2: blinded labels adjudicated without seeing the judge's output.
+- *Expected Output*:
+  - (a) $\hat p=(14+3)/30=0.567$; swap consistency $=24/30=0.80$.
+  - (b) Fixed grader versions/protocol, order assignment, ties, reference labels, slice error, uncertainty, latency, and cost. Knowledge check 2: blinded labels adjudicated without seeing the judge's output.
 - *Typical Error*: dropping ties from the denominator ($14/24=0.583$), self-judging, or forced choice without calibration.
 - *Diagnostic Hint*: Does disagreement track answer position, length, or slice?
 - *Concept to Revisit*: grader validity and order sensitivity.
@@ -320,7 +475,32 @@ How can paired evidence, dependence, practical thresholds, and repeated looks be
 - **Power**: the probability that a gate passes when the true effect equals a stated planning value.
 
 **Mechanism Explanation:**
-Predeclare, before any result is seen: metric and direction, the independent block, the interval procedure and level, $\epsilon$ and $\tau$, the critical slices and their margins, the multiplicity and look policy, and the three-state decision rule (**D**, CLM-011). Then compute paired effects, reduce them to block effects, build the interval at block level, evaluate every gate, and record the decision with its inputs. Thresholds are product and risk judgments; statistics cannot choose them. Choices made after seeing results belong in a new, separately sampled confirmation.
+Predeclare, before any result is seen (**D**, CLM-011):
+- metric and direction;
+- the independent block;
+- the interval procedure and level;
+- $\epsilon$ and $\tau$;
+- the critical slices and their margins;
+- the multiplicity and look policy;
+- the three-state decision rule.
+
+Then run the pipeline:
+
+```mermaid
+flowchart LR
+    PRE["Predeclared contract"] --> PE["Paired effects<br/>(per row)"]
+    PE --> BE["Block effects<br/>(mean per block)"]
+    BE --> IV["Block-level interval"]
+    IV --> GT["Evaluate every gate<br/>(primary + critical slices<br/>+ hard constraints)"]
+    GT --> DR{"Decision"}
+    DR --> REL["RELEASE"]
+    DR --> HOLD["HOLD"]
+    DR --> INC["INCONCLUSIVE"]
+    DR --> REC["Record decision<br/>with its inputs"]
+```
+
+- Thresholds are product and risk judgments; statistics cannot choose them.
+- Choices made after seeing results belong in a new, separately sampled confirmation.
 
 A scalar $S=\sum_k w_k z_k$ is meaningful only with fixed directions, scales, transforms, and weights. Preserve the metric vector, Pareto frontier, and hard safety/reliability constraints so a gain cannot compensate for an unacceptable harm.
 
@@ -328,15 +508,40 @@ A scalar $S=\sum_k w_k z_k$ is meaningful only with fixed directions, scales, tr
 
 The seven items below are this module's **release statistics contract**. Module 17 reuses it.
 
-*1. Paired effect.* For row $j$ in block $g$, with both systems run on that same row, $d_{g,j}=m_B(g,j)-m_A(g,j)$. The block effect is $\bar d_g=\frac{1}{n_g}\sum_j d_{g,j}$. The estimand is the mean block effect $\Delta=E[\bar d_g]$, estimated by $\hat\Delta=\frac1G\sum_g\bar d_g$. If block sizes differ, the row-weighted mean $\sum_{g,j}d_{g,j}/\sum_g n_g$ is a different estimand; declare which one the decision uses (**D**, CLM-010).
+*1. Paired effect.* For row $j$ in block $g$, with both systems run on that same row:
 
-where $g=1,\dots,G$ indexes blocks, $j=1,\dots,n_g$ indexes rows inside block $g$, $m_A(g,j)$ and $m_B(g,j)$ are the metric values, $\Delta$ is the population mean block effect, and $\hat\Delta$ its estimate.
+$$
+d_{g,j}=m_B(g,j)-m_A(g,j), \qquad \bar d_g=\frac{1}{n_g}\sum_j d_{g,j}, \qquad \Delta=E[\bar d_g], \qquad \hat\Delta=\frac1G\sum_g\bar d_g
+$$
 
-*2. Interval.* Let $s_b$ be the sample standard deviation of the $G$ block effects, $s_b=\sqrt{\frac{1}{G-1}\sum_g(\bar d_g-\hat\Delta)^2}$. Let $\alpha$ be the two-sided error level (0.05 for a 95% interval) and $t_{1-\alpha/2,\,G-1}$ the $1-\alpha/2$ quantile of the t distribution with $G-1$ degrees of freedom.
+where:
+- $d_{g,j}$: row difference (metric units)
+- $\bar d_g$: block effect (metric units)
+- $\Delta$: the estimand, the population mean block effect; $\hat\Delta$: its estimate (metric units)
+- $g=1,\dots,G$: block index; $G$: number of blocks (count)
+- $j=1,\dots,n_g$: row index inside block $g$; $n_g$: rows in block $g$ (count)
+- $m_A(g,j)$, $m_B(g,j)$: metric values of A and B on that row (metric units)
+- $E[\cdot]$: population expectation (preserves metric units)
 
+If block sizes differ, the row-weighted mean $\sum_{g,j}d_{g,j}/\sum_g n_g$ is a different estimand; declare which one the decision uses (**D**, CLM-010).
+
+*2. Interval.* Definitions:
+- $s_b=\sqrt{\frac{1}{G-1}\sum_g(\bar d_g-\hat\Delta)^2}$: sample standard deviation of the $G$ block effects (metric units).
+- $\alpha$: two-sided error level (0.05 for a 95% interval).
+- $t_{1-\alpha/2,\,G-1}$: the $1-\alpha/2$ quantile of the t distribution with $G-1$ degrees of freedom.
+
+Interval procedures:
 - Block t interval: $\hat\Delta\pm t_{1-\alpha/2,\,G-1}\,s_b/\sqrt G$. This is Module 00's paired interval applied to block effects.
-- Block bootstrap: draw $G$ blocks with replacement, keep every row of each drawn block, recompute $\hat\Delta$, repeat, and take percentiles. The standard deviation of that bootstrap distribution is exactly $\sqrt{(G-1)/G}\;s_b/\sqrt G$. Step-by-step: each resample draws $G$ block effects independently from the $G$ observed values, whose variance with divisor $G$ is $\frac{G-1}{G}s_b^2$; the mean of $G$ such draws has variance $\frac{G-1}{G}s_b^2/G$; take the square root. Example (R-15 below): $\sqrt{9/10}\times0.1491=0.1414$.
-- **Block resampling is required whenever an independent unit contributes more than one row**: repeated generations of one prompt, turns of one conversation, tasks of one user or session, questions about one document, or translations of one question. Row resampling is valid only when each block has one row or rows are uncorrelated. Under positive within-block correlation it understates the standard error by about the square root of the design effect of Lesson 15.1 (**D**, CLM-020).
+- Block bootstrap: draw $G$ blocks with replacement, keep every row of each drawn block, recompute $\hat\Delta$, repeat, and take percentiles.
+  - The standard deviation of that bootstrap distribution is exactly $\sqrt{(G-1)/G}\;s_b/\sqrt G$.
+  - Step 1: each resample draws $G$ block effects independently from the $G$ observed values, whose variance with divisor $G$ is $\frac{G-1}{G}s_b^2$.
+  - Step 2: the mean of $G$ such draws has variance $\frac{G-1}{G}s_b^2/G$.
+  - Step 3: take the square root.
+  - Example (R-15 below): $\sqrt{9/10}\times0.1491=0.1414$.
+- **Block resampling is required whenever an independent unit contributes more than one row** (**D**, CLM-020):
+  - Examples: repeated generations of one prompt, turns of one conversation, tasks of one user or session, questions about one document, or translations of one question.
+  - Row resampling is valid only when each block has one row or rows are uncorrelated.
+  - Under positive within-block correlation it understates the standard error by about the square root of the design effect of Lesson 15.1.
 - No interval here is a guarantee. With few blocks, the percentile bootstrap undercovers; the simulation below shows it. The t interval assumes roughly normal block effects.
 
 The same adjustment appears in the evaluation literature as clustered standard errors, together with the recommendation to analyze question-level paired differences (**O**, CLM-023).
@@ -349,7 +554,25 @@ The same adjustment appears in the evaluation literature as clustered standard e
 
 Here $L$ and $U$ are the lower and upper interval bounds (not the look count $L$ of item 5). Because $L<U$, a gate cannot both pass and be refuted.
 
-For a harm metric where lower is better, with $\Delta_h=h_B-h_A$, the noninferiority gate is $UCB(\Delta_h)\le\tau$. Here $h_A,h_B$ are the harm rates of A and B and $UCB$ is the upper confidence bound (the $U$ of the harm interval). Flipping the sign, $-\Delta_h$ is larger-is-better, and $L(-\Delta_h)\ge-\tau$ is the same condition as $UCB(\Delta_h)\le\tau$. A pass at a two-sided 95% interval is a one-sided 97.5% statement, so a gate whose true value sits exactly at its threshold passes at most about 2.5% of the time (**D**, CLM-021). Reason: a two-sided $1-\alpha$ interval leaves $\alpha/2$ in each tail, so when the true value equals the threshold, $L\ge$ threshold happens with probability about $\alpha/2=0.025$.
+```mermaid
+flowchart LR
+    I["Interval L, U<br/>(larger is better)"] --> P{"L ≥ threshold?"}
+    P -->|"yes"| PASS["passes"]
+    P -->|"no"| R{"U < threshold?"}
+    R -->|"yes"| REF["refuted"]
+    R -->|"no"| UND["undetermined"]
+```
+
+Legend: threshold is $\epsilon$ for an improvement gate and $-\tau$ for a noninferiority gate; $L$, $U$ are the interval bounds.
+
+Harm metrics (lower is better):
+- With $\Delta_h=h_B-h_A$, the noninferiority gate is $UCB(\Delta_h)\le\tau$.
+- $h_A,h_B$ are the harm rates of A and B; $UCB$ is the upper confidence bound (the $U$ of the harm interval).
+- Flipping the sign, $-\Delta_h$ is larger-is-better, and $L(-\Delta_h)\ge-\tau$ is the same condition as $UCB(\Delta_h)\le\tau$.
+
+False-pass rate at the threshold (**D**, CLM-021):
+- A pass at a two-sided 95% interval is a one-sided 97.5% statement, so a gate whose true value sits exactly at its threshold passes at most about 2.5% of the time.
+- Reason: a two-sided $1-\alpha$ interval leaves $\alpha/2$ in each tail, so when the true value equals the threshold, $L\ge$ threshold happens with probability about $\alpha/2=0.025$.
 
 *4. Critical-slice gates.* Each critical slice gets its own gate, computed from the rows in that slice with the same block structure and its own margin $\tau_s$. Prevalence weights do not enter. Hard constraints, such as zero unauthorized effects, are deterministic checks and need no interval.
 
@@ -358,7 +581,11 @@ For a harm metric where lower is better, with $\Delta_h=h_B-h_A$, the noninferio
 - *All gates must pass.* If release requires every gate to pass, no adjustment is needed to control false release. Reason: if any one requirement is truly violated, release needs that gate to pass, which happens with probability at most its own level (**D**, CLM-021). The price is lower power.
 - *Any of $K$ can win.* If any one of $K$ metrics or slices could justify a claim, test each at $\alpha/K$ (Bonferroni). This also applies to exploratory slices scanned for regressions.
 - *Looks.* The default is one planned look. With $L$ planned looks, use $\alpha/L$ at each. This is conservative and valid. An unplanned look or rerun is treated as a new experiment on a fresh protected sample; its data are never silently pooled.
-- *Rerun-until-pass.* With $k$ independent reruns of a gate whose true value sits at its threshold, the chance that at least one passes is $1-(1-\alpha/2)^k$. Step-by-step: each rerun falsely passes with probability $\alpha/2$ (item 3), so it fails with $1-\alpha/2$; all $k$ independent reruns fail with $(1-\alpha/2)^k$; at least one passes with the complement. With $\alpha=0.05$, $k=5$: $1-0.975^5=0.119$.
+- *Rerun-until-pass.* With $k$ independent reruns of a gate whose true value sits at its threshold, the chance that at least one passes is $1-(1-\alpha/2)^k$.
+  - Each rerun falsely passes with probability $\alpha/2$ (item 3), so it fails with $1-\alpha/2$.
+  - All $k$ independent reruns fail with $(1-\alpha/2)^k$.
+  - At least one passes with the complement.
+  - With $\alpha=0.05$, $k=5$: $1-0.975^5=0.119$.
 
 *6. Decision.*
 
@@ -370,7 +597,12 @@ For a harm metric where lower is better, with $\Delta_h=h_B-h_A$, the noninferio
 
 $$G\ \ge\ \left(\frac{(z_{1-\alpha/2}+z_{1-\beta})\,s_b}{\delta-\epsilon}\right)^2 .$$
 
-where $z_q$ is the $q$ quantile of the standard normal ($z_{0.975}=1.960$, $z_{0.80}=0.842$), $\beta$ is the planned miss probability, and $\delta$ is the true effect assumed for planning.
+where:
+- $G$: required number of independent blocks (count)
+- $z_q$: the $q$ quantile of the standard normal ($z_{0.975}=1.960$, $z_{0.80}=0.842$)
+- $\alpha$: two-sided error level; $\beta$: planned miss probability ($1-\beta$ is power)
+- $s_b$: pilot block standard deviation (metric units)
+- $\delta$: true effect assumed for planning; $\epsilon$: practical threshold (metric units)
 
 *Step-by-step (normal approximation, $SE=s_b/\sqrt G$).*
 1. The gate passes when $L=\hat\Delta-z_{1-\alpha/2}SE\ge\epsilon$, i.e. $\hat\Delta\ge\epsilon+z_{1-\alpha/2}SE$.
@@ -378,11 +610,21 @@ where $z_q$ is the $q$ quantile of the standard normal ($z_{0.975}=1.960$, $z_{0
 3. Rearrange: $(z_{1-\alpha/2}+z_{1-\beta})\,s_b/\sqrt G\le\delta-\epsilon$. Solve for $G$ and square to get the formula above; round up.
 4. The noninferiority gate passes when $L\ge-\tau$, so the distance to the threshold is $\delta-(-\tau)=\delta+\tau$.
 
-For a noninferiority gate replace $\delta-\epsilon$ by $\delta+\tau$. Power here is the probability that the gate passes when the true effect is $\delta$. It is not the probability that B is better, and it is not defined at a true effect equal to the threshold, where the pass rate is the false-pass rate (**D**, CLM-022). $G$ counts blocks, not rows.
+Notes on planning (**D**, CLM-022):
+- For a noninferiority gate replace $\delta-\epsilon$ by $\delta+\tau$.
+- Power here is the probability that the gate passes when the true effect is $\delta$.
+- It is not the probability that B is better.
+- It is not defined at a true effect equal to the threshold, where the pass rate is the false-pass rate.
+- $G$ counts blocks, not rows.
 
 **Worked Example — fixture R-15 (synthetic):**
 
-*Predeclared contract.* Metric: task success (1 or 0), higher is better. Block: user. Ten users were sampled independently; each ran the same four tasks on A and on B. Primary gate: improvement with $\epsilon=0.05$. Critical slice: the effectful refund task T4, noninferiority with $\tau=0.05$. Interval: two-sided 95% block t. One look. All gates must pass.
+*Predeclared contract.*
+- Metric: task success (1 or 0), higher is better.
+- Block: user. Ten users were sampled independently; each ran the same four tasks on A and on B.
+- Primary gate: improvement with $\epsilon=0.05$.
+- Critical slice: the effectful refund task T4, noninferiority with $\tau=0.05$.
+- Interval: two-sided 95% block t. One look. All gates must pass.
 
 *Input.* Paired effects $d=\text{success}_B-\text{success}_A$:
 
@@ -403,31 +645,70 @@ There are 13 rows at +1, 24 at 0, and 3 at −1.
 
 *Step 1 — estimate.* $\hat\Delta=(1+0.75+0.75+0.5+0+0+0+0+0-0.5)/10=0.25$. Block sizes are equal, so the row mean is also $10/40=0.25$.
 
-*Step 2 — the wrong interval (rows as independent).* $n=40$, $s=0.5883$, $SE=0.5883/\sqrt{40}=0.0930$, $t_{0.975,39}=2.023$. Interval $[0.062,\,0.438]$. A row bootstrap (10,000 resamples, seed 15) gives the percentile interval $[0.075,\,0.425]$.
+*Step 2 — the wrong interval (rows as independent).*
+- $n=40$, $s=0.5883$.
+- $SE=0.5883/\sqrt{40}=0.0930$.
+- $t_{0.975,39}=2.023$; interval $[0.062,\,0.438]$.
+- A row bootstrap (10,000 resamples, seed 15) gives the percentile interval $[0.075,\,0.425]$.
 
-*Step 3 — the block interval.* Squared deviations of the block effects from 0.25 sum to 2.0, so $s_b=\sqrt{2.0/9}=0.4714$ and $SE=0.4714/\sqrt{10}=0.1491$. With $t_{0.975,9}=2.262$ the half-width is $2.262\times0.1491=0.337$ and the interval is $0.25\pm0.337=[-0.087,\,0.587]$. A block bootstrap (10,000 resamples, seed 15) gives $[-0.025,\,0.525]$. The exact bootstrap standard deviations are $0.1414$ for blocks and $0.0919$ for rows.
+*Step 3 — the block interval.*
+- Squared deviations of the block effects from 0.25 sum to 2.0.
+- $s_b=\sqrt{2.0/9}=0.4714$.
+- $SE=0.4714/\sqrt{10}=0.1491$.
+- With $t_{0.975,9}=2.262$, half-width $=2.262\times0.1491=0.337$.
+- Interval: $0.25\pm0.337=[-0.087,\,0.587]$.
+- A block bootstrap (10,000 resamples, seed 15) gives $[-0.025,\,0.525]$.
+- The exact bootstrap standard deviations are $0.1414$ for blocks and $0.0919$ for rows.
 
-*Step 4 — why they differ.* The block standard error is $0.1491/0.0930=1.60$ times the row standard error, a variance ratio of 2.57 ($1.60^2$). Read through Lesson 15.1, this ratio plays the role of an observed design effect: $1+(4-1)\rho=2.57$ would mean $\rho\approx0.52$. That is only an analogy, since the 15.1 model assumes one shared $\rho$. Users are either helped on most tasks or not at all, so four rows from one user are far from four independent rows.
+*Step 4 — why they differ.*
+- The block standard error is $0.1491/0.0930=1.60$ times the row standard error, a variance ratio of 2.57 ($1.60^2$).
+- Read through Lesson 15.1, this ratio plays the role of an observed design effect: $1+(4-1)\rho=2.57$ would mean $\rho\approx0.52$.
+- That is only an analogy, since the 15.1 model assumes one shared $\rho$.
+- Users are either helped on most tasks or not at all, so four rows from one user are far from four independent rows.
 
 *Step 5 — primary gate.* Block interval: $L=-0.087<0.05$, so the gate does not pass; $U=0.587\ge0.05$, so it is not refuted. **Undetermined.** The row interval would have passed it ($0.062\ge0.05$).
 
-*Step 6 — critical-slice gate.* T4 has one row per user: $(+1,0,0,0,0,0,0,0,-1,-1)$. Mean $-0.10$, $s=\sqrt{2.9/9}=0.5676$, $SE=0.1795$, interval $[-0.506,\,0.306]$. $L<-0.05$ and $U\ge-0.05$. **Undetermined.** Cross-check: the discordant pairs are 1 positive and 2 negative, and an exact two-sided sign test gives $p=1.0$. (Ties, the seven zeros, are dropped; with 3 discordant pairs under a fair coin, the outcome 1-vs-2 is the most likely split, so every possible outcome is at least as extreme and $p=1$.)
+*Step 6 — critical-slice gate.* T4 has one row per user: $(+1,0,0,0,0,0,0,0,-1,-1)$.
+- Mean $-0.10$, $s=\sqrt{2.9/9}=0.5676$, $SE=0.1795$.
+- Interval $[-0.506,\,0.306]$.
+- $L<-0.05$ and $U\ge-0.05$: **Undetermined.**
+- Cross-check: the discordant pairs are 1 positive and 2 negative, and an exact two-sided sign test gives $p=1.0$.
+  - Ties (the seven zeros) are dropped.
+  - With 3 discordant pairs under a fair coin, the outcome 1-vs-2 is the most likely split, so every possible outcome is at least as extreme and $p=1$.
 
 *Step 7 — decision.* No gate is refuted and not every gate passes. **INCONCLUSIVE**, with a mean of +0.25.
 
-*Look and multiplicity arithmetic.* If two looks had been planned, each would use $\alpha/2$: $t_{0.9875,9}=2.685$ and the interval widens to $[-0.150,\,0.650]$. If five exploratory slices were scanned, each would use $t_{0.995,9}=3.250$, a half-width 1.44 times larger ($3.250/2.262$). Five independent reruns of a gate sitting at its threshold pass at least once with probability $1-0.975^5=0.119$; ten reruns, 0.224.
+*Look and multiplicity arithmetic.*
+- Two planned looks: each would use $\alpha/2$; $t_{0.9875,9}=2.685$ and the interval widens to $[-0.150,\,0.650]$.
+- Five exploratory slices scanned: each would use $t_{0.995,9}=3.250$, a half-width 1.44 times larger ($3.250/2.262$).
+- Reruns of a gate sitting at its threshold: five independent reruns pass at least once with probability $1-0.975^5=0.119$; ten reruns, 0.224.
 
 *Planning calculation.* Treat $s_b=0.4714$ as a pilot value and plan for $\delta=0.25$, $\epsilon=0.05$, $\alpha=0.05$, power 0.80:
 
 $$G\ge\left(\frac{(1.960+0.842)\times0.4714}{0.25-0.05}\right)^2=43.6\ \Rightarrow\ 44\text{ users}.$$
 
-Step-by-step: $1.960+0.842=2.802$; $2.802\times0.4714=1.321$; $1.321/0.20=6.604$; $6.604^2=43.6$; round up to 44.
+where:
+- $G$: required number of independent user blocks (users)
+- $1.960$, $0.842$: standard normal quantiles for two-sided $\alpha=0.05$ and power 0.80 (dimensionless)
+- $0.4714$: pilot block standard deviation (task-success difference units)
+- $0.25$, $0.05$: planning effect $\delta$ and practical threshold $\epsilon$ (task-success difference units)
 
-The answer is sensitive to the pilot: $s_b=0.35$ gives 25 users and $s_b=0.60$ gives 71. A planning effect of 0.15 gives 175.
+Step-by-step:
+- $1.960+0.842=2.802$
+- $2.802\times0.4714=1.321$
+- $1.321/0.20=6.604$
+- $6.604^2=43.6$; round up to 44.
 
-*Planning simulation (synthetic; seed 154; 20,000 replications; block effects drawn from a normal distribution with mean $\delta$ and standard deviation 0.4714; block t gate).* The primary gate passes with probability 0.223 at $G=10$, 0.788 at $G=44$, and 0.801 at $G=46$. With the true effect set to $\epsilon$, it passes with probability 0.024 to 0.025 at every $G$ tried. So the ten-user sample would have been inconclusive about three times in four even if the true effect were 0.25.
+Sensitivity to the pilot:
+- $s_b=0.35$ gives 25 users; $s_b=0.60$ gives 71.
+- A planning effect of 0.15 gives 175.
 
-*Coverage simulation (synthetic; seed 151; 5,000 replications; 4 rows per block; block effects normal with mean 0.25 and standard deviation 0.4; row noise normal with standard deviation 0.4, so $\rho=0.5$; 1,000 resamples per bootstrap).* Fraction of nominal 95% intervals that contain the true mean:
+*Planning simulation* (synthetic; seed 154; 20,000 replications; block effects drawn from a normal distribution with mean $\delta$ and standard deviation 0.4714; block t gate):
+- The primary gate passes with probability 0.223 at $G=10$, 0.788 at $G=44$, and 0.801 at $G=46$.
+- With the true effect set to $\epsilon$, it passes with probability 0.024 to 0.025 at every $G$ tried.
+- So the ten-user sample would have been inconclusive about three times in four even if the true effect were 0.25.
+
+*Coverage simulation* (synthetic; seed 151; 5,000 replications; 4 rows per block; block effects normal with mean 0.25 and standard deviation 0.4; row noise normal with standard deviation 0.4, so $\rho=0.5$; 1,000 resamples per bootstrap). Fraction of nominal 95% intervals that contain the true mean:
 
 | Blocks | Row bootstrap | Block bootstrap (percentile) | Block t |
 |---:|---:|---:|---:|
@@ -436,7 +717,12 @@ The answer is sensitive to the pilot: $s_b=0.35$ gives 25 users and $s_b=0.60$ g
 
 Monte Carlo error is about 0.003 near 0.95 and 0.006 near 0.76 (**D**, CLM-024).
 
-*Interpretation / limits.* A positive mean is not a release. Row resampling misses the truth about one time in four in this model, and more blocks do not repair it. The block bootstrap is the right resampling unit but still undercovers at ten blocks. The block t interval is near 95% here because the simulation draws normal block effects; R-15's block effects are bounded and discrete, so its interval is approximate. All numbers describe synthetic data and one simulation model.
+*Interpretation / limits.*
+- A positive mean is not a release.
+- Row resampling misses the truth about one time in four in this model, and more blocks do not repair it.
+- The block bootstrap is the right resampling unit but still undercovers at ten blocks.
+- The block t interval is near 95% here because the simulation draws normal block effects; R-15's block effects are bounded and discrete, so its interval is approximate.
+- All numbers describe synthetic data and one simulation model.
 
 **Knowledge Check:**
 1. Why can row bootstrap understate uncertainty for user-clustered data?
@@ -451,7 +737,17 @@ Fixture P-15 (synthetic) uses the same contract as R-15, with twelve users. Pair
 Compute the block effects, the block t interval, both gates, and the decision. Then compute the row-level interval and explain how it compares.
 
 **Feedback Contract:**
-- *Expected Output*: block effects $(0.5,0.5,0.75,0.25,0.5,0.25,0.25,0.5,0,0.5,0.25,0.5)$; $\hat\Delta=4.75/12=0.396$; $s_b=0.198$; $SE=0.0572$; $t_{0.975,11}=2.201$; interval $[0.270,\,0.522]$, so the primary gate **passes**. T4 has seven −1 and five 0: mean $-0.583$, $s=0.515$, $SE=0.149$, interval $[-0.911,\,-0.256]$; $U<-0.05$, so the critical-slice gate is **refuted**. Decision: **HOLD**, with a positive mean and a passing primary gate. The row interval is $[0.182,\,0.610]$, wider than the block interval, because here rows inside a user are negatively related (gains on T1–T3, losses on T4). Block analysis is the correct unit, not the wider one. Knowledge check 3: release needs the violated gate to pass, which has probability at most its own level; the cost is lower power.
+- *Expected Output*:
+  - Primary gate:
+    - Block effects $(0.5,0.5,0.75,0.25,0.5,0.25,0.25,0.5,0,0.5,0.25,0.5)$.
+    - $\hat\Delta=4.75/12=0.396$; $s_b=0.198$; $SE=0.0572$; $t_{0.975,11}=2.201$.
+    - Interval $[0.270,\,0.522]$, so the primary gate **passes**.
+  - Critical slice T4 (seven −1 and five 0):
+    - Mean $-0.583$, $s=0.515$, $SE=0.149$.
+    - Interval $[-0.911,\,-0.256]$; $U<-0.05$, so the critical-slice gate is **refuted**.
+  - Decision: **HOLD**, with a positive mean and a passing primary gate.
+  - The row interval is $[0.182,\,0.610]$, wider than the block interval, because here rows inside a user are negatively related (gains on T1–T3, losses on T4). Block analysis is the correct unit, not the wider one.
+  - Knowledge check 3: release needs the violated gate to pass, which has probability at most its own level; the cost is lower power.
 - *Typical Error*: reporting RELEASE because the mean is positive or because the primary gate passes; using $n=48$ rows in the t formula; averaging the T4 loss into the aggregate.
 - *Diagnostic Hint*: How many independent users are there? Which gate reads only T4? Which choices were made after seeing results?
 - *Concept to Revisit*: block effect and block interval; critical-slice gate; the three decision states.
@@ -475,20 +771,47 @@ When does an offline quality gain fail to improve offered-user utility under rea
 - **Online validity**: causal evidence that proxy changes transfer to user/business outcomes.
 
 **Mechanism Explanation:**
-Score offered work, not only completed successes. Keep timeouts, refusals, invalid output, retrieval/tool failure, retries, abandonment, and unfinished trajectories in explicit terminal classes (**D**, CLM-014). Conditioning quality on completion permits a weak system to improve by dropping hard cases.
+Score offered work, not only completed successes. Keep every offered request in an explicit terminal class (**D**, CLM-014):
+
+```mermaid
+flowchart LR
+    OFF["Offered request"] --> ACC["accepted"]
+    OFF --> TO["timeout"]
+    OFF --> RF["refusal"]
+    OFF --> INV["invalid output"]
+    OFF --> TF["retrieval/tool failure"]
+    OFF --> RT["retries"]
+    OFF --> AB["abandonment"]
+    OFF --> UF["unfinished trajectory"]
+    ACC --> OK{"quality, latency,<br/>cost within thresholds?"}
+    OK -->|"yes"| GOOD["counts toward goodput<br/>and offered success"]
+    OK -->|"no"| LATE["accepted but not good"]
+```
+
+Conditioning quality on completion permits a weak system to improve by dropping hard cases.
 
 For agents, preserve turn and trajectory success, attempts, tool effects, recovery, intervention, irreversible harm, and final state. A correct final answer reached after unauthorized or duplicate effects is not a successful trajectory.
 
-Offline scores are proxies. Shadowing, canaries, randomized A/B tests, or other causally credible designs must test whether they predict user and business outcomes under real traffic, latency, interaction, and feedback (**D**, CLM-013). State the assignment and exposure units, and check sample-ratio mismatch, interference, novelty, selection, and delayed outcomes.
+Offline scores are proxies (**D**, CLM-013):
+- Shadowing, canaries, randomized A/B tests, or other causally credible designs must test whether they predict user and business outcomes under real traffic, latency, interaction, and feedback.
+- State the assignment and exposure units.
+- Check sample-ratio mismatch, interference, novelty, selection, and delayed outcomes.
 
 **Quantitative Model / Derivation:**
 Join task quality with safety, latency, cost, and completion. A thresholded offered-request goodput is
 
-$$G=\frac{1}{T}\sum_i \mathbf{1}[q_i\ge q^*,\ l_i\le l^*,\ c_i\le c^*,\ terminal_i=accepted],$$
+$$G=\frac{1}{T}\sum_i \mathbf{1}[q_i\ge q^*,\ l_i\le l^*,\ c_i\le c^*,\ t_i=\text{accepted}],$$
 
-with units of useful accepted requests per time.
+where:
+- $G$: goodput (useful accepted requests per second); not the block count $G$ of Lesson 15.4
+- $T$: observation window length (s); not the tie count of Lesson 15.3
+- $i$: ranges over all offered requests in that window
+- $q_i,l_i,c_i$: request $i$'s quality (metric units), latency (s), and cost (currency)
+- $q^*,l^*,c^*$: the declared thresholds, same units
+- $t_i$: request $i$'s terminal class (categorical)
+- $\mathbf{1}[\cdot]$: 1 if every condition holds, 0 otherwise
 
-where $T$ is the observation window length, $i$ ranges over all offered requests in that window, $q_i,l_i,c_i$ are request $i$'s quality, latency, and cost, $q^*,l^*,c^*$ are the declared thresholds, $terminal_i$ is its terminal class, and $\mathbf{1}[\cdot]$ is 1 if every condition holds and 0 otherwise. Here $G$ means goodput, not the block count $G$ of Lesson 15.4, and $T$ means time, not the tie count of Lesson 15.3. Dividing the same count by the number of offered requests instead of $T$ gives the offered success rate. Thresholds are workload decisions; show sensitivity and the quality–latency–cost frontier.
+Dividing the same count by the number of offered requests instead of $T$ gives the offered success rate. Thresholds are workload decisions; show sensitivity and the quality–latency–cost frontier.
 
 **Worked Example (synthetic):**
 - *Input*: in 100 s, 50 requests are offered. 30 accepted outcomes satisfy the quality, latency, and cost thresholds; 8 time out; 4 refuse; 3 fail tools; 5 remain unfinished.
@@ -503,10 +826,21 @@ where $T$ is the observation window length, $i$ ranges over all offered requests
 2. Why can user-level assignment be required for an interactive product?
 
 **Guided Practice:**
-(a) In 200 s, 80 requests are offered: 52 accepted and within thresholds, 10 accepted but late, 6 timeouts, 5 refusals, 4 tool failures, 3 unfinished. Compute goodput, offered success, and quality conditioned on the 62 accepted outcomes. (b) Build an offered-outcome ledger and an online validation plan specifying assignment, exposure, guardrails, sample-ratio checks, interference, and delayed effects.
+(a) In 200 s, 80 requests are offered:
+- 52 accepted and within thresholds; 10 accepted but late;
+- 6 timeouts, 5 refusals, 4 tool failures, 3 unfinished.
+
+Compute goodput, offered success, and quality conditioned on the 62 accepted outcomes.
+
+(b) Build an offered-outcome ledger and an online validation plan specifying assignment, exposure, guardrails, sample-ratio checks, interference, and delayed effects.
 
 **Feedback Contract:**
-- *Expected Output*: (a) goodput $=52/200=0.26$/s; offered success $=52/80=0.65$; conditional $=52/62=0.839$. The terminal classes sum to 80. (b) All terminal classes, trajectory effects, thresholds, sensitivity, assignment integrity, and offline/online deltas by slice. Knowledge check 2: one user's sessions share state and learning, so request-level assignment mixes treatments inside a user.
+- *Expected Output*:
+  - (a) Rates (the terminal classes sum to 80):
+    - Goodput: $52/200=0.26$/s.
+    - Offered success: $52/80=0.65$.
+    - Conditional: $52/62=0.839$.
+  - (b) All terminal classes, trajectory effects, thresholds, sensitivity, assignment integrity, and offline/online deltas by slice. Knowledge check 2: one user's sessions share state and learning, so request-level assignment mixes treatments inside a user.
 - *Typical Error*: counting only final successes, reporting 0.839 as the success rate, or treating an offline proxy as causal proof.
 - *Diagnostic Hint*: Which offered users disappeared from the denominator?
 - *Concept to Revisit*: offered denominator and offline-to-online validity.
@@ -529,18 +863,54 @@ How should evaluation run as versioned infrastructure whose cost, coverage, drif
 - **Unique defect yield**: adjudicated failures found by a stage and by no other stage.
 
 **Mechanism Explanation:**
-Use a staged funnel: deterministic unit/contract checks, sampled regression suites, adversarial and slice suites, grader/human audits, shadow/canary, and controlled online evidence. Measure each stage's cost, latency, rerun variance, unique defects, overlap, false blocks, and escaped incidents. The claim that staging lowers cost and escapes is a hypothesis to test, not a guarantee (**H**, CLM-016).
+Use a staged funnel:
 
-An immutable run manifest includes dataset/slice hashes, item/root request IDs, model/system/policy/harness/grader revisions, prompts and generation settings, all attempts, raw and normalized outputs, grades, timing, token/cost data, exclusions, terminal states, and environment.
+```mermaid
+flowchart LR
+    S1["Deterministic<br/>unit/contract checks"] --> S2["Sampled<br/>regression suites"] --> S3["Adversarial and<br/>slice suites"] --> S4["Grader/human<br/>audits"] --> S5["Shadow/canary"] --> S6["Controlled<br/>online evidence"]
+```
 
-**Production source trace.** At EleutherAI `lm-evaluation-harness` revision `d6de81643928d653435c431bae19945d41d32520`, `simple_evaluate` loads tasks through `TaskManager.load` and delegates to `evaluate`. `evaluate` calls `task.build_all_requests`, dispatches each request type with `getattr(lm, reqtype)`, calls `task.process_results` per document, and hands the per-document metrics to `_process_results` for aggregation (**O**, CLM-015). The task API exposes `build_all_requests`, `construct_requests`, `process_results`, `aggregation`, and `higher_is_better`. This is static inspection of one pinned implementation, not the definition of evaluation engineering.
+- Measure each stage's cost, latency, rerun variance, unique defects, overlap, false blocks, and escaped incidents.
+- The claim that staging lowers cost and escapes is a hypothesis to test, not a guarantee (**H**, CLM-016).
 
-**One tool's default is not this module's interval.** At the same revision, `simple_evaluate` and `evaluate` default to `bootstrap_iters=100000`. `stderr_for_metric` maps the `mean` aggregation to `mean_stderr`, the sample standard deviation over per-document values divided by $\sqrt n$. For a listed set of other metrics it uses `bootstrap_stderr`, which resamples per-document values with `rnd.choices(xs, k=len(xs))` (**O**, CLM-018). Both treat documents as independent and unpaired; there is no block key. A harness-reported `_stderr` therefore answers a different question from Lesson 15.4. Export per-document results and compute paired block effects yourself.
+An immutable run manifest includes:
+- dataset/slice hashes; item/root request IDs;
+- model/system/policy/harness/grader revisions;
+- prompts and generation settings;
+- all attempts; raw and normalized outputs; grades;
+- timing, token/cost data;
+- exclusions, terminal states, and environment.
+
+**Production source trace.** At EleutherAI `lm-evaluation-harness` revision `d6de81643928d653435c431bae19945d41d32520` (**O**, CLM-015):
+
+```mermaid
+flowchart TD
+    SE["simple_evaluate"] --> TM["TaskManager.load<br/>(load tasks)"]
+    SE --> EV["evaluate"]
+    EV --> BR["task.build_all_requests"]
+    BR --> DIS["dispatch per request type<br/>getattr(lm, reqtype)"]
+    DIS --> PR["task.process_results<br/>(per document)"]
+    PR --> AGG["_process_results<br/>(aggregation)"]
+```
+
+- The task API exposes `build_all_requests`, `construct_requests`, `process_results`, `aggregation`, and `higher_is_better`.
+- This is static inspection of one pinned implementation, not the definition of evaluation engineering.
+
+**One tool's default is not this module's interval.** At the same revision (**O**, CLM-018):
+- `simple_evaluate` and `evaluate` default to `bootstrap_iters=100000`.
+- `stderr_for_metric` maps the `mean` aggregation to `mean_stderr`, the sample standard deviation over per-document values divided by $\sqrt n$.
+- For a listed set of other metrics it uses `bootstrap_stderr`, which resamples per-document values with `rnd.choices(xs, k=len(xs))`.
+- Both treat documents as independent and unpaired; there is no block key.
+
+A harness-reported `_stderr` therefore answers a different question from Lesson 15.4. Export per-document results and compute paired block effects yourself.
 
 JudgeArena (2026) is frontier work on making judge, benchmark, prompt, inference backend, and metadata swappable and logged (**O**, CLM-017; abstract-level). It does not remove the need to validate the judge or reproduce performance claims.
 
 **Quantitative Model / Trade-off Comparison:**
-A stage is not justified by case count alone. For each stage report cost per run, defects found, unique defects, severity of the unique defects, false blocks, and escaped incidents. Compare cost per unique consequential defect under a predeclared decision rule. Early detection has separate value: a defect caught by a cheap early stage avoids the cost of running later stages on a broken build.
+A stage is not justified by case count alone.
+- For each stage report cost per run, defects found, unique defects, severity of the unique defects, false blocks, and escaped incidents.
+- Compare cost per unique consequential defect under a predeclared decision rule.
+- Early detection has separate value: a defect caught by a cheap early stage avoids the cost of running later stages on a broken build.
 
 **Worked Example (synthetic):**
 - *Input*:
@@ -564,7 +934,11 @@ A stage is not justified by case count alone. For each stage report cost per run
 Run one immutable manifest through task loading, request construction, dispatch, per-document processing, aggregation, and metadata capture; inject one change at a time. Then recompute the uncertainty of one metric at block level and compare it with the harness-reported standard error.
 
 **Feedback Contract:**
-- *Expected Output*: a versioned run, complete attempts, stage costs, unique/overlap defects, false blocks, escapes, and the source trace. A two-line comparison of harness standard error and block-level standard error with the block key named. Knowledge check 1: grader revision, judge prompt hash, and parser version differ while model and dataset hashes match. Knowledge check 3: the document.
+- *Expected Output*:
+  - A versioned run, complete attempts, stage costs, unique/overlap defects, false blocks, escapes, and the source trace.
+  - A two-line comparison of harness standard error and block-level standard error with the block key named.
+  - Knowledge check 1: grader revision, judge prompt hash, and parser version differ while model and dataset hashes match.
+  - Knowledge check 3: the document.
 - *Typical Error*: changing data or graders invisibly between runs, or quoting a harness standard error as a paired release interval.
 - *Diagnostic Hint*: What is the earliest differing manifest field? Which column of your per-document export is the block key?
 - *Concept to Revisit*: run manifest; independent unit (Lesson 15.1).
@@ -607,20 +981,37 @@ These follow from stated assumptions (**D**, CLM-001, CLM-003, CLM-004, CLM-008,
 
 **FRONTIER** (each scoped to what was read)
 
-- [LiveBench](https://arxiv.org/abs/2406.19314) — White et al., ICLR 2025 (arXiv v2 comment: "ICLR 2025 Spotlight"). Abstract re-opened 2026-11-09; the earlier ICLR proceedings link was unreachable. Frequently updated questions from recent sources, objective ground-truth scoring, and varied tasks (**O**, CLM-012). No result figure from it is used here.
-- [JudgeArena](https://arxiv.org/abs/2608.02620) — Lushtaku et al., 2026, arXiv v1. Abstract-level, opened 2026-10-01. One interface over several judge benchmarks with swappable judges and metadata logging (**O**, CLM-017). Its claims about tuned open judges are author-reported and not reproduced; its adoption is unknown.
+- [LiveBench](https://arxiv.org/abs/2406.19314) — White et al., ICLR 2025 (arXiv v2 comment: "ICLR 2025 Spotlight"). Abstract re-opened 2026-11-09; the earlier ICLR proceedings link was unreachable.
+  - *Scope*: frequently updated questions from recent sources, objective ground-truth scoring, and varied tasks (**O**, CLM-012). No result figure from it is used here.
+- [JudgeArena](https://arxiv.org/abs/2608.02620) — Lushtaku et al., 2026, arXiv v1. Abstract-level, opened 2026-10-01.
+  - *Scope*: one interface over several judge benchmarks with swappable judges and metadata logging (**O**, CLM-017). Its claims about tuned open judges are author-reported and not reproduced; its adoption is unknown.
 - The wider 2025–2026 landscape of evaluation-statistics tooling and sequential release testing was not surveyed (`TODO_VERIFY`, CLM-025).
 
 Neither frontier source proves zero contamination or universally valid automated judging.
 
-**LEGACY / INSUFFICIENT:** one static benchmark as product quality; one mean without uncertainty; success-only scoring; independent tests on paired items; rows-as-independent for repeated turns; tag frequencies used as weights for overlapping slices; judge self-scoring without calibration; forced-choice without ties; changing prompts/graders invisibly; tuning repeatedly on the test set; one weighted score that offsets critical harm.
+**LEGACY / INSUFFICIENT:**
+- one static benchmark as product quality;
+- one mean without uncertainty;
+- success-only scoring;
+- independent tests on paired items;
+- rows-as-independent for repeated turns;
+- tag frequencies used as weights for overlapping slices;
+- judge self-scoring without calibration;
+- forced-choice without ties;
+- changing prompts/graders invisibly;
+- tuning repeatedly on the test set;
+- one weighted score that offsets critical harm.
 
 **PRODUCTION SOURCE TRACE**
 
 - Repository: `EleutherAI/lm-evaluation-harness`
 - Revision: `d6de81643928d653435c431bae19945d41d32520`
 - Verified: 2026-09-26; files and symbols below re-read at this revision on 2026-10-01. Static inspection only; nothing was executed.
-- Files/symbols: `lm_eval/evaluator.py::{simple_evaluate,evaluate}`; `lm_eval/api/task.py::Task.{build_all_requests,construct_requests,process_results,aggregation,higher_is_better}`; `lm_eval/evaluator_utils.py::_compute_task_aggregations`; `lm_eval/api/metrics.py::{stderr_for_metric,mean_stderr,bootstrap_stderr}`.
+- Files/symbols:
+  - `lm_eval/evaluator.py::{simple_evaluate,evaluate}`
+  - `lm_eval/api/task.py::Task.{build_all_requests,construct_requests,process_results,aggregation,higher_is_better}`
+  - `lm_eval/evaluator_utils.py::_compute_task_aggregations`
+  - `lm_eval/api/metrics.py::{stderr_for_metric,mean_stderr,bootstrap_stderr}`.
 - Path: task loading/configuration → instance construction → request dispatch → per-document results → aggregation, standard error, and run metadata.
 
 ### LAYER 2: ENGINEERING PRACTICE LAYER
@@ -669,10 +1060,16 @@ All labs follow `PREDICT → BUILD → MEASURE → EXPLAIN → BREAK → IMPROVE
 
 - Compare two system revisions on shared independent blocks with block effects, a block t interval, and a block bootstrap.
 - Add stochastic repeats without pretending they are new items; exercise improvement, noninferiority, critical-slice gates, and the all-must-pass rule.
-- **Required test**: (i) reproduce the R-15 numbers in Lesson 15.4 from the table; (ii) on seeded clustered data, report row and block intervals side by side; (iii) produce one positive-mean case that is INCONCLUSIVE and one that is HOLD; (iv) run a planning calculation and check it with a seeded simulation.
+- **Required test**:
+  - (i) reproduce the R-15 numbers in Lesson 15.4 from the table;
+  - (ii) on seeded clustered data, report row and block intervals side by side;
+  - (iii) produce one positive-mean case that is INCONCLUSIVE and one that is HOLD;
+  - (iv) run a planning calculation and check it with a seeded simulation.
 - Break the gate with unpaired analysis, tiny slices, metric shopping, rerun-until-pass, aggregate compensation, and success-only deletion.
 - Artifact: **Release Decision Record** — predeclared contract, block effects, intervals with method and seed, each gate's state, the decision, the planning inputs, and the look log.
-- **Break & Falsify**: Use tiny slices, metric shopping, rerun-until-pass, aggregate compensation, and success-only deletion; any undeclared selection that passes exposes an invalid gate. If row and block intervals agree on the seeded clustered data, the hypothesis is falsified for that seed and the correlation must be reported.
+- **Break & Falsify**:
+  - Use tiny slices, metric shopping, rerun-until-pass, aggregate compensation, and success-only deletion; any undeclared selection that passes exposes an invalid gate.
+  - If row and block intervals agree on the seeded clustered data, the hypothesis is falsified for that seed and the correlation must be reported.
 - **Alignment**: Lesson 15.4.
 - **Effort Estimate**: 2h implementation, 1h analysis (3h total).
 
@@ -759,7 +1156,10 @@ Reviewers use these to check arithmetic. A submission on other data is checked a
 ### Rubric Dimensions
 
 - **Validity and Population** (Deliverables 1–2): *Insufficient* reports a score, or weights overlapping slices. *Competent* defines construct, population, unit, estimator, and decision, and counts each item once. *Strong* proves lineage, weighting, dependence, slices, and shift limitations.
-- **Graders and Statistics** (Deliverables 3–4): *Insufficient* trusts a judge or a mean, resamples rows, or releases on a positive mean. *Competent* calibrates graders, reports block-level paired intervals, and applies the three-state rule with predeclared thresholds. *Strong* also handles multiplicity and looks, shows planning sensitivity, and states where the interval is approximate.
+- **Graders and Statistics** (Deliverables 3–4):
+  - *Insufficient* trusts a judge or a mean, resamples rows, or releases on a positive mean.
+  - *Competent* calibrates graders, reports block-level paired intervals, and applies the three-state rule with predeclared thresholds.
+  - *Strong* also handles multiplicity and looks, shows planning sensitivity, and states where the interval is approximate.
 - **Accounting and Transfer** (Deliverables 5, 7): *Insufficient* scores successes only. *Competent* retains failures/cost/latency/effects and plans guarded online validation. *Strong* verifies assignment integrity and explains offline-online divergence.
 - **Operations and Diagnosis** (Deliverables 6, 8): *Insufficient* changes fixtures invisibly. *Competent* versions the pipeline and source trace. *Strong* measures unique yield, false blocks, escapes, and discriminating remeasurement.
 

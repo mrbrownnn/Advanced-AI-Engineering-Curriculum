@@ -2,23 +2,41 @@
 
 ## 00 Why This Module Exists
 
-Retrieval is not “vector search.” It is a staged decision system that converts a query into a bounded candidate set under corpus, relevance, filter, latency, and capacity constraints. A relevant document can be lost by analysis, representation, approximate search, filtering, fusion, truncation, or reranking; the same missing result can therefore have several competing causes.
+Retrieval is not “vector search.” It is a staged decision system that converts a query into a bounded candidate set under corpus, relevance, filter, latency, and capacity constraints.
+- A relevant document can be lost by analysis, representation, approximate search, filtering, fusion, truncation, or reranking.
+- The same missing result can therefore have several competing causes.
 
-$$
-\text{query}\to\text{analyze/embed}\to\text{candidate branches}
-\to\text{filter/fuse}\to\text{rerank}\to\text{top-}k.
-$$
+```mermaid
+flowchart LR
+    Q["query"] --> A["analyze / embed"] --> C["candidate branches"] --> F["filter / fuse"] --> R["rerank"] --> K["top-k"]
+```
+- Legend: k: result-list cutoff (items).
 
-*Notation note.* The letter $k$ is overloaded in retrieval. In this module, $k$ alone (top-$k$, Recall@$k$, nDCG@$k$) is the result-list cutoff; $k_1$ is the BM25 saturation parameter; the RRF paper's constant (also written $k$ there) is renamed $c$ here; and Lucene's "per-leaf $k$" is the number of hits requested from one index segment. Likewise $c$ in Lesson 9.3 (the popped HNSW candidate) is unrelated to the RRF constant $c$ in Lesson 9.4.
+*Notation note.* The letter $k$ is overloaded in retrieval:
+- $k$ alone (top-$k$, Recall@$k$, nDCG@$k$) is the result-list cutoff.
+- $k_1$ is the BM25 saturation parameter.
+- The RRF paper's constant (also written $k$ there) is renamed $c$ here.
+- Lucene's "per-leaf $k$" is the number of hits requested from one index segment.
+- Likewise $c$ in Lesson 9.3 (the popped HNSW candidate) is unrelated to the RRF constant $c$ in Lesson 9.4.
 
-This module covers lexical and dense retrieval, exact and approximate nearest neighbors, HNSW, hybrid fusion, reranking, late interaction, metrics, and latency–quality trade-offs. Document ingestion and lineage belong to Module 08. Query rewriting, generation, citations, freshness orchestration, and RAG failure handling belong to Module 10.
+This module covers lexical and dense retrieval, exact and approximate nearest neighbors, HNSW, hybrid fusion, reranking, late interaction, metrics, and latency–quality trade-offs.
+- Document ingestion and lineage belong to Module 08.
+- Query rewriting, generation, citations, freshness orchestration, and RAG failure handling belong to Module 10.
 
-**Research cutoff:** 2026-09-27 for the original revision. Sources added in the 2026-09-30 revision (IDF conventions, HNSW Algorithm 2, MaxSim, RRF constants, frontier items) were searched through 2026-09-30, and the pinned Lucene files were re-read on 2026-09-30. Claims not listed as changed in the registry were not re-verified.
+**Research cutoff:** 2026-09-27 for the original revision.
+- Sources added in the 2026-09-30 revision (IDF conventions, HNSW Algorithm 2, MaxSim, RRF constants, frontier items) were searched through 2026-09-30, and the pinned Lucene files were re-read on 2026-09-30.
+- Claims not listed as changed in the registry were not re-verified.
 
 **Module Orientation**
 
 - **Engineering problem:** maximize useful relevance under filter correctness, tail latency, memory, update, and capacity constraints.
-- **What you will do:** implement lexical and exact-dense baselines; quantify representation and approximation loss separately; tune HNSW under selective filters; build hybrid fusion and bounded reranking; measure judgment and service trade-offs; trace Lucene source; and diagnose a loaded retrieval regression.
+- **What you will do:** implement lexical and exact-dense baselines;
+  - quantify representation and approximation loss separately;
+  - tune HNSW under selective filters;
+  - build hybrid fusion and bounded reranking;
+  - measure judgment and service trade-offs;
+  - trace Lucene source;
+  - and diagnose a loaded retrieval regression.
 - **Environment:** Python 3.10+ for experiment orchestration and analysis, plus a pinned search engine or ANN implementation and a versioned corpus/query/judgment set. Record index hardware, build/search parameters, concurrency, filters, and cache state.
 - **Evidence rule:** separate source observations (**O**), derivations (**D**), and telemetry-dependent hypotheses (**H**). Paper gains remain scoped to model, corpus, queries, judgments, index, hardware, and baseline.
 - **If You Only Have One Week**: Lessons 9.1, 9.3, 9.6 — they cover the lexical baseline, exact-versus-ANN loss under filters, and judged quality against latency; dense encoders, fusion, reranking, and adaptation build on those three.
@@ -68,22 +86,24 @@ The learner must be able to implement strong lexical/dense baselines, isolate en
 
 ## 03 Knowledge Map
 
-```text
-query + corpus snapshot + relevance/filter contract
-        |                         |
-        | lexical analyzer       | query encoder
-        v                         v
-   BM25 candidate list      vector candidate list
-                                  |
-                         exact kNN or ANN/HNSW
-        \_________________________/
-                    |
-              identity + fusion
-                    |
-             reranker/late interaction
-                    |
-        ranked results + complete stage trace
+```mermaid
+flowchart TD
+    IN["<b>Inputs</b><br/>query + corpus snapshot + relevance/filter contract"]
+    BM25["BM25 candidate list"]
+    VEC["vector candidate list"]
+    KNN["exact kNN or ANN/HNSW"]
+    FUSE["<b>Identity + fusion</b>"]
+    RR["<b>Reranker / late interaction</b>"]
+    OUT["ranked results + complete stage trace"]
+
+    IN -- "lexical analyzer" --> BM25
+    IN -- "query encoder" --> VEC
+    VEC --> KNN
+    BM25 --> FUSE
+    KNN --> FUSE
+    FUSE --> RR --> OUT
 ```
+- Legend: BM25: lexical scoring baseline; kNN: k-nearest neighbors; ANN: approximate nearest neighbors; HNSW: hierarchical navigable small-world graph.
 
 Keep three loss boundaries separate:
 
@@ -91,7 +111,15 @@ Keep three loss boundaries separate:
 2. **Approximation/filter loss:** ANN differs from exact search under the same vectors and filters.
 3. **Selection/system loss:** fusion, reranking, truncation, latency, or capacity changes the delivered list.
 
-Adaptation loop: held-out query boundary → positive/negative construction → contrastive or teacher-margin update → corpus re-encoding → exact-search evaluation → ANN and reranking release checks. Lesson 9.7 changes representation and supervision, not the definition of ANN recall.
+Adaptation loop:
+
+```mermaid
+flowchart LR
+    H["Held-out query<br/>boundary"] --> P["Positive / negative<br/>construction"] --> U["Contrastive or<br/>teacher-margin update"] --> E["Corpus<br/>re-encoding"] --> X["Exact-search<br/>evaluation"] --> R["ANN and reranking<br/>release checks"]
+```
+- Legend: ANN: approximate nearest-neighbor search.
+
+Lesson 9.7 changes representation and supervision, not the definition of ANN recall.
 
 ## 04 Lessons
 
@@ -134,13 +162,20 @@ where:
 
 Small check with this module's constants ($k_1=1.2$, $b=0.75$) at $|d|=avgdl$, so $K=1.2$: $f=1$ gives $2.2/2.2=1.0$, $f=2$ gives $4.4/3.2=1.375$, $f=10$ gives $22/11.2=1.964$, all below the ceiling $k_1+1=2.2$.
 
-At the pinned commit, Lucene's scorer computes $\text{boost}\cdot IDF\cdot \frac{f}{f+k_1(1-b+b\,|d|/avgdl)}$, without the $(k_1+1)$ factor. That constant does not change rankings for a fixed $k_1$, but it changes absolute scores. Lucene also stores $|d|$ in a lossy one-byte norm, so its scores can differ slightly from a hand calculation (**O**, CLM-013).
+At the pinned commit, Lucene's scorer computes $\text{boost}\cdot IDF\cdot \frac{f}{f+k_1(1-b+b\,|d|/avgdl)}$, without the $(k_1+1)$ factor.
+- That constant does not change rankings for a fixed $k_1$, but it changes absolute scores.
+- Lucene also stores $|d|$ in a lossy one-byte norm, so its scores can differ slightly from a hand calculation (**O**, CLM-013).
 
 **Mechanism Explanation:**
 
 The formula is incomplete without analyzer, token positions/overlaps, fields/boosts, corpus statistics, query construction, $k_1$, and $b$. Stemming, stopwords, Unicode normalization, synonyms, and index/query analyzer mismatch can dominate tuning.
 
-**Break cases:** product codes split incorrectly; language-specific tokenization; a corpus refresh changes IDF; synonyms expand only one side; long templated documents receive unintended length penalties.
+**Break cases:**
+- product codes split incorrectly;
+- language-specific tokenization;
+- a corpus refresh changes IDF;
+- synonyms expand only one side;
+- long templated documents receive unintended length penalties.
 
 **Worked Example (synthetic four-document fixture):**
 *Input.* The query is `xj-200 firmware`, with $k_1=1.2$ and $b=0.75$, natural logarithms, and the $(k_1+1)$ form above.
@@ -152,14 +187,39 @@ The formula is incomplete without analyzer, token positions/overlaps, fields/boo
 | d3 | xj-200 warranty |
 | d4 | printer 200 dpi setup guide |
 
-*Steps with analyzer K (lowercase, split on whitespace only).* Lengths are $(4,7,2,5)$, so $avgdl=4.5$. The query terms are `xj-200` ($n=2$) and `firmware` ($n=2$). Lucene IDF is $\ln(1+2.5/2.5)=\ln2=0.6931$ for both. For d1: norm $=1.2(0.25+0.75\cdot4/4.5)=1.1$, tf part $=1\cdot2.2/(1+1.1)=1.0476$, so each term contributes $0.7262$ and the total is $1.4523$. Likewise d3 $=0.8970$ (norm 0.70), d2 $=0.5648$ (norm 1.70), and d4 $=0$.
-Here "norm" is $K=k_1(1-b+b|d|/avgdl)$ and $1-b=0.25$. Expanded: d3 has only `xj-200` with $f=1$, norm $=1.2(0.25+0.75\cdot2/4.5)=0.70$, tf part $=2.2/1.70=1.2941$, score $=0.6931\cdot1.2941=0.8970$. d2 has only `firmware` with $f=1$, norm $=1.2(0.25+0.75\cdot7/4.5)=1.70$, tf part $=2.2/2.70=0.8148$, score $=0.6931\cdot0.8148=0.5648$. d4 contains neither query term, so it scores 0. The shorter d3 beats the longer d2 because both match one term with the same IDF, and only the length normalization differs.
+*Steps with analyzer K (lowercase, split on whitespace only).* Here "norm" is $K = k_1(1 - b + b\,|d|/\bar{d})$ with $1 - b = 0.25$, and $\bar d$ is the average document length.
+- Lengths $(4, 7, 2, 5)$, so $\bar d = 4.5$.
+- Query terms: `xj-200` ($n=2$) and `firmware` ($n=2$).
+- Lucene IDF for both: $\ln(1 + 2.5/2.5) = \ln 2 = 0.6931$.
+- d1 (both terms, $f=1$):
+  - Norm: $1.2(0.25 + 0.75 \times 4/4.5) = 1.1$.
+  - tf part: $1 \times 2.2/(1 + 1.1) = 1.0476$.
+  - Each term contributes $0.7262$; total $1.4523$.
+- d3 (only `xj-200`, $f=1$):
+  - Norm: $1.2(0.25 + 0.75 \times 2/4.5) = 0.70$.
+  - tf part: $2.2/1.70 = 1.2941$.
+  - Score: $0.6931 \times 1.2941 = 0.8970$.
+- d2 (only `firmware`, $f=1$):
+  - Norm: $1.2(0.25 + 0.75 \times 7/4.5) = 1.70$.
+  - tf part: $2.2/2.70 = 0.8148$.
+  - Score: $0.6931 \times 0.8148 = 0.5648$.
+- d4 contains neither query term, so it scores 0.
+- The shorter d3 beats the longer d2 because both match one term with the same IDF, and only the length normalization differs.
+
 Ranking: **d1 > d3 > d2 > d4**.
 
-*Steps with analyzer S (also split on `-`).* Now `xj-200` becomes `xj` and `200`. Lengths become $(5,7,3,5)$, so $avgdl=5.0$. The term `200` now also matches d4 ("200 dpi"), so $n_{200}=3$ and Lucene IDF $=\ln(1+1.5/3.5)=0.3567$. Totals: d1 $=1.7430$, d3 $=1.2552$, d2 $=0.5957$, d4 $=0.3567$.
+*Steps with analyzer S (also split on `-`).* Now `xj-200` becomes `xj` and `200`.
+- Lengths $(5, 7, 3, 5)$, so $\bar d = 5.0$.
+- The term `200` now also matches d4 ("200 dpi"), so $n_{200} = 3$ and Lucene IDF $= \ln(1 + 1.5/3.5) = 0.3567$.
+- Totals: d1 $= 1.7430$, d3 $= 1.2552$, d2 $= 0.5957$, d4 $= 0.3567$.
+
 d4 now scores through a coincidental match on `200`.
 
-*Same analyzer S, RSJ IDF instead of Lucene's.* With $N=4$, $n=2$ gives $\ln(2.5/2.5)=0$ and $n=3$ gives $\ln(1.5/3.5)=-0.8473$. Matching `200` now **lowers** a score. Totals: d2 $=0$, d1 $=-0.8473$, d4 $=-0.8473$, d3 $=-1.0131$.
+*Same analyzer S, RSJ IDF instead of Lucene's.* With $N=4$:
+- $n=2$ gives $\ln(2.5/2.5)=0$.
+- $n=3$ gives $\ln(1.5/3.5)=-0.8473$. Matching `200` now **lowers** a score.
+- Totals: d2 $=0$, d1 $=-0.8473$, d4 $=-0.8473$, d3 $=-1.0131$.
+
 Ranking: **d2 first**, the only document that does *not* contain the product code.
 
 *Result.* The analyzer changed the term inventory, $avgdl$, and the candidate set. The IDF convention reversed the ranking even with $k_1$ and $b$ held fixed.
@@ -171,7 +231,15 @@ Ranking: **d2 first**, the only document that does *not* contain the product cod
 **Guided Practice:** (a) With analyzer K and Lucene IDF, add document d5 = "xj-200 xj-200 manual" and recompute $n$, $avgdl$, IDF, and d1's score. (b) Reproduce one score from a real pinned index (term frequency, stored norm, corpus statistics, fields, analyzer output), then change one factor.
 
 **Feedback Contract:**
-- *Expected Evidence*: (a) $N=5$ and $avgdl=(4+7+2+5+3)/5=4.2$. $n_{xj\text{-}200}=3$, so IDF $=\ln(1+2.5/3.5)=0.5390$; $n_{firmware}=2$, so IDF $=\ln(1+3.5/2.5)=0.8755$. d1 norm $=1.2(0.25+0.75\cdot4/4.2)=1.1571$, tf part $=2.2/2.1571=1.0199$, so d1 $=1.0199(0.5390+0.8755)=1.4426$. (b) A pinned analyzer/index manifest and a score decomposition that matches the engine's explanation output within its norm quantization.
+- *Expected Evidence*:
+  - (a)
+    - $N=5$ and $avgdl=(4+7+2+5+3)/5=4.2$.
+    - $n_{xj\text{-}200}=3$, so IDF $=\ln(1+2.5/3.5)=0.5390$.
+    - $n_{firmware}=2$, so IDF $=\ln(1+3.5/2.5)=0.8755$.
+    - d1 norm $=1.2(0.25+0.75\cdot4/4.2)=1.1571$.
+    - tf part $=2.2/2.1571=1.0199$.
+    - d1 $=1.0199(0.5390+0.8755)=1.4426$.
+  - (b) A pinned analyzer/index manifest and a score decomposition that matches the engine's explanation output within its norm quantization.
 - *Common Failure*: Comparing BM25 parameters across different analyzers, mixing the RSJ and Lucene IDF forms, or ignoring Lucene's missing $(k_1+1)$ factor when matching absolute scores.
 - *Diagnostic Hint*: Print the analyzed tokens for the query and for the missing document before touching $k_1$ or $b$.
 - *Concept to Revisit*: IDF Convention; Analyzer as Semantic Input.
@@ -187,7 +255,9 @@ Did the representation fail, or did approximate search lose a useful vector resu
 
 **Concepts & Definitions:**
 
-Dense retrieval encodes query $q$ and document $d$ separately, then scores inner product, cosine, or distance. DPR establishes this mechanism for open-domain QA, not universal superiority over BM25 (**O**, CLM-002). Training positives/negatives, encoder version, pooling, normalization, dimension, chunking, domain, and similarity must match index and query paths.
+Dense retrieval encodes query $q$ and document $d$ separately, then scores inner product, cosine, or distance.
+- DPR establishes this mechanism for open-domain QA, not universal superiority over BM25 (**O**, CLM-002).
+- Training positives/negatives, encoder version, pooling, normalization, dimension, chunking, domain, and similarity must match index and query paths.
 
 **Mechanism Explanation:**
 
@@ -201,7 +271,9 @@ where $q,d\in\mathbb{R}^m$ are the query and document embeddings ($m$ is the emb
 2. With unit vectors, $\|q\|=\|d\|=1$, so $\|q-d\|^2=2-2\,q\cdot d$, and also $\cos(q,d)=q\cdot d$.
 3. $2-2x$ decreases as $x$ increases, and $\sqrt{\cdot}$ is increasing, so the smallest L2 distance is the largest inner product, which is the largest cosine: all three rankings coincide.
 4. Without normalization, step 1 keeps the term $\|d\|^2$, which varies by document. Inner product then rewards large $\|d\|$, L2 penalizes it, and cosine ignores it, so the three rankings can disagree (see the example check in the Feedback Contract below).
-5. For a fixed query, $\|q\|$ is the same for every document, so normalizing only the query never changes an inner-product or L2 ranking; what matters is whether the *document* vectors are normalized. First run exact vector search on a representative subset: if exact search misses relevance, increasing ANN effort cannot repair the encoder.
+5. For a fixed query, $\|q\|$ is the same for every document, so normalizing only the query never changes an inner-product or L2 ranking;
+   - what matters is whether the *document* vectors are normalized.
+  - First run exact vector search on a representative subset: if exact search misses relevance, increasing ANN effort cannot repair the encoder.
 
 **Worked Example:**
 Run exact search over the same normalized vectors and metric. If the relevant item is absent from exact top-$k$, raising HNSW search effort cannot repair that representation ranking.
@@ -211,7 +283,20 @@ Run exact search over the same normalized vectors and metric. If the relevant it
 **Guided Practice:** Cross normalized/unnormalized embeddings with cosine, inner product, and L2; record ranking changes and invalid combinations.
 
 **Feedback Contract:**
-- *Expected Evidence*: A pinned encoder/tokenizer/pooling/metric manifest plus exact ranks. Example check: query $(1,0)$, documents $a=(2,2)$ and $b=(0.9,0.1)$. Inner product ranks $a$ first ($2$ vs $0.9$). Cosine ranks $b$ first ($0.994$ vs $0.707$), and so does L2 ($0.141$ vs $2.236$). After unit-normalizing both documents, all three metrics rank $b$ first. Step-by-step: $\|a\|=\sqrt{8}=2.828$ and $\|b\|=\sqrt{0.82}=0.906$. Cosines are $2/2.828=0.707$ and $0.9/0.906=0.994$. L2 distances are $\sqrt{(2-1)^2+2^2}=\sqrt5=2.236$ and $\sqrt{0.1^2+0.1^2}=0.141$. Unit-normalized, $\hat a=(0.707,0.707)$ and $\hat b=(0.994,0.110)$; inner products equal the cosines ($0.707$, $0.994$), and $\|q-\hat d\|^2=2-2\,q\cdot\hat d$ gives $0.586$ and $0.012$ (distances $0.765$ and $0.111$), so $b$ wins under every metric.
+- *Expected Evidence*: A pinned encoder/tokenizer/pooling/metric manifest plus exact ranks.
+  - Example check: query $(1,0)$, documents $a=(2,2)$ and $b=(0.9,0.1)$.
+  - Inner product ranks $a$ first ($2$ vs $0.9$).
+  - Cosine ranks $b$ first ($0.994$ vs $0.707$), and so does L2 ($0.141$ vs $2.236$).
+  - After unit-normalizing both documents, all three metrics rank $b$ first.
+  - Step-by-step:
+    - $\|a\|=\sqrt{8}=2.828$.
+    - $\|b\|=\sqrt{0.82}=0.906$.
+    - Cosine for $a$: $2/2.828=0.707$.
+    - Cosine for $b$: $0.9/0.906=0.994$.
+    - L2 distance to $a$: $\sqrt{(2-1)^2+2^2}=\sqrt5=2.236$.
+    - L2 distance to $b$: $\sqrt{0.1^2+0.1^2}=0.141$.
+    - Unit-normalized: $\hat a=(0.707,0.707)$ and $\hat b=(0.994,0.110)$; inner products equal the cosines ($0.707$, $0.994$).
+    - $\|q-\hat d\|^2=2-2\,q\cdot\hat d$ gives $0.586$ and $0.012$ (distances $0.765$ and $0.111$), so $b$ wins under every metric.
 - *Common Failure*: Blaming ANN before exact comparison, or indexing normalized vectors while querying with unnormalized ones.
 - *Diagnostic Hint*: Is the missing item in the *exact* top-$k$ under the served metric? If not, the problem is upstream of the index.
 - *Concept to Revisit*: Representation vs Approximation Loss.
@@ -227,7 +312,8 @@ How do approximation, filters, updates, and graph-search budgets change delivere
 
 **Concepts & Definitions:**
 
-HNSW builds randomized hierarchical proximity graphs and searches from sparse upper layers toward a denser base (**O**, CLM-003). Construction connectivity/effort, search effort, vector distribution, distance, deletion/update policy, memory layout, and implementation produce a recall–latency–memory surface.
+HNSW builds randomized hierarchical proximity graphs and searches from sparse upper layers toward a denser base (**O**, CLM-003).
+- Construction connectivity/effort, search effort, vector distribution, distance, deletion/update policy, memory layout, and implementation produce a recall–latency–memory surface.
 
 The paper's layer search, Algorithm 2 `SEARCH-LAYER(q, ep, ef, l)`, keeps three structures (**O**, CLM-015):
 
@@ -235,7 +321,26 @@ The paper's layer search, Algorithm 2 `SEARCH-LAYER(q, ep, ef, l)`, keeps three 
 - **candidates $C$:** a frontier of nodes still to expand, nearest first;
 - **results $W$:** the best $ef$ nodes found so far.
 
-At each step it pops the nearest candidate $c$. If $c$ is farther than the farthest node in $W$, it **stops**. Otherwise it scores each unvisited neighbor $e$ and adds $e$ to both $C$ and $W$ if $e$ is closer than the farthest node in $W$ or $|W|<ef$, trimming $W$ back to $ef$. Upper layers run with $ef=1$ to find an entry point, and the base layer runs with the requested $ef$.
+Layer search follows this loop:
+
+```mermaid
+flowchart TD
+    POP["Pop nearest candidate c<br/>from C"] --> STOP{"c farther than<br/>farthest node in W?"}
+    STOP -- "yes" --> END["Stop search"]
+    STOP -- "no" --> SCORE["Score each unvisited<br/>neighbor e"]
+    SCORE --> ACCEPT{"e closer than farthest in W<br/>or size(W) &lt; ef?"}
+    ACCEPT -- "yes" --> ADD["Add e to C and W;<br/>trim W back to ef"]
+    ACCEPT -- "no" --> NEXT["Continue neighbors"]
+    ADD --> NEXT
+    NEXT --> MORE{"C nonempty?"}
+    MORE -- "yes" --> POP
+    MORE -- "no" --> END
+```
+- Legend: c: popped candidate; e: neighbor; C: frontier; W: best-result set; ef: search-effort bound (nodes).
+- $c$: popped HNSW candidate; $e$: unvisited neighbor.
+- $C$: candidate frontier; $W$: best-result set; $ef$: result-set/search-effort bound (node count).
+- Upper layers run with $ef=1$ to find an entry point; the base layer runs with the requested $ef$.
+- Neighbor processing is condensed in the diagram; every unvisited neighbor is scored before the next candidate pop.
 
 **Quantitative Model / Derivation:**
 
@@ -245,7 +350,14 @@ $$
 Recall^{ANN}@k=\frac{|A_k\cap E_k|}{|E_k|}.
 $$
 
-where $E_k$ is the set of $k$ items returned by exact (brute-force) search, $A_k$ is the set of $k$ items returned by the ANN index for the same query, and $|\cdot|$ counts set elements. Normally $|E_k|=k$, so the value is "how many of the true $k$ nearest neighbors the ANN index found, divided by $k$"; it ranges from 0 to 1, and order inside the top-$k$ is ignored. The search effort $ef$ in the algorithm above is a separate knob: $ef\ge k$ is needed to return $k$ results from the base layer.
+where:
+- $E_k$: set of $k$ items returned by exact (brute-force) search for the query
+- $A_k$: set of $k$ items returned by the ANN index for the same query
+- $k$: result-list cutoff (items)
+- $|\cdot|$: set cardinality (items)
+- $Recall^{ANN}@k$: recovered exact-neighbor fraction (dimensionless, 0–1); order inside top-$k$ is ignored
+
+Normally $|E_k|=k$: the value is how many of the true $k$ nearest neighbors the ANN index found, divided by $k$. Search effort $ef$ is a separate knob: $ef\ge k$ is needed to return $k$ results from the base layer.
 
 This measures approximation, not relevance (**D**, CLM-004). A system can have perfect ANN recall and poor retrieval relevance.
 
@@ -255,12 +367,31 @@ Filters complicate search. Prefiltering, integrated graph filtering, oversamplin
 - Per segment, if the filter admits at most the per-leaf $k$ documents, Lucene runs exact search directly.
 - Otherwise it runs approximate search with a visit limit of (filter cost + 1). If that limit is hit, or too few results come back, it falls back to exact search.
 
+```mermaid
+flowchart TD
+    F["Filter admits documents<br/>in one segment"] --> K{"Filter cost ≤ per-leaf k?"}
+    K -- "yes" --> E["Exact search"]
+    K -- "no" --> A["Approximate search<br/>visit limit = filter cost + 1"]
+    A --> L{"Visit limit hit<br/>or too few results?"}
+    L -- "yes" --> E
+    L -- "no" --> R["Return approximate results"]
+    E --> X["Return exact results"]
+```
+- Legend: k: requested hits per index segment.
+- Per-leaf $k$: hits requested from one index segment; ANN: approximate nearest-neighbor search. Scope is the pinned Lucene implementation, not all engines.
+
 Selective filters can therefore turn an ANN query into an exact scan, with a latency cost that depends on the filter. Measure exact filtered ground truth, visited nodes/candidates, fallback, tail latency, and concurrency. ACL correctness is a hard invariant, not a recall trade.
 
-Index lifecycle is part of correctness: insert, update, delete/tombstone, segment merge or graph rebuild, replica visibility, and rollback can temporarily diverge. Track query-visible revision and resource cost; “write accepted” does not establish that every serving replica uses the same candidate universe.
+Index lifecycle is part of correctness: insert, update, delete/tombstone, segment merge or graph rebuild, replica visibility, and rollback can temporarily diverge.
+- Track query-visible revision and resource cost;
+- “write accepted” does not establish that every serving replica uses the same candidate universe.
 
 **Worked Example (synthetic single-layer HNSW trace):**
-*Input.* Seven 2-D points: A(0,0), B(2,1), C(4,0), D(5,3), E(2,4), F(6,5), G(7,1). Undirected edges: A–B, A–E, B–C, B–E, C–G, D–E, D–F, D–G. The query is $q=(4,2)$, the entry point is A, and the distance is Euclidean. Distances to $q$: D 1.414, C 2.000, B 2.236, E 2.828, G 3.162, F 3.606, A 4.472. Exact top-2 is {D, C}.
+*Input.* Seven 2-D points: A(0,0), B(2,1), C(4,0), D(5,3), E(2,4), F(6,5), G(7,1).
+- Undirected edges: A–B, A–E, B–C, B–E, C–G, D–E, D–F, D–G.
+- The query is $q=(4,2)$, the entry point is A, and the distance is Euclidean.
+- Distances to $q$: D 1.414, C 2.000, B 2.236, E 2.828, G 3.162, F 3.606, A 4.472.
+- Exact top-2 is {D, C}.
 
 *Trace with $ef=1$.*
 
@@ -279,16 +410,24 @@ $C$ is empty, so the search ends with {C}, a local minimum. D is reachable only 
 
 *Result.* ANN recall@1 is $0/1$ at $ef=1$. ANN recall@2 is $|\{C,B\}\cap\{D,C\}|/2=0.5$ at $ef=2$ and $1.0$ at $ef=3$. The distance evaluations go 5, 5, 7.
 
-*Interpretation and limits.* A larger $ef$ bought recall with extra work. The failure mode is local minima in a greedy graph walk, not randomness. This is a hand-built graph; real HNSW adds layers, degree limits, and neighbor-selection heuristics, and Lucene orders by similarity score rather than distance.
+*Interpretation and limits.* A larger $ef$ bought recall with extra work.
+- The failure mode is local minima in a greedy graph walk, not randomness.
+- This is a hand-built graph;
+- real HNSW adds layers, degree limits, and neighbor-selection heuristics, and Lucene orders by similarity score rather than distance.
 
-A second, set-level example: if exact filtered top-10 contains ten eligible targets and ANN returns eight of those plus two other eligible items, ANN recall@10 is 0.8. That says nothing about relevance recall unless the exact set is itself judged relevant. Returning an unauthorized item is a correctness failure regardless of 0.8.
+A second, set-level example: if exact filtered top-10 contains ten eligible targets and ANN returns eight of those plus two other eligible items, ANN recall@10 is 0.8.
+- That says nothing about relevance recall unless the exact set is itself judged relevant.
+- Returning an unauthorized item is a correctness failure regardless of 0.8.
 
 **Knowledge Check:** Why must filter, vectors, metric, snapshot, and ties match when computing ANN recall?
 
 **Guided Practice:** (a) Rerun the trace above with query $q=(6,4)$ and $ef=1$ from entry point A. (b) Sweep search effort and filter selectivity/correlation, then inject update/delete and replica lag. Compare against exact filtered ground truth.
 
 **Feedback Contract:**
-- *Expected Evidence*: (a) Distances: D 1.414, F 1.000, G 3.162, E 4.000, C 4.472, B 5.000, A 7.211. The walk is A → E (4.000 beats B 5.000) → D (1.414) → F (1.000), ending at F, the exact nearest. Greedy search succeeds here, so one success does not prove $ef=1$ is safe. (b) Exact/ANN sets, visited work, tail latency, memory, revision, fallback count, and zero ACL violations.
+- *Expected Evidence*: (a) Distances: D 1.414, F 1.000, G 3.162, E 4.000, C 4.472, B 5.000, A 7.211.
+  - The walk is A → E (4.000 beats B 5.000) → D (1.414) → F (1.000), ending at F, the exact nearest.
+  - Greedy search succeeds here, so one success does not prove $ef=1$ is safe.
+  - (b) Exact/ANN sets, visited work, tail latency, memory, revision, fallback count, and zero ACL violations.
 - *Common Failure*: Calling ANN recall "relevance recall", or forgetting that a node rejected from $W$ is also never expanded.
 - *Diagnostic Hint*: When ANN misses an exact neighbor, find the graph path to it and ask which node on that path was rejected, and why.
 - *Concept to Revisit*: Frontier, Visited Set, and Stop Rule; Approximation vs Relevance.
@@ -320,9 +459,16 @@ where:
 - $rank_r(d)\in\{1,2,\dots\}$ is $d$'s 1-based position in ranking $r$; if $d$ is absent from ranking $r$, that term is taken as 0 in this module.
 - $w_r\ge0$ is the weight of ranking $r$, and $c\ge0$ is the smoothing constant.
 
-*Step-by-step reading.* Each ranking contributes $w_r/(c+rank)$, which is largest at rank 1 and decays slowly. The gap between ranks 1 and 2 is $\frac{1}{c+1}-\frac{1}{c+2}=\frac{1}{(c+1)(c+2)}$: with $c=1$ that is $1/2-1/3=0.167$, with $c=60$ it is only $1/3782=0.00026$. A large $c$ therefore flattens rank differences, so *how many* rankings contain $d$ matters more than *where*. Only ranks enter the formula, never raw scores, which is why branch score scales do not need to be comparable.
+*Step-by-step reading.* Each ranking contributes $w_r/(c+rank)$, which is largest at rank 1 and decays slowly.
+- The gap between ranks 1 and 2 is $\frac{1}{c+1}-\frac{1}{c+2}=\frac{1}{(c+1)(c+2)}$: with $c=1$ that is $1/2-1/3=0.167$, with $c=60$ it is only $1/3782=0.00026$.
+- A large $c$ therefore flattens rank differences, so *how many* rankings contain $d$ matters more than *where*.
+- Only ranks enter the formula, never raw scores, which is why branch score scales do not need to be comparable.
 
-In the original paper, $w_r=1$, $c=60$ (the paper calls it $k$) was fixed in a pilot, and each input ranking is a permutation over all documents (**O**, CLM-005). The weights, a document absent from a truncated list (contributing 0 in this module), and duplicate-identity rules are engineering extensions that must be declared. RRF avoids treating incomparable raw score scales as comparable. Fusion cannot recover an item missing from all branches. Compare each branch, union oracle opportunity, fusion, and latency at equal budgets.
+In the original paper, $w_r=1$, $c=60$ (the paper calls it $k$) was fixed in a pilot, and each input ranking is a permutation over all documents (**O**, CLM-005).
+- The weights, a document absent from a truncated list (contributing 0 in this module), and duplicate-identity rules are engineering extensions that must be declared.
+- RRF avoids treating incomparable raw score scales as comparable.
+- Fusion cannot recover an item missing from all branches.
+- Compare each branch, union oracle opportunity, fusion, and latency at equal budgets.
 
 **Worked Example (synthetic rankings):**
 *Input.* Lexical top-5 = (d3, d1, d7, d2, d9) and dense top-5 = (d2, d5, d1, d8, d3). Weights are 1, $c=60$, a missing document contributes 0, and exact score ties are broken by ascending document ID.
@@ -338,7 +484,11 @@ In the original paper, $w_r=1$, $c=60$ (the paper calls it $k$) was fixed in a p
 
 *Result.* Fused order: **d2, d1, d3, d5, d7, d8, d9**. The top three are separated by less than $2.5\times10^{-4}$. With $c=1$ the order becomes d2 (0.700), d3 (0.667), d1 (0.583), and so on, so $c$ decides d1 vs d3.
 
-*Interpretation and limits.* With $c=60$, appearing in both lists dominates rank position within the top 5: every document in both lists outranks every single-list document. Check: the weakest possible two-list score in two top-5 lists is $2/(60+5)=0.0308$, and the strongest single-list score is $1/(60+1)=0.0164$. The union has 7 distinct documents; if the relevant ones are d4 and d6, no fusion setting can find them. That is branch opportunity loss, not fusion loss.
+*Interpretation and limits.* With $c=60$, appearing in both lists dominates rank position within the top 5: every document in both lists outranks every single-list document.
+- Check: the weakest possible two-list score in two top-5 lists is $2/(60+5)=0.0308$, and the strongest single-list score is $1/(60+1)=0.0164$.
+- The union has 7 distinct documents;
+- if the relevant ones are d4 and d6, no fusion setting can find them.
+- That is branch opportunity loss, not fusion loss.
 
 **Knowledge Check:** Can fusion recover an item absent from every branch?
 
@@ -361,9 +511,18 @@ How much candidate opportunity should be purchased before reranking cost and tru
 
 **Concepts & Definitions:**
 
-- **Cross-encoder reranker:** encodes the query and one candidate *together* in a single forward pass and outputs a score, so every query–candidate pair needs a new forward pass. It can reorder only the candidate pool it receives, and its cost grows with candidate count and sequence shapes (**D**, CLM-006). Truncation can remove the only relevant span.
-- **Late interaction (ColBERT):** encodes the query and the document *separately* into one contextual vector per token, then scores with MaxSim. Document vectors can therefore be precomputed offline (**O**, CLM-007). It is **not** a cross-encoder, because no query token attends to document tokens inside the encoder.
-- **MaxSim:** $S(q,d)=\sum_{i\in q}\max_{j\in d} E_{q_i}\cdot E_{d_j}$. ColBERT L2-normalizes the token embeddings, so each dot product is a cosine, and it pads queries with `[mask]` tokens to a fixed length (**O**, CLM-016). Here $i$ indexes query tokens, $j$ indexes document tokens, and $E_{q_i}$, $E_{d_j}$ are their output token embeddings. Read it in two steps: (1) for each query token, find the single document token most similar to it (the inner $\max_j$); (2) add those best matches over all query tokens (the outer $\sum_i$). With unit vectors each term is at most 1, so the score is at most the number of query tokens.
+- **Cross-encoder reranker:** encodes the query and one candidate *together* in a single forward pass and outputs a score, so every query–candidate pair needs a new forward pass.
+  - It can reorder only the candidate pool it receives, and its cost grows with candidate count and sequence shapes (**D**, CLM-006).
+  - Truncation can remove the only relevant span.
+- **Late interaction (ColBERT):** encodes the query and the document *separately* into one contextual vector per token, then scores with MaxSim.
+  - Document vectors can therefore be precomputed offline (**O**, CLM-007).
+  - It is **not** a cross-encoder, because no query token attends to document tokens inside the encoder.
+- **MaxSim:** $S(q,d)=\sum_{i\in q}\max_{j\in d} E_{q_i}\cdot E_{d_j}$.
+  - ColBERT L2-normalizes the token embeddings, so each dot product is a cosine, and it pads queries with `[mask]` tokens to a fixed length (**O**, CLM-016).
+  - Here $i$ indexes query tokens, $j$ indexes document tokens, and $E_{q_i}$, $E_{d_j}$ are their output token embeddings.
+  - Read it in two steps: (1) for each query token, find the single document token most similar to it (the inner $\max_j$);
+  - (2) add those best matches over all query tokens (the outer $\sum_i$).
+  - With unit vectors each term is at most 1, so the score is at most the number of query tokens.
 - **Single-vector dual encoder:** one pooled vector per side; for example, cosine of mean-pooled normalized vectors.
 
 **Mechanism Explanation:**
@@ -375,11 +534,16 @@ For each depth, record candidate recall before reranking, reranker nDCG/MRR afte
 **Worked Example 1 (synthetic 2-D token vectors, all unit-normalized):**
 *Input.* Query tokens $q_1=(1,0)$ and $q_2=(0,1)$. Document d1 tokens: $(0.995,0.0995)$, $(0.196,0.981)$, $(0.707,0.707)$. Document d2 tokens: $(0.707,0.707)$, $(0.743,0.669)$.
 
-*Steps.* For d1, $\max_j q_1\cdot d_j=0.995$ and $\max_j q_2\cdot d_j=0.981$, so MaxSim $=1.976$. For d2, the maxima are $0.743$ and $0.707$, so MaxSim $=1.450$. For contrast, mean-pooling each side and normalizing gives single-vector cosines of $0.9995$ for d1 and $0.9997$ for d2. (Since $q_k=(1,0)$ or $(0,1)$, each dot product $q_1\cdot d_j$ is just the first coordinate of $d_j$ and $q_2\cdot d_j$ the second. The pooled query is $(0.5,0.5)$; the pooled d1 is $(0.633,0.596)$ and the pooled d2 is $(0.725,0.688)$, and the cosine of each with $(0.5,0.5)$ gives the two values above.)
+*Steps.* For d1, $\max_j q_1\cdot d_j=0.995$ and $\max_j q_2\cdot d_j=0.981$, so MaxSim $=1.976$.
+- For d2, the maxima are $0.743$ and $0.707$, so MaxSim $=1.450$.
+- For contrast, mean-pooling each side and normalizing gives single-vector cosines of $0.9995$ for d1 and $0.9997$ for d2.
+- (Since $q_k=(1,0)$ or $(0,1)$, each dot product $q_1\cdot d_j$ is just the first coordinate of $d_j$ and $q_2\cdot d_j$ the second. The pooled query is $(0.5,0.5)$; the pooled d1 is $(0.633,0.596)$ and the pooled d2 is $(0.725,0.688)$, and the cosine of each with $(0.5,0.5)$ gives the two values above.)
 
 *Result.* The pooled single-vector score slightly prefers d2. MaxSim clearly prefers d1, which has a token matching each query token, while d2 has only "in-between" tokens.
 
-*Interpretation and limits.* MaxSim keeps per-token evidence that pooling averages away, at the cost of storing 3 + 2 vectors instead of 2. A cross-encoder would instead run a forward pass over the concatenated query and d1, then again for d2. Its score cannot be decomposed this way, and it cannot be precomputed.
+*Interpretation and limits.* MaxSim keeps per-token evidence that pooling averages away, at the cost of storing 3 + 2 vectors instead of 2.
+- A cross-encoder would instead run a forward pass over the concatenated query and d1, then again for d2.
+- Its score cannot be decomposed this way, and it cannot be precomputed.
 
 **Worked Example 2 (depth frontier):**
 If candidate recall saturates by depth 50 but P99 rerank latency rises through depth 200 with no judged gain, the deeper setting is dominated for that workload. A different corpus or batch shape requires remeasurement.
@@ -416,15 +580,24 @@ where:
 - $i$ is a rank position, $rel_i$ is the judged grade of the document at rank $i$, and $g(\cdot)$ maps a grade to a gain.
 - $IDCG@k$ is the DCG@$k$ of the ideal list: all judged documents for the query sorted by grade, highest first, then cut at $k$. $nDCG@k=DCG@k/IDCG@k$, so $0\le nDCG@k\le1$.
 
-*Step-by-step for DCG.* Rank 1 has discount $\log_2 2=1$, rank 2 has $\log_2 3=1.585$, rank 3 has $\log_2 4=2$, rank 4 has $\log_2 5=2.322$, rank 5 has $\log_2 6=2.585$. Each gain is divided by its rank's discount and the results are summed; dividing by IDCG makes queries with different numbers of relevant documents comparable.
+*Step-by-step for DCG.* Rank 1 has discount $\log_2 2=1$, rank 2 has $\log_2 3=1.585$, rank 3 has $\log_2 4=2$, rank 4 has $\log_2 5=2.322$, rank 5 has $\log_2 6=2.585$.
+- Each gain is divided by its rank's discount and the results are summed;
+- dividing by IDCG makes queries with different numbers of relevant documents comparable.
 
-*Conventions used in this module:* the gain is linear, $g(rel)=rel$, and the discount is $\log_2(i+1)$. **Unjudged** documents get gain 0, and the unjudged count in the top $k$ is reported alongside the metric. **Zero IDCG** (no relevant judgment) makes nDCG undefined: such queries are excluded from the nDCG and MRR means, and their count is reported. **Ties** in system score are broken by ascending document ID before any metric is computed. Ties inside the ideal ordering do not change IDCG.
+*Conventions used in this module:* the gain is linear, $g(rel)=rel$, and the discount is $\log_2(i+1)$.
+- **Unjudged** documents get gain 0, and the unjudged count in the top $k$ is reported alongside the metric.
+- **Zero IDCG** (no relevant judgment) makes nDCG undefined: such queries are excluded from the nDCG and MRR means, and their count is reported.
+- **Ties** in system score are broken by ascending document ID before any metric is computed.
+- Ties inside the ideal ordering do not change IDCG.
 
 **Mechanism Explanation:**
 
 Declare binary/graded relevance, cutoff, gain, discount, query unit, ties, duplicates, zero-relevant queries, and unjudged policy. Incomplete pools can favor systems similar to the pooling methods. BEIR's heterogeneous results are evidence against a universal retriever ranking (**O**, CLM-008).
 
-End-to-end latency includes query processing/embedding, branch searches, filters, fusion, fetch, reranking, network, and queueing (**D**, CLM-010). Parallel branch latency follows the join critical path; both branches consume capacity. Report per-stage and end-to-end distributions, quality under load, timeout/cancellation, and SLO-goodput.
+End-to-end latency includes query processing/embedding, branch searches, filters, fusion, fetch, reranking, network, and queueing (**D**, CLM-010).
+- Parallel branch latency follows the join critical path;
+- both branches consume capacity.
+- Report per-stage and end-to-end distributions, quality under load, timeout/cancellation, and SLO-goodput.
 
 **Worked Example 1 (synthetic judgments, three queries, $k=5$):**
 *Input.*
@@ -432,7 +605,12 @@ End-to-end latency includes query processing/embedding, branch searches, filters
 - q2: judgments are d3=2, d8=0, d6=0. The system returns (d8, d6, d3).
 - q3: no document is judged relevant.
 
-*Steps for q1.* Gains are $(0,3,0,1,0)$, with d7 treated as 0. $DCG=3/\log_2 3+1/\log_2 5=1.8928+0.4307=2.3235$. The ideal gains are $(3,2,1,0,0)$, so $IDCG=3+2/\log_2 3+1/\log_2 4=3+1.2619+0.5=4.7619$ and $nDCG=0.4879$. The first relevant document is at rank 2, so $RR=0.5$. Recall@5 counting $rel\ge1$ is $2/3$. The unjudged count is 1.
+*Steps for q1.* Gains are $(0,3,0,1,0)$, with d7 treated as 0.
+- $DCG=3/\log_2 3+1/\log_2 5=1.8928+0.4307=2.3235$.
+- The ideal gains are $(3,2,1,0,0)$, so $IDCG=3+2/\log_2 3+1/\log_2 4=3+1.2619+0.5=4.7619$ and $nDCG=0.4879$.
+- The first relevant document is at rank 2, so $RR=0.5$.
+- Recall@5 counting $rel\ge1$ is $2/3$.
+- The unjudged count is 1.
 
 *Steps for q2.* $DCG=2/\log_2 4=1.0$ and $IDCG=2$, so $nDCG=0.5$ and $RR=1/3$. (Here $k=5$ but only 3 results are returned, so ranks 4–5 contribute 0; the ideal list is $(2,0,0)$, so $IDCG=2/\log_2 2=2$. The only relevant document, d3, is at rank 3.)
 
@@ -440,7 +618,8 @@ End-to-end latency includes query processing/embedding, branch searches, filters
 
 *Result.* Mean nDCG@5 is $0.494$ and MRR is $0.417$ over 2 scored queries, with 1 excluded: $(0.4879+0.5)/2=0.494$ and $(0.5+1/3)/2=0.417$. Had q3 been scored as 0, the means would be $0.329$ and $0.278$ (the same sums divided by 3). The policy moves the headline by about a third.
 
-*Sensitivity to the unjudged document.* If d7 were actually relevant with grade 2, q1's gains become $(0,3,2,1,0)$ and IDCG uses $(3,2,2,1,0)$, giving $nDCG=0.584$ instead of $0.488$ ($DCG=3/1.585+2/2+1/2.322=3.3235$ and $IDCG=3+2/1.585+2/2+1/2.322=5.6926$). A single unjudged document in the top 5 is worth reporting.
+*Sensitivity to the unjudged document.* If d7 were actually relevant with grade 2, q1's gains become $(0,3,2,1,0)$ and IDCG uses $(3,2,2,1,0)$, giving $nDCG=0.584$ instead of $0.488$ ($DCG=3/1.585+2/2+1/2.322=3.3235$ and $IDCG=3+2/1.585+2/2+1/2.322=5.6926$).
+- A single unjudged document in the top 5 is worth reporting.
 
 *Interpretation and limits.* The metric definition includes the zero-IDCG, unjudged, and tie rules; change any of them and the headline changes. Comparisons between systems must use identical rules and query sets, and paired uncertainty across queries.
 
@@ -449,7 +628,11 @@ Two systems can have the same nDCG while one times out on selective-filter queri
 
 **Knowledge Check:** Why can incomplete judgment pools favor systems similar to the pool constructors? Why must IDCG use all judged items rather than only retrieved ones?
 
-**Guided Practice:** (a) For q2, the system instead returns (d3, d8, d6). Compute nDCG@3 and RR, then the two-query means with q1 unchanged. (b) Evaluate a stable query set at increasing open-loop load. Join judgments, stage traces, timeouts, and resource use; report quality, latency, and goodput by slice.
+**Guided Practice:** (a) For q2, the system instead returns (d3, d8, d6).
+- Compute nDCG@3 and RR, then the two-query means with q1 unchanged.
+- (b) Evaluate a stable query set at increasing open-loop load.
+- Join judgments, stage traces, timeouts, and resource use;
+- report quality, latency, and goodput by slice.
 
 **Feedback Contract:**
 - *Expected Evidence*: (a) $DCG=IDCG=2$, so $nDCG=1.0$ and $RR=1$. The means become nDCG $=(0.4879+1)/2=0.744$ and MRR $=(0.5+1)/2=0.75$, with q3 still excluded and reported. (b) A pinned judgment policy, unjudged handling, uncertainty, stage and end-to-end tails, and complete denominators.
@@ -467,49 +650,121 @@ Two systems can have the same nDCG while one times out on selective-filter queri
 When exact retrieval misses domain relevance, how can training improve the representation without teaching false negatives or leaking evaluation answers?
 
 **Concepts & Definitions:**
-- **Contrastive fine-tuning** updates encoder weights so a query scores its positive passage above competing candidates. A **positive** is relevant under the declared task; an unjudged passage is not necessarily a negative. **InfoNCE-style loss** here means negative log probability of the positive in a candidate softmax; DPR supplies this form without a temperature, while E5 uses temperature-scaled cosine (**O**, CLM-021, CLM-022).
-- **In-batch negatives** are other queries' positives reused as competitors. A **hard negative** is a high-scoring but genuinely irrelevant passage. A **false negative** is relevant but assigned a negative training role. Hardness is relative to a particular encoder, query, and corpus, not a permanent document property.
+- **Contrastive fine-tuning** updates encoder weights so a query scores its positive passage above competing candidates.
+  - A **positive** is relevant under the declared task;
+  - an unjudged passage is not necessarily a negative.
+  - **InfoNCE-style loss** here means negative log probability of the positive in a candidate softmax;
+  - DPR supplies this form without a temperature, while E5 uses temperature-scaled cosine (**O**, CLM-021, CLM-022).
+- **In-batch negatives** are other queries' positives reused as competitors.
+  - A **hard negative** is a high-scoring but genuinely irrelevant passage.
+  - A **false negative** is relevant but assigned a negative training role.
+  - Hardness is relative to a particular encoder, query, and corpus, not a permanent document property.
 - **Temperature** $\tau>0$ divides similarities before softmax; scale $s=1/\tau$. Lower temperature concentrates gradient on higher-scoring competitors. It is not the generator's query-sampling temperature.
 - **Mining** retrieves candidate negatives; **denoising** removes likely mislabeled ones. **Distillation** transfers a teacher's scores or score differences to a student. A cross-encoder teacher jointly encodes query/passage; the deployed student can remain a dual encoder (Lesson 9.5).
-- **Domain adaptation** trains for a target corpus/task. **Transductive corpus access** permits training on unlabeled target documents, but not held-out query labels; declare it rather than claiming an untouched-corpus evaluation. Synthetic queries are proposed supervision, not human relevance judgments.
+- **Domain adaptation** trains for a target corpus/task.
+  - **Transductive corpus access** permits training on unlabeled target documents, but not held-out query labels;
+  - declare it rather than claiming an untouched-corpus evaluation.
+  - Synthetic queries are proposed supervision, not human relevance judgments.
 
 **Mechanism Explanation:**
 1. Freeze train/dev/test query partitions and corpus lineage before mining or generation. Record duplicate groups, generator/teacher revisions, prompts, mining checkpoint, score scale, and filters. Keep test qrels out of selection and threshold tuning.
 2. Encode positives and candidate negatives; compute loss; backpropagate; publish a new encoder checkpoint. Re-encode the corpus for comparison with the new checkpoint: mixing new query vectors with old document vectors confounds training and deployment.
 3. Mine with BM25, a dense retriever, or a teacher. ANCE asynchronously refreshes corpus embeddings and the ANN index while its trainer advances; stale checkpoints and full-corpus encoding are part of that recipe's cost (**O**, CLM-023). Offline mining is an alternative, not the same refresh loop.
-4. Mask known positives and duplicate texts. Inspect a stratified sample by rank and query slice. RocketQA reports that hard-negative training without denoising hurts its MSMARCO setup; its teacher filter is not proof every retained negative is irrelevant (**O**, CLM-024). Positive-aware filtering uses the teacher's positive score as a reference: NV-Retriever's TopK-PercPos retains $s^-<0.95s^+$ in its reported setting (**O**, CLM-025). This threshold is not universal or portable between cosine, logits, and probabilities.
-5. Train a reranker on jointly encoded labeled pairs. For relevance logit $a$ and binary label $y$, use $p=\sigma(a)=1/(1+e^{-a})$ and binary cross entropy $-y\log p-(1-y)\log(1-p)$, averaged over pairs. monoBERT is a reference for this pointwise objective; a probability-like inference score is not necessarily the training logit (**O**, CLM-026). Evaluate at fixed candidate pools before attributing gains to reranker training.
-6. For unlabeled domains, GPL generates queries, mines passages, obtains teacher margins, and trains with Margin-MSE. Promptagator instead includes a round-trip filter: keep generated query/document pairs when the source document is retrieved near the top. Filters can discard valid diverse queries as well as hallucinations (**O**, CLM-027). Compare synthetic-only, filtered, and no-adaptation baselines on independent queries.
+4. Mask known positives and duplicate texts.
+   - Inspect a stratified sample by rank and query slice.
+  - RocketQA reports that hard-negative training without denoising hurts its MSMARCO setup;
+  - its teacher filter is not proof every retained negative is irrelevant (**O**, CLM-024).
+  - Positive-aware filtering uses the teacher's positive score as a reference: NV-Retriever's TopK-PercPos retains $s^-<0.95s^+$ in its reported setting (**O**, CLM-025).
+  - This threshold is not universal or portable between cosine, logits, and probabilities.
+5. Train a reranker on jointly encoded labeled pairs.
+   - For relevance logit $a$ and binary label $y$, use $p=\sigma(a)=1/(1+e^{-a})$ and binary cross entropy $-y\log p-(1-y)\log(1-p)$, averaged over pairs. monoBERT is a reference for this pointwise objective;
+  - a probability-like inference score is not necessarily the training logit (**O**, CLM-026).
+  - Evaluate at fixed candidate pools before attributing gains to reranker training.
+6. For unlabeled domains, GPL generates queries, mines passages, obtains teacher margins, and trains with Margin-MSE.
+   - Promptagator instead includes a round-trip filter: keep generated query/document pairs when the source document is retrieved near the top.
+  - Filters can discard valid diverse queries as well as hallucinations (**O**, CLM-027).
+  - Compare synthetic-only, filtered, and no-adaptation baselines on independent queries.
 
 **Quantitative Model / Derivation:**
 For $B$ local queries, positive $p_i^+$, candidate multiset $\mathcal C$, similarity $u(q,c)$, and $z_{ic}=u(q_i,c)/\tau$:
 $$L=-\frac1B\sum_i\log\frac{e^{z_{i+}}}{\sum_{c\in\mathcal C}e^{z_{ic}}},\qquad
 \pi_{ic}=\frac{e^{z_{ic}}}{\sum_c e^{z_{ic}}}.$$
-This is dimensionless negative log likelihood. Use log-sum-exp numerically. For one query, $\partial L_i/\partial z_{ic}=\pi_{ic}-\mathbf1[c=p_i^+]$; similarity gradients add the factor $1/\tau$. A high-scoring mislabeled passage therefore receives a strong push away, not just a harmless extra example (**D**, CLM-028).
+where:
+- $L$: mean contrastive negative log likelihood (dimensionless)
+- $B$: local query count; $i$: query index
+- $q_i$, $p_i^+$: query $i$ and its positive passage
+- $\mathcal C$: candidate multiset; $c$: candidate passage
+- $u(q_i,c)$: similarity score (dimensionless here)
+- $\tau$: positive temperature (same score units); $z_{ic}=u(q_i,c)/\tau$: dimensionless logit
+- $z_{i+}$: positive-passage logit
+- $\pi_{ic}$: softmax probability for candidate $c$ (dimensionless)
+
+This is dimensionless negative log likelihood.
+- Use log-sum-exp numerically.
+- For one query, $\partial L_i/\partial z_{ic}=\pi_{ic}-\mathbf1[c=p_i^+]$;
+- similarity gradients add the factor $1/\tau$.
+- A high-scoring mislabeled passage therefore receives a strong push away, not just a harmless extra example (**D**, CLM-028).
 
 At the pinned sentence-transformers **main snapshot**, MNRL concatenates all candidate columns, sharing every query's explicit negatives with other queries. With $W$ devices gathered, $B$ queries/device and $n$ explicit negatives/query:
 $$N_{neg}=WB(1+n)-1.$$
-Without gathering, replace $W$ by 1. Of these, $WBn$ are explicit negatives, while $WB-1$ are other positives. Counts assume one positive per query, no masking, and all columns shared. Duplicate and relevant candidates can make the count of *valid distinct* negatives smaller. Ordinary gradient accumulation across separate losses does not enlarge this candidate softmax; GradCache preserves the large-batch candidate comparison while splitting encoder passes (**O**, CLM-029; **D**, CLM-028). Bigger batches are a candidate-pool intervention, not a guarantee of better generalization.
+where:
+- $N_{neg}$: nominal negative candidate columns per query (count)
+- $W$: gathered device count
+- $B$: local queries per device (count)
+- $n$: explicit negatives per query (count)
+Without gathering, replace $W$ by 1.
+- Of these, $WBn$ are explicit negatives, while $WB-1$ are other positives.
+- Counts assume one positive per query, no masking, and all columns shared.
+- Duplicate and relevant candidates can make the count of *valid distinct* negatives smaller.
+- Ordinary gradient accumulation across separate losses does not enlarge this candidate softmax;
+- GradCache preserves the large-batch candidate comparison while splitting encoder passes (**O**, CLM-029; **D**, CLM-028).
+- Bigger batches are a candidate-pool intervention, not a guarantee of better generalization.
 
 Let $f$ be an assumed independent probability that a selected negative is relevant and $n$ the number selected:
 $$P(\text{at least one false negative})=1-(1-f)^n,\qquad E[F]=nf.$$
+where:
+- $f$: independent probability a selected negative is relevant (dimensionless)
+- $n$: selected negative count
+- $F$: false-negative count; $E[F]$: expected count
+- $P(\cdot)$: event probability (dimensionless)
 The complement derives from all $n$ being valid negatives. Independence is a toy approximation; rank, duplicate groups, and topic create correlations. Estimate $f$ from adjudicated rank/slice samples, never reuse a paper's sample rate as a corpus constant (**D**, CLM-028).
 
 For student score $S$ and teacher score $T$, Margin-MSE is:
 $$L_{MM}=\frac1B\sum_i\left[(S(q_i,p_i^+)-S(q_i,p_i^-))-(T(q_i,p_i^+)-T(q_i,p_i^-))\right]^2.$$
+where:
+- $L_{MM}$: mean squared student–teacher margin error (score units squared)
+- $B$: query/triplet count; $i$: triplet index
+- $q_i$: query; $p_i^+$, $p_i^-$: positive and negative passages
+- $S$, $T$: student and teacher scoring functions (compatible score units)
 A per-query additive teacher offset cancels, but multiplicative scale does not. Cosine differences lie in $[-2,2]$; unbounded teacher logit margins may be unattainable without compatible student scores or scaling. Teacher errors still transfer (**O**, CLM-030; **D**, CLM-028).
 
 **Worked Example (synthetic; all calculations recomputed in Python):**
-One query has positive cosine 0.7, two in-batch competitors 0.5/0.3, and a mined competitor 0.6. At $s=20$ ($\tau=0.05$), logits are 14/10/6/12; softmax probabilities are approximately 0.8666/0.0159/0.0003/0.1173 and loss is 0.1432. At $s=1$, loss is 1.2220 and probabilities are 0.2946/0.2412/0.1975/0.2666. At scale 20 the 0.6 competitor receives $e^{20(0.6-0.3)}=403.43$ times the gradient weight of the 0.3 competitor. If the 0.6 passage is relevant, lowering temperature intensifies the wrong supervision.
+One query has positive cosine 0.7, two in-batch competitors 0.5/0.3, and a mined competitor 0.6.
+- At $s=20$ ($\tau=0.05$), logits are 14/10/6/12;
+- softmax probabilities are approximately 0.8666/0.0159/0.0003/0.1173 and loss is 0.1432.
+- At $s=1$, loss is 1.2220 and probabilities are 0.2946/0.2412/0.1975/0.2666.
+- At scale 20 the 0.6 competitor receives $e^{20(0.6-0.3)}=403.43$ times the gradient weight of the 0.3 competitor.
+- If the 0.6 passage is relevant, lowering temperature intensifies the wrong supervision.
 
 For $W=4,B=32,n=3$ with gathering, each query sees $4\cdot32\cdot4-1=511$ nominal negatives, including 384 explicit negatives. With **synthetic** $f=0.10$ for four selected negatives, $P(F\ge1)=1-0.9^4=0.3439$, and $E[F]=0.4$; this is not a measured error rate.
 
-Teacher scores 6 and 2 give target margin 4. Student scores 0.9 and 0.4 give margin 0.5, hence loss $(0.5-4)^2=12.25$. If the teacher instead scores the supposed negative 5.8, target margin is 0.2 and loss is 0.09: the student is not forced to create a large separation. That helps only if the teacher's near-tie reflects actual relevance.
+Teacher scores 6 and 2 give target margin 4.
+- Student scores 0.9 and 0.4 give margin 0.5, hence loss $(0.5-4)^2=12.25$.
+- If the teacher instead scores the supposed negative 5.8, target margin is 0.2 and loss is 0.09: the student is not forced to create a large separation.
+- That helps only if the teacher's near-tie reflects actual relevance.
 
 **Evaluation leakage and unjudged-hit pitfalls:**
-Audit exact and near-duplicate query overlap, split-related documents, test-qrel use in mining/filter tuning, generator exposure, and query/document identity collisions. Target-corpus access alone is not test-label leakage; undeclared transduction or generation of held-out questions invalidates the claimed evaluation boundary. Promptagator excludes known generator-overlap datasets, and GPL documents an identical-ID evaluation correction (**O**, CLM-031).
+Audit exact and near-duplicate query overlap, split-related documents, test-qrel use in mining/filter tuning, generator exposure, and query/document identity collisions.
+- Target-corpus access alone is not test-label leakage;
+- undeclared transduction or generation of held-out questions invalidates the claimed evaluation boundary.
+- Promptagator excludes known generator-overlap datasets, and GPL documents an identical-ID evaluation correction (**O**, CLM-031).
 
-Report Hole@$k$ = unjudged top-$k$ hits / returned top-$k$ hits alongside Lesson 9.6 metrics, with returned count explicit. A new representation may find relevant documents outside the old judgment pool. BEIR's additional annotation changes non-lexical systems' measured quality (**O**, CLM-032). Pool old/new results for blind adjudication; show original-pool and expanded-pool sensitivity, out-of-domain slices, and paired query uncertainty. Neither an unjudged hit nor a falling training loss proves relevance or regression.
+Report Hole@$k$ = unjudged top-$k$ hits / returned top-$k$ hits alongside Lesson 9.6 metrics, with returned count explicit.
+- A new representation may find relevant documents outside the old judgment pool.
+- BEIR's additional annotation changes non-lexical systems' measured quality (**O**, CLM-032).
+- Pool old/new results for blind adjudication;
+- show original-pool and expanded-pool sensitivity, out-of-domain slices, and paired query uncertainty.
+- Neither an unjudged hit nor a falling training loss proves relevance or regression.
 
 **Knowledge Check:**
 1. Why does accumulating four independent microbatch losses not create the same negatives as one large contrastive batch?
@@ -536,7 +791,8 @@ Recompute the cosine fixture at $s=50$; filter the 0.6 competitor and recompute 
 
 **REFERENCE / BASELINE**
 
-- [The Probabilistic Relevance Framework: BM25 and Beyond](https://www.staff.city.ac.uk/~sbrp622/papers/foundations_bm25_review.pdf) — Robertson and Zaragoza (2009). Reading pointers: Eq. 3.2–3.3 (RSJ weight and the IDF form without relevance information) and §3.4, Eq. 3.12–3.13 (length normalization and saturation).
+- [The Probabilistic Relevance Framework: BM25 and Beyond](https://www.staff.city.ac.uk/~sbrp622/papers/foundations_bm25_review.pdf) — Robertson and Zaragoza (2009).
+  - Reading pointers: Eq. 3.2–3.3 (RSJ weight and the IDF form without relevance information) and §3.4, Eq. 3.12–3.13 (length normalization and saturation).
 - [Efficient and robust approximate nearest neighbor search using HNSW graphs](https://arxiv.org/abs/1603.09320) — Malkov and Yashunin (2018). Reading pointers: Algorithm 2 (SEARCH-LAYER) and Algorithm 5 (K-NN-SEARCH).
 - [Dense Passage Retrieval](https://arxiv.org/abs/2004.04906) — Karpukhin et al. (EMNLP 2020).
 - [Reciprocal Rank Fusion](https://dl.acm.org/doi/10.1145/1571941.1572114) — Cormack, Clarke, and Büttcher (SIGIR 2009). Reading pointer: §1, the RRFscore formula with $k=60$ ([author-hosted copy](https://plg.uwaterloo.ca/~gvcormac/cormacksigir09-rrf.pdf), read 2026-09-30).
@@ -544,11 +800,15 @@ Recompute the cosine fixture at $s=50$; filter the 0.6 competitor and recompute 
 - [BEIR](https://arxiv.org/abs/2104.08663) — Thakur et al. (2021).
 
 **ADAPTATION REFERENCES / WORKLOAD-DEPENDENT** (full-text reading recorded 2026-11-10; no benchmark table numbers imported):
-- [DPR v3](https://arxiv.org/abs/2004.04906v3), Karpukhin et al., 2020: §3.1–3.2, candidate NLL and in-batch negatives (CLM-021). [E5 v2](https://arxiv.org/abs/2212.03533v2), Wang et al., 2024 revision: §3–4, temperature-scaled cosine and training stages (CLM-022). Neither establishes a universal temperature.
+- [DPR v3](https://arxiv.org/abs/2004.04906v3), Karpukhin et al., 2020: §3.1–3.2, candidate NLL and in-batch negatives (CLM-021).
+  - [E5 v2](https://arxiv.org/abs/2212.03533v2), Wang et al., 2024 revision: §3–4, temperature-scaled cosine and training stages (CLM-022).
+  - Neither establishes a universal temperature.
 - [ANCE v2](https://arxiv.org/abs/2007.00808v2), Xiong et al., 2020/ICLR 2021: §3–6 and App. A.3, asynchronous mining/index refresh (CLM-023). [RocketQA v2](https://arxiv.org/abs/2010.08191v2), Qu et al., 2021: §4–5.3, false-negative denoising and negative results (CLM-024).
 - [NV-Retriever v2](https://arxiv.org/abs/2407.15831v2), Moreira et al., 2025 revision: §2.2–4, positive-aware filtering (CLM-025). WORKLOAD-DEPENDENT/FRONTIER, not an industry default.
 - [Passage Re-ranking with BERT v5](https://arxiv.org/abs/1901.04085v5), Nogueira and Cho, 2020 revision: joint pair scoring and binary cross entropy (CLM-026). [Margin-MSE v2](https://arxiv.org/abs/2010.02666v2), Hofstätter et al., 2021: §3, teacher score-difference objective (CLM-030).
-- [GPL v3](https://arxiv.org/abs/2112.07577v3), Wang et al., 2022: §3–7 and App. D, generated queries, mined negatives, pseudo-margins, identical-ID correction. [Promptagator v1](https://arxiv.org/abs/2209.11755v1), Dai et al., 2022: §3–5, round-trip filtering and generator-overlap exclusions (CLM-027, CLM-031). Synthetic supervision is not independent validation.
+- [GPL v3](https://arxiv.org/abs/2112.07577v3), Wang et al., 2022: §3–7 and App. D, generated queries, mined negatives, pseudo-margins, identical-ID correction.
+  - [Promptagator v1](https://arxiv.org/abs/2209.11755v1), Dai et al., 2022: §3–5, round-trip filtering and generator-overlap exclusions (CLM-027, CLM-031).
+  - Synthetic supervision is not independent validation.
 - [GradCache v2](https://arxiv.org/abs/2101.06983v2), Gao et al., 2021: §3.2–3.3, staged gradient caching rather than ordinary accumulation (CLM-029). [BEIR v4](https://arxiv.org/abs/2104.08663v4): §5–6, incomplete judgment pools and additional annotation (CLM-032); no parsed table values retained.
 
 **CURRENT DEFAULT** (the module's *recommended baseline*, derived from CLM-001, CLM-004, CLM-006, and CLM-010; not a measured survey of industry adoption or of any one engine's defaults): a measured BM25 baseline, embedding-version pinning, ANN-versus-exact audit, hybrid candidate lineage where justified, bounded reranking, slice metrics, and end-to-end timing.
@@ -557,7 +817,10 @@ Recompute the cosine fixture at $s=50$; filter the 0.6 competitor and recompute 
 
 **FRONTIER / NEWER WORK** (none is a universal replacement for workload-grounded baselines):
 
-- Multi-vector compression: [ColBERTv2](https://arxiv.org/abs/2112.01488) — Santhanam et al. (NAACL 2022; arXiv v3 July 2022). The authors report that residual compression substantially reduces the late-interaction index footprint while improving quality on their benchmarks. Author-reported, abstract-level reading; the ratio is omitted here because its hardware, corpus, and baseline context was not read (CLM-017).
+- Multi-vector compression: [ColBERTv2](https://arxiv.org/abs/2112.01488) — Santhanam et al. (NAACL 2022; arXiv v3 July 2022).
+  - The authors report that residual compression substantially reduces the late-interaction index footprint while improving quality on their benchmarks.
+  - Author-reported, abstract-level reading;
+  - the ratio is omitted here because its hardware, corpus, and baseline context was not read (CLM-017).
 - Reasoning-intensive retrieval benchmarks: [BRIGHT](https://arxiv.org/abs/2407.12883) — Su et al. (arXiv v1 July 2024, v4 March 2025). 1,384 real-world queries where keyword or semantic matching is usually insufficient. Abstract-level reading (CLM-018).
 - Retrieval agents: [Search-R1](https://arxiv.org/abs/2503.09516) — Jin et al. (arXiv v1 March 2025, v5 August 2025). Trains an LLM with reinforcement learning to issue search queries during step-by-step reasoning. Abstract-level reading; agent orchestration belongs to Modules 10 and 12 (CLM-019).
 - `TODO_VERIFY` (CLM-020): learned sparse retrieval and LLM-based reranking or query representations were **not** opened from primary sources in this revision. No specific result is claimed.
@@ -577,9 +840,16 @@ Recompute the cosine fixture at $s=50$; filter the 0.6 competitor and recompute 
 - Scope: pinned Lucene behavior, not a universal BM25/HNSW or filtered-search definition. Engines built on Lucene may configure or override these paths.
 
 **ADAPTATION SOURCE TRACE — main snapshot, not a release**
-- Repository: [huggingface/sentence-transformers](https://github.com/huggingface/sentence-transformers/tree/a89a0fb5394edc2e601c7972ca4e3ec7de6390e3); commit `a89a0fb5394edc2e601c7972ca4e3ec7de6390e3`, statically inspected in the dossier 2026-11-10. No training or example logs reproduced. Do not call this a stable release.
-- Entry `MultipleNegativesRankingLoss.compute_loss_from_embeddings`, file `sentence_transformers/sentence_transformer/losses/multiple_negatives_ranking.py`: concatenate document columns → cosine × scale → positive column/log-sum-exp → mean NLL. Default scale 20 means temperature 0.05; cross-device gathering is opt-in (CLM-029).
-- `sentence_transformers/util/hard_negatives.py::mine_hard_negatives`: corpus plus positives → deduplicate → mask known positives → optional teacher rescoring/margins → rank/select. Margin filtering is not enabled by default. Its relative margin is based on the absolute positive score, so equivalence with 95% multiplication holds only for positive scores (CLM-033).
+- Repository: [huggingface/sentence-transformers](https://github.com/huggingface/sentence-transformers/tree/a89a0fb5394edc2e601c7972ca4e3ec7de6390e3);
+  - commit `a89a0fb5394edc2e601c7972ca4e3ec7de6390e3`, statically inspected in the dossier 2026-11-10.
+  - No training or example logs reproduced.
+  - Do not call this a stable release.
+- Entry `MultipleNegativesRankingLoss.compute_loss_from_embeddings`, file `sentence_transformers/sentence_transformer/losses/multiple_negatives_ranking.py`: concatenate document columns → cosine × scale → positive column/log-sum-exp → mean NLL.
+  - Default scale 20 means temperature 0.05;
+  - cross-device gathering is opt-in (CLM-029).
+- `sentence_transformers/util/hard_negatives.py::mine_hard_negatives`: corpus plus positives → deduplicate → mask known positives → optional teacher rescoring/margins → rank/select.
+  - Margin filtering is not enabled by default.
+  - Its relative margin is based on the absolute positive score, so equivalence with 95% multiplication holds only for positive scores (CLM-033).
 - `sentence_transformers/sentence_transformer/losses/margin_mse.py::MarginMSELoss`: pairwise student differences versus detached target margins (CLM-030). Scope: library choices, not a universal recipe.
 
 ### LAYER 2: ENGINEERING PRACTICE LAYER
@@ -632,11 +902,21 @@ All labs follow `PREDICT → BUILD → MEASURE → EXPLAIN → BREAK → IMPROVE
 
 - **Hardware:** CPU for loss checks, mining/audit on a small corpus, and supplied or clearly synthetic score replay; COLAB-GPU optional for small-encoder training. No local GPU required. A replay demonstrates analysis, not an empirical model-quality gain.
 - **Objective:** compare no adaptation, random/in-batch supervision, filtered hard negatives, and teacher-margin supervision with exact-search evaluation before ANN tuning.
-- **Pre-Registered Hypothesis:** on the declared domain slice, audited hard negatives improve held-out exact relevance over matched random negatives without exceeding a predeclared out-of-domain regression margin; reject this hypothesis if paired query intervals or expanded judgments do not support it.
+- **Pre-Registered Hypothesis:** on the declared domain slice, audited hard negatives improve held-out exact relevance over matched random negatives without exceeding a predeclared out-of-domain regression margin;
+  - reject this hypothesis if paired query intervals or expanded judgments do not support it.
 - **Independent Variables:** negative source/filter, temperature, shared candidate count, teacher margin, synthetic-query filter; hold encoder initialization, corpus, query partitions, candidate budget, and update budget fixed or report their differences.
 - **Dependent Variables:** loss/gradient weights, duplicate/false-negative sample rate by rank, exact Recall/nDCG with paired uncertainty, Hole@k and judgment sensitivity, domain slices, training/mining/re-encoding cost, fixed-pool reranker quality and served latency.
 - **Loop:** predict → construct/replay candidate batches → measure → inject a duplicate positive and mislabeled hard negative → explain gradient effects → filter/relabel → falsify on independent queries and an out-of-domain slice → defend release or no-change.
-- **Evidence:** split/generator/teacher manifest; sampled label audit; baseline and adaptation ablation; exact-before-ANN comparison; original/expanded judgment results; candidate-pool-controlled reranker comparison; rollback to a compatible encoder/index pair. Never tune on test qrels. Submit with the module release report; no new submission platform is implied.
+- **Evidence:** split/generator/teacher manifest;
+  - sampled label audit;
+  - baseline and adaptation ablation;
+  - exact-before-ANN comparison;
+  - original/expanded judgment results;
+  - candidate-pool-controlled reranker comparison;
+  - rollback to a compatible encoder/index pair.
+  - Never tune on test qrels.
+  - Submit with the module release report;
+  - no new submission platform is implied.
 - **Alignment:** Lesson 9.7; Mastery deliverables 2, 5, 8–9 extended with the adaptation ablation and contamination audit.
 - **Effort Estimate:** 4h, separate from Lesson 9.7 guided practice. Source reading shares the existing source-trace budget.
 

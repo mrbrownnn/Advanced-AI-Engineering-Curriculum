@@ -2,9 +2,19 @@
 
 ## 00 Why This Module Exists
 
-A green dashboard can accompany a failing service. Successful exported spans omit rejected work, crashed workers, unfinished requests, and dropped telemetry. A judge score can move while true quality does not. A trace can detect failure yet omit evidence needed to localize origin. Reliability therefore starts with measurement contracts, not dashboards.
+A green dashboard can accompany a failing service:
+- Successful exported spans omit rejected work, crashed workers, unfinished requests, and dropped telemetry.
+- A judge score can move while true quality does not.
+- A trace can detect failure yet omit evidence needed to localize origin.
 
-This module owns production telemetry boundaries, trace continuity and sampling, offered-outcome reliability, SLO burn control, delayed quality signals, telemetry governance, and incident discrimination. Serving metric mechanics stay in Module 04; evaluation design in Module 15; rollout and rollback-state compatibility in Module 17; security detection in Module 18; full cost modeling in Module 22.
+Reliability therefore starts with measurement contracts, not dashboards.
+
+This module owns production telemetry boundaries, trace continuity and sampling, offered-outcome reliability, SLO burn control, delayed quality signals, telemetry governance, and incident discrimination. Neighbouring topics stay elsewhere:
+- Serving metric mechanics: Module 04.
+- Evaluation design: Module 15.
+- Rollout and rollback-state compatibility: Module 17.
+- Security detection: Module 18.
+- Full cost modeling: Module 22.
 
 **Research cutoff:** 2026-09-30.
 
@@ -55,7 +65,10 @@ estimated_effort:
   total: 34.75h
 ```
 
-Lesson lines sum to 480 minutes instruction and 225 minutes guided practice. LABs A–F are 3 hours each (18h). The 2h source-trace budget is shared between Lesson 23.1/LAB A and the selected autoscaling/startup paths in LABs E/F, counted once. Module-local schedule is 34.75h (formerly 23.5h); shared ROADMAP changes are outside this edit scope.
+- Lesson lines sum to 480 minutes instruction and 225 minutes guided practice.
+- LABs A–F are 3 hours each (18h).
+- The 2h source-trace budget is shared between Lesson 23.1/LAB A and the selected autoscaling/startup paths in LABs E/F, counted once.
+- Module-local schedule is 34.75h (formerly 23.5h); shared ROADMAP changes are outside this edit scope.
 
 ---
 
@@ -63,11 +76,47 @@ Lesson lines sum to 480 minutes instruction and 225 minutes guided practice. LAB
 
 ## 03 Knowledge Map
 
-Offered request → ingress ledger → logical operation and attempts → propagated trace context → spans/events/metrics → sampling/export pipeline → terminal-state reconciliation → offered-outcome SLI → error budget and burn alerts → fast proxy plus mature delayed quality labels → governed storage → mitigation, discrimination, rollback, and remeasurement.
+```mermaid
+flowchart TD
+    subgraph Capture["Capture"]
+        A1["Offered request"] --> A2["Ingress ledger"]
+        A2 --> A3["Logical operation and attempts"]
+        A3 --> A4["Propagated trace context"]
+        A4 --> A5["Spans / events / metrics"]
+        A5 --> A6["Sampling / export pipeline"]
+    end
+    subgraph Reliability["Reliability"]
+        B1["Terminal-state reconciliation"] --> B2["Offered-outcome SLI"]
+        B2 --> B3["Error budget and burn alerts"]
+        B3 --> B4["Fast proxy + mature delayed quality labels"]
+    end
+    subgraph Response["Govern and respond"]
+        C1["Governed storage"] --> C2["Mitigation, discrimination,<br/>rollback, remeasurement"]
+    end
+    A6 --> B1
+    B4 --> C1
+```
 
-Cross-cutting invariants: every number declares boundary, population, units, aggregation, window, failure/cancellation/unfinished treatment, sampling probability, and schema revision; missing telemetry is unknown, not success.
+- SLI: service-level indicator.
 
-Scaling extension: demand signal → sampled control recommendation → desired/current/ready capacity → startup critical path → useful offered outcomes. Idle gaps select warm/sleep/zero states subject to SLO and isolation constraints. Steady-state sizing stays in 4.7; failure/reload recovery in 20.6; prices in 22; LoRA adapter cold start in EXPERT-TRACK module 35.
+Cross-cutting invariants:
+- Every number declares boundary, population, units, aggregation, window, failure/cancellation/unfinished treatment, sampling probability, and schema revision.
+- Missing telemetry is unknown, not success.
+
+Scaling extension:
+
+```mermaid
+flowchart LR
+    S1["Demand signal"] --> S2["Sampled control<br/>recommendation"]
+    S2 --> S3["Desired / current / ready<br/>capacity"]
+    S3 --> S4["Startup critical path"]
+    S4 --> S5["Useful offered outcomes"]
+    G["Idle gaps"] --> W["Warm / sleep / zero state<br/>(subject to SLO + isolation)"]
+```
+
+- SLO: service-level objective.
+- Idle gaps select warm/sleep/zero states subject to SLO and isolation constraints.
+- Owned elsewhere: steady-state sizing in 4.7; failure/reload recovery in 20.6; prices in 22; LoRA adapter cold start in EXPERT-TRACK module 35.
 
 ## 04 Lessons
 
@@ -79,28 +128,57 @@ What does each span, event, and metric measure, and which schema revision makes 
 **Concepts & Definitions:**
 - A **span** times one operation and preserves causal links; an **event** records a timestamped occurrence; a **metric** is an aggregate that has lost request identity.
 - A **logical client span** may cover retries; attempt child spans/events preserve attempt detail. Client, server, and attempt clocks are not interchangeable (**O**, CLM-004, CLM-005; **D**, CLM-011).
-- At core semantic-conventions commit `70550277d98a01ca3fe83bcfc3a2dac18a0d98b7`, GenAI definitions are moved/deprecated. At `semantic-conventions-genai` commit `b31e9e8ea26ac1c086d3313d474e31d7c3f391ae`, inspected GenAI spans, metrics, events, and attributes are **Development**, not Stable (**O**, CLM-001, CLM-002, CLM-003). Production mappings must record revision.
+- At core semantic-conventions commit `70550277d98a01ca3fe83bcfc3a2dac18a0d98b7`, GenAI definitions are moved/deprecated.
+  - At `semantic-conventions-genai` commit `b31e9e8ea26ac1c086d3313d474e31d7c3f391ae`, inspected GenAI spans, metrics, events, and attributes are **Development**, not Stable (**O**, CLM-001, CLM-002, CLM-003).
+  - Production mappings must record revision.
 - Finish reasons preserve error/cancellation positions; operation status does not imply answer quality (**O**, CLM-006, CLM-044). Token histograms and counters have different aggregation contracts (**O**, CLM-010).
 
 **Mechanism Explanation:**
-At request start, create a logical operation span with sampling-eligible attributes. Each retry gets attempt evidence. Evaluation results are events correlated by response ID, not truth labels (**O**, CLM-009). At completion, record declared terminal state, latency, usage, and schema revision. Metrics aggregate bounded dimensions; the ledger retains request identity.
+- At request start, create a logical operation span with sampling-eligible attributes.
+- Each retry gets attempt evidence.
+- Evaluation results are events correlated by response ID, not truth labels (**O**, CLM-009).
+- At completion, record declared terminal state, latency, usage, and schema revision.
+- Metrics aggregate bounded dimensions; the ledger retains request identity.
+
+
 
 **Quantitative Model / Derivation:**
-For 121 client chunks, mean per-output-chunk time is `(last-first)/(121-1)`. Server TPOT similarly divides post-first-token duration by output-token gaps. These are exact only at their named clocks and populations.
+For $n$ client chunks with arrival times $t_1, \dots, t_n$, mean per-output-chunk time is
 
-*Why divide by $n-1$:* $n$ arrivals have only $n-1$ gaps between them (fence-post rule). The first arrival marks the start of the averaged interval, so 121 chunks give 120 gaps and 241 tokens give 240 gaps. TTFC (time to first chunk) is read on the client clock; TTFT (time to first token) and TPOT (time per output token) are read on the server clock.
+$$
+\bar g = \frac{t_n - t_1}{n - 1}
+$$
+
+where:
+- $\bar g$: mean gap between consecutive client chunks (s)
+- $t_1$, $t_n$: arrival times of the first and last chunk on the client clock (s)
+- $n$: number of chunks received (count)
+
+Server TPOT similarly divides post-first-token duration by output-token gaps. These are exact only at their named clocks and populations.
+
+*Why divide by $n-1$:*
+- $n$ arrivals have only $n-1$ gaps between them (fence-post rule).
+- The first arrival marks the start of the averaged interval, so 121 chunks give 120 gaps and 241 tokens give 240 gaps.
+- TTFC (time to first chunk) is read on the client clock; TTFT (time to first token) and TPOT (time per output token) are read on the server clock.
 
 **Worked Example (synthetic):**
-Input: logical client span 3.650 s; attempt 1 fails at 0.600 s; retry starts 0.650 s; first client chunk at 1.250 s; last at 3.650 s; server receives retry at 0.670 s, first token after 0.560 s, and 241 tokens finish after 2.960 s server duration.
+Input:
+- Logical client span 3.650 s.
+- Attempt 1 fails at 0.600 s; retry starts 0.650 s.
+- First client chunk at 1.250 s; last at 3.650 s.
+- Server receives retry at 0.670 s, first token after 0.560 s, and 241 tokens finish after 2.960 s server duration.
+
 1. Client time to first chunk from logical start = 1.250 s; from retry = 0.600 s.
-2. Client mean chunk gap = `(3.650-1.250)/120 = 0.020 s`.
-3. Server TPOT = `(2.960-0.560)/240 = 0.010 s`.
+2. Client mean chunk gap $= (3.650 - 1.250) / 120 = 0.020$ s.
+3. Server TPOT $= (2.960 - 0.560) / 240 = 0.010$ s.
 4. A `(0.64,1.28]` TTFC histogram bucket cannot recover retry or server decomposition.
 Step 4 in plain terms: a histogram keeps only "this request fell somewhere in 0.64–1.28 s"; the retry and the server-side timings are already gone and cannot be rebuilt from it.
 Result: no valid subtraction converts client TTFC into server TTFT. Limit: synthetic clocks; unsynchronized clock skew needs separate measurement.
 
 **Knowledge Check:**
-1. Why can one successful logical span contain a failed attempt? 2. Why cannot span status serve as quality truth? 3. Are pinned GenAI attributes stable?
+1. Why can one successful logical span contain a failed attempt?
+2. Why cannot span status serve as quality truth?
+3. Are pinned GenAI attributes stable?
 
 **Guided Practice:**
 Write contracts for one logical span, attempt event, evaluation event, and offered-request counter. Include timestamps, population, units, aggregation, terminal states, and revision.
@@ -129,20 +207,62 @@ How can trace continuity and rate estimates survive retries, sampling, late span
 - **Censoring**: unfinished, crashed, cancelled, or unexported work lacks an observed terminal span. It is neither a negative label nor success.
 
 **Mechanism Explanation:**
-Propagate context gateway → orchestrator → retrieval/provider/tool. Record request, trace, operation, and attempt IDs in a reliability ledger, never as unbounded metric labels. Reconcile ingress offered records with terminal ledger rows and export counters. If inclusion probability is known, use adjusted counts; if eviction adds unknown selection, report non-identifiability.
+
+
+- Propagate context gateway → orchestrator → retrieval/provider/tool.
+- Record request, trace, operation, and attempt IDs in a reliability ledger, never as unbounded metric labels.
+- Reconcile ingress offered records with terminal ledger rows and export counters.
+- If inclusion probability is known, use adjusted counts; if eviction adds unknown selection, report non-identifiability.
 
 **Quantitative Model / Derivation:**
-`P(observe at least one of k rare events)=1-(1-p)^k`. With unequal inclusion probabilities, estimate a rate as `Σ(y_i/p_i)/Σ(1/p_i)` only when every `p_i` is known and no extra censoring exists.
+$$
+P(\text{observe at least one of } k \text{ rare events}) = 1 - (1-p)^k
+$$
 
-*Reading the formulas:* each event is kept independently with probability $p$, so it is missed with probability $1-p$; all $k$ are missed with probability $(1-p)^k$, and the complement is "see at least one". In the weighted estimate the sums run over exported traces; $y_i=1$ if trace $i$ failed, else 0, and $p_i$ is its inclusion probability. Each kept trace stands in for $1/p_i$ offered requests, so the numerator estimates total failures and the denominator estimates total requests. If traces vanished for a reason with no known $p_i$ (eviction, crash), their weight is unknown and the rate is not identifiable.
+where:
+- $p$: per-event inclusion (sampling) probability (dimensionless, 0–1)
+- $k$: number of rare events offered (count)
+
+With unequal inclusion probabilities, estimate a rate as
+
+$$
+\hat r = \frac{\sum_i y_i / p_i}{\sum_i 1 / p_i}
+$$
+
+only when every $p_i$ is known and no extra censoring exists.
+
+where:
+- $\hat r$: estimated failure rate over offered requests (fraction)
+- $i$: index over exported traces
+- $y_i$: 1 if trace $i$ failed, else 0
+- $p_i$: inclusion probability of trace $i$ (0–1)
+
+*Reading the formulas:*
+- Each event is kept independently with probability $p$, so it is missed with probability $1-p$.
+- All $k$ are missed with probability $(1-p)^k$; the complement is "see at least one".
+- In the weighted estimate, each kept trace stands in for $1/p_i$ offered requests: the numerator estimates total failures, the denominator total requests.
+- If traces vanished for a reason with no known $p_i$ (eviction, crash), their weight is unknown and the rate is not identifiable.
 
 **Worked Example (synthetic; D):**
-One million offered requests contain 40 rare failures. At `p=0.01`, expected sampled failures = 0.4 and visibility is `1-0.99^40=0.331` (**D**, CLM-018). Tail policy keeps all 40 failures and 1% of 999,960 successes: exported count ≈10,039.6; naive failure share `40/10039.6=0.398%`, versus true `0.004%`. Weighting failures by 1 and successes by 100 recovers `40/1,000,000=0.004%`. If 500 crashed workers never end spans, span-only correction cannot recover them (**D**, CLM-019).
+Input: one million offered requests contain 40 rare failures.
 
-Step by step: head sampling expects `40×0.01=0.4` failures; the chance of seeing none is `0.99^40≈0.669`, so visibility is `1-0.669=0.331`. Tail sampling exports `40+0.01×999,960=40+9,999.6=10,039.6` traces; dividing failures by exported traces inflates the failure share about 100×. Each kept success has `p=0.01` (weight 100) and each failure `p=1` (weight 1): weighted failures `=40`, weighted total `=40+9,999.6×100=1,000,000`.
+- Head sampling at $p = 0.01$ (**D**, CLM-018):
+  - Expected sampled failures: $40 \times 0.01 = 0.4$.
+  - Chance of seeing none: $0.99^{40} \approx 0.669$.
+  - Visibility: $1 - 0.669 = 0.331$.
+- Tail sampling keeps all 40 failures and 1% of 999,960 successes:
+  - Exported traces: $40 + 0.01 \times 999{,}960 = 40 + 9{,}999.6 = 10{,}039.6$.
+  - Naive failure share: $40 / 10{,}039.6 = 0.398\%$, versus true $0.004\%$ (inflated about $100\times$).
+- Weighted correction: each kept success has $p_i = 0.01$ (weight 100), each failure $p_i = 1$ (weight 1):
+  - Weighted failures: $40$.
+  - Weighted total: $40 + 9{,}999.6 \times 100 = 1{,}000{,}000$.
+  - Rate: $40 / 1{,}000{,}000 = 0.004\%$.
+- If 500 crashed workers never end spans, span-only correction cannot recover them (**D**, CLM-019).
 
 **Knowledge Check:**
-1. Why is sampled=true not proof all child spans arrived? 2. When is inverse-probability weighting invalid? 3. What population contains crashed requests?
+1. Why is sampled=true not proof all child spans arrived?
+2. When is inverse-probability weighting invalid?
+3. What population contains crashed requests?
 
 **Guided Practice:**
 Simulate 1,000 windows and test the predicted zero-observation fraction, naive tail bias, adjusted rate, and ingress reconciliation (**H**, CLM-042).
@@ -171,26 +291,53 @@ Which denominator represents user-visible reliability when work is rejected, can
 - Cancellations and unfinished requests are included, excluded by declared policy with sensitivity, or bounded—never silently dropped.
 
 **Mechanism Explanation:**
-Ingress writes every offered request. Terminal reconciliation assigns rejection, success, explicit error, timeout, cancellation, or unfinished-at-close. The SLI joins outcome checks. Trace-derived success is a diagnostic view, not reliability denominator.
+
+
+- Ingress writes every offered request.
+- Terminal reconciliation assigns rejection, success, explicit error, timeout, cancellation, or unfinished-at-close.
+- The SLI joins outcome checks.
+- Trace-derived success is a diagnostic view, not reliability denominator.
 
 **Quantitative Model / Derivation:**
-`SLI_offered=good/offered`. With `u` unfinished and `g` known good, bounds are `[g/N,(g+u)/N]`. Exclusion sensitivity recomputes both numerator and denominator under the declared policy.
+$$
+\text{SLI}_{\text{offered}} = \frac{\text{good}}{\text{offered}}
+$$
 
-*Why these bounds:* $N$ is the offered count. Unfinished requests have no known outcome, so the worst case counts all $u$ as bad (lower bound $g/N$) and the best case counts all as good (upper bound $(g+u)/N$). The width $u/N$ shows how much the unknowns could matter.
+where:
+- $\text{SLI}_{\text{offered}}$: fraction of offered requests that meet the good predicate (0–1)
+- good: requests satisfying the good predicate (count)
+- offered: every eligible ingress request, before admission (count)
+
+With $u$ unfinished and $g$ known good, bounds are $\left[\dfrac{g}{N},\ \dfrac{g+u}{N}\right]$. Exclusion sensitivity recomputes both numerator and denominator under the declared policy.
+
+*Why these bounds:*
+- $N$ is the offered count.
+- Unfinished requests have no known outcome, so the worst case counts all $u$ as bad (lower bound $g/N$) and the best case counts all as good (upper bound $(g+u)/N$).
+- The width $u/N$ shows how much the unknowns could matter.
 
 **Worked Example (synthetic; D, CLM-021):**
-Input: 120,000 offered; 6,000 rejected; 108,300 completed OK; 1,140 errors; 2,280 timeouts; 1,710 cancellations; 570 unfinished; 104,000 pass latency and schema.
-Check: buckets sum to `6,000+108,300+1,140+2,280+1,710+570=120,000` offered; admitted `=120,000-6,000=114,000`; completed (OK plus explicit error) `=108,300+1,140=109,440`. Each view below changes the denominator (and, for step 4, the good predicate).
-1. Completion-conditioned success = `108300/109440=98.96%`.
-2. Admitted completion = `108300/114000=95.00%`.
-3. Offered completion = `108300/120000=90.25%`.
-4. Offered-outcome good = `104000/120000=86.67%`.
-5. Excluding cancellations = `104000/118290=87.92%`.
-6. Unfinished bounds = `[104000,104570]/120000=[86.67%,87.14%]` (the upper bound counts all 570 unfinished as good).
+Input:
+- 120,000 offered; 6,000 rejected.
+- 108,300 completed OK; 1,140 errors; 2,280 timeouts; 1,710 cancellations; 570 unfinished.
+- 104,000 pass latency and schema.
+Check:
+- Offered: $6{,}000 + 108{,}300 + 1{,}140 + 2{,}280 + 1{,}710 + 570 = 120{,}000$.
+- Admitted: $120{,}000 - 6{,}000 = 114{,}000$.
+- Completed (OK plus explicit error): $108{,}300 + 1{,}140 = 109{,}440$.
+
+Each view below changes the denominator (and, for step 4, the good predicate).
+1. Completion-conditioned success $= 108{,}300 / 109{,}440 = 98.96\%$.
+2. Admitted completion $= 108{,}300 / 114{,}000 = 95.00\%$.
+3. Offered completion $= 108{,}300 / 120{,}000 = 90.25\%$.
+4. Offered-outcome good $= 104{,}000 / 120{,}000 = 86.67\%$.
+5. Excluding cancellations $= 104{,}000 / 118{,}290 = 87.92\%$.
+6. Unfinished bounds $= [104{,}000,\ 104{,}570] / 120{,}000 = [86.67\%,\ 87.14\%]$ (the upper bound counts all 570 unfinished as good).
 Limit: cancellations may be caused by slowness; exclusion can hide harm.
 
 **Knowledge Check:**
-1. Why can admitted latency look healthy during mass rejection? 2. How should unfinished requests appear? 3. When may quality join the primary SLI?
+1. Why can admitted latency look healthy during mass rejection?
+2. How should unfinished requests appear?
+3. When may quality join the primary SLI?
 
 **Guided Practice:**
 Design availability/latency and mature-quality predicates for a streaming endpoint; include retry ownership, cancellation sensitivity, and window closure.
@@ -213,32 +360,86 @@ Design availability/latency and mature-quality predicates for a streaming endpoi
 How should alert thresholds be recomputed for this SLO, window, traffic level, and response time?
 
 **Concepts & Definitions:**
-- Allowance `a=1-S`; burn rate `B=e/a`; burn 1 exhausts budget exactly over SLO period.
-  - Terms: `S` is the SLO target, `a` the allowed bad fraction, `e` the observed error ratio in a window, `T` the SLO period. Example: `S=99.9%` gives `a=0.001`; over 30 days (`43,200 min`) that equals `0.001×43,200=43.2 min` of full outage. Burn `B=2` spends budget twice as fast as allowed, so it lasts `T/2`. Since `e≤1`, the largest possible burn is `1/a`.
+- Allowance and burn rate:
+
+  $$a = 1 - S, \qquad B = \frac{e}{a}$$
+
+  where:
+  - $S$: SLO target (fraction, e.g. 0.999)
+  - $a$: allowed bad fraction (dimensionless)
+  - $e$: observed error ratio in a window (dimensionless)
+  - $B$: burn rate (multiple of the allowed rate)
+  - $T$: SLO period (min or h)
+
+  Burn $B = 1$ exhausts budget exactly over the SLO period.
+  - Example: $S = 99.9\%$ gives $a = 0.001$; over 30 days ($43{,}200$ min) that equals $0.001 \times 43{,}200 = 43.2$ min of full outage.
+  - Burn $B = 2$ spends budget twice as fast as allowed, so it lasts $T/2$.
+  - Since $e \le 1$, the largest possible burn is $1/a$.
 - Multiwindow alerts pair a long budget-consumption window with a short active-burn window. Workbook values 14.4/6/1 are starting points for a 99.9%, 30-day example, not constants (**O**, CLM-022).
 - Low traffic needs counts/intervals, separate synthetics, or a longer/combined population; one failure can be a noisy page (**O**, CLM-024).
 
 **Mechanism Explanation:**
-Choose page-value budget fractions and response windows, derive burn, convert to error ratio, verify `B≤1/a`, require both windows, and add minimum-event or uncertainty treatment. Keep synthetics separate from real-user SLIs.
+```mermaid
+flowchart TD
+    P1["Choose page-value budget fraction f<br/>and response window w"] --> P2["Derive burn B = f·T / w"]
+    P2 --> P3["Convert to error ratio B·a"]
+    P3 --> P4{"B ≤ 1/a ?"}
+    P4 -->|no| P5["Alert impossible: re-choose f or w"]
+    P4 -->|yes| P6["Require long AND short window"]
+    P6 --> P7["Add minimum-event or<br/>uncertainty treatment"]
+```
+
+- $f$: budget fraction; $w$: window; $T$: SLO period; $a$: allowed bad fraction; $B$: burn rate.
+- Keep synthetics separate from real-user SLIs.
 
 **Quantitative Model / Derivation:**
-Budget fraction consumed over `w` is `Bw/T`; constant-rate exhaustion is `T/B`; approximate fire time after outage onset is `(a/e)wB` plus evaluation and notification delay.
+$$
+f = \frac{B w}{T}, \qquad T_{\text{exhaust}} = \frac{T}{B}, \qquad t_{\text{fire}} \approx \frac{a}{e}\, w B
+$$
 
-*Derivation steps:* (1) Pick the budget fraction $f$ a page should represent and the long window $w$. (2) Solve $f=Bw/T$ for the alert burn $B=fT/w$. (3) Convert to an error-ratio threshold $Ba$. (4) In the fire-time formula, $B$ is the alert-threshold burn and $e$ the actual outage error ratio: the window average rises roughly linearly as the outage fills the window, reaching $Ba$ after a fraction $Ba/e$ of $w$, i.e. time $(a/e)wB$.
+where:
+- $f$: budget fraction consumed over window $w$ (dimensionless)
+- $w$: alert window length (h or min)
+- $B$: burn rate; $T$: SLO period (same unit as $w$)
+- $T_{\text{exhaust}}$: time to exhaust budget at constant burn (unit of $T$)
+- $t_{\text{fire}}$: approximate fire time after outage onset, plus evaluation and notification delay (unit of $w$)
+- $a$: allowed bad fraction; $e$: actual outage error ratio
+
+*Derivation steps:*
+1. Pick the budget fraction $f$ a page should represent and the long window $w$.
+2. Solve $f=Bw/T$ for the alert burn $B=fT/w$.
+3. Convert to an error-ratio threshold $Ba$.
+4. In the fire-time formula, $B$ is the alert-threshold burn and $e$ the actual outage error ratio. The window average rises roughly linearly as the outage fills the window, reaching $Ba$ after a fraction $Ba/e$ of $w$, i.e. time $(a/e)wB$.
 
 **Worked Example (synthetic arithmetic; D, CLM-023):**
-For 30 days = 720 h: 2%/1 h gives `B=14.4`; 5%/6 h gives `B=6`; 10%/72 h gives `B=1`. At SLO 99%, thresholds are 14.4%, 6%, 1%. A 30% error ratio burns 30×, exhausts in 24 h, and reaches the 1 h page after `0.01/0.30×60×14.4=28.8 min`. At SLO 90%, maximum burn is 10, so a 14.4× alert is impossible. At 10 req/h and 99.9%, one hourly failure is 100× burn and consumes `1/7.2=13.9%` of monthly budget—not 1,000×.
+Input: $T = 30$ days $= 720$ h.
 
-Step by step: `B=fT/w`, so `0.02×720/1=14.4`, `0.05×720/6=6`, `0.10×720/72=1`. At 99% (`a=0.01`) thresholds are `14.4×0.01=14.4%`, `6×0.01=6%`, `1×0.01=1%`. A 30% error ratio gives `B=0.30/0.01=30`; exhaustion `720/30=24 h`; fire time `(0.01/0.30)×60 min×14.4=28.8 min`. At 90% SLO, `a=0.1`, max burn `1/0.1=10<14.4`. Low traffic: 1 failure in 10 requests is `e=0.1`, `B=0.1/0.001=100`; the month has `10×720=7,200` requests and `7,200×0.001=7.2` allowed failures, so one failure uses `1/7.2≈13.9%`. 1,000× (`=1/a`) would require every request in the window to fail.
+- Alert burns from $B = fT/w$:
+  - 2% / 1 h: $0.02 \times 720 / 1 = 14.4$.
+  - 5% / 6 h: $0.05 \times 720 / 6 = 6$.
+  - 10% / 72 h: $0.10 \times 720 / 72 = 1$.
+- Error-ratio thresholds at SLO 99% ($a = 0.01$): $14.4 \times 0.01 = 14.4\%$, $6 \times 0.01 = 6\%$, $1 \times 0.01 = 1\%$.
+- A 30% error ratio:
+  - Burn: $B = 0.30 / 0.01 = 30$.
+  - Exhaustion: $720 / 30 = 24$ h.
+  - Fire time for the 1 h page: $(0.01 / 0.30) \times 60 \text{ min} \times 14.4 = 28.8$ min.
+- At SLO 90%: $a = 0.1$, max burn $1/0.1 = 10 < 14.4$, so a $14.4\times$ alert is impossible.
+- Low traffic (10 req/h, SLO 99.9%):
+  - 1 failure in 10 requests: $e = 0.1$, $B = 0.1 / 0.001 = 100$.
+  - Month: $10 \times 720 = 7{,}200$ requests, $7{,}200 \times 0.001 = 7.2$ allowed failures.
+  - One failure uses $1 / 7.2 \approx 13.9\%$ of monthly budget, not $1{,}000\times$.
+  - $1{,}000\times$ ($= 1/a$) would require every request in the window to fail.
 
 **Knowledge Check:**
-1. Why does maximum burn depend on SLO? 2. Why require long and short windows? 3. Why can synthetic success not repair real-user reliability?
+1. Why does maximum burn depend on SLO?
+2. Why require long and short windows?
+3. Why can synthetic success not repair real-user reliability?
 
 **Guided Practice:**
 For SLO 99.5%, derive thresholds for 2%/1 h and 5%/6 h, expected fire times for 20% errors, and low-traffic behavior at 30 requests/hour.
 
 **Feedback Contract:**
-- **Expected Evidence**: `a=.005`; burns 14.4 and 6; error thresholds 7.2% and 3%; explicit count treatment.
+- **Expected Evidence**: $a = 0.005$; burns 14.4 and 6; error thresholds 7.2% and 3%; explicit count treatment.
 - **Common Failure**: Copying thresholds or paging on a percentage with one event.
 - **Diagnostic Hint**: Check maximum burn and actual event count first.
 - **Concept to Revisit**: Error allowance and budget fraction.
@@ -261,23 +462,48 @@ How can fast detectors support operations without being promoted to ground truth
 - Prediction-powered inference is an alternative using labeled and unlabeled target samples; registry inspection is abstract-level (**O**, CLM-027).
 
 **Mechanism Explanation:**
-Fast proxies page or prioritize review. A separate mature quality SLI joins independent labels by response ID and cohort age. Calibration correction requires invariant conditional judge behavior; new failure mixes invalidate it.
+
+
+- Fast proxies page or prioritize review.
+- A separate mature quality SLI joins independent labels by response ID and cohort age.
+- Calibration correction requires invariant conditional judge behavior; new failure mixes invalidate it.
 
 **Quantitative Model / Derivation:**
-With sensitivity `q1`, specificity `q0`, and raw pass `p`, corrected prevalence is `(p+q0-1)/(q0+q1-1)`, requiring `q0+q1>1` and invariance. Delayed-positive estimate at age `d` is `n_d/(N F(d))`. Detector PPV is `πs/[πs+(1-π)FPR]`.
+$$
+\hat\theta = \frac{p + q_0 - 1}{q_0 + q_1 - 1}, \qquad \hat r_d = \frac{n_d}{N\,F(d)}, \qquad \text{PPV} = \frac{\pi s}{\pi s + (1 - \pi)\,\text{FPR}}
+$$
+
+where:
+- $\hat\theta$: corrected prevalence (true good rate, 0–1), from sensitivity $q_1$, specificity $q_0$, raw pass $p$; requires $q_0 + q_1 > 1$ and invariance
+- $\hat r_d$: delayed-positive estimate at age $d$ (fraction)
+- $n_d$, $N$: positives seen and outcomes at age $d$ (counts); $F(d)$: arrival fraction by age $d$ (0–1)
+- PPV: detector positive predictive value (0–1); $\pi$: prior incident rate; $s$: sensitivity; FPR: false-positive rate
 
 *Where these come from:*
-- Correction: $q_1=P(\text{judge pass}\mid\text{truly good})$, $q_0=P(\text{judge reject}\mid\text{truly bad})$. With true good rate $\theta$, raw pass is $p=q_1\theta+(1-q_0)(1-\theta)$; solving for $\theta$ gives $(p+q_0-1)/(q_0+q_1-1)$. If $q_0+q_1\le 1$ the judge is no better than chance and the denominator is zero or negative.
+- Correction:
+  - $q_1=P(\text{judge pass}\mid\text{truly good})$, $q_0=P(\text{judge reject}\mid\text{truly bad})$.
+  - With true good rate $\theta$, raw pass is $p=q_1\theta+(1-q_0)(1-\theta)$; solving for $\theta$ gives $(p+q_0-1)/(q_0+q_1-1)$.
+  - If $q_0+q_1\le 1$ the judge is no better than chance and the denominator is zero or negative.
 - Delay: $n_d$ is positives (e.g. complaints) seen among $N$ outcomes of age $d$; $F(d)$ is the fraction of eventual positives arrived by age $d$, estimated from mature cohorts. Dividing by $F(d)$ scales the partial count to its expected final value.
 - PPV (positive predictive value) is Bayes' rule: $\pi$ is the prior incident rate, $s$ sensitivity, FPR the false-positive rate. Numerator = true alarms; denominator = true plus false alarms.
 
 **Worked Example (synthetic; D):**
-Calibration: `q1=.92`, `q0=.80`. Raw pass `.88` corrects to `.68/.72=.944`; `.82` to `.62/.72=.861`, so raw 6 points understates corrected 8.3 points (**D**, CLM-026). A new accepted failure type can make stale correction read `.919` while truth is `.860`; proxy is not truth. Separately, 150 complaints among 10,000 day-old outcomes with `F(1d)=.5` estimate `150/(10000×.5)=3%`, not 1.5%. At 2% incident prior, sensitivity .9 and FPR .1 give PPV `.018/.116=.155` (**D**, CLM-031).
-
-Step by step: denominator `q0+q1-1=.80+.92-1=.72`; raw `.88` gives numerator `.88+.80-1=.68`, raw `.82` gives `.62`. Raw gap `.88-.82=.06`; corrected gap `.944-.861=.083`. PPV: true alarms `.02×.9=.018`, false alarms `.98×.1=.098`, total `.116`; roughly 1 alarm in 6.5 is a real incident.
+- Calibration correction with $q_1 = 0.92$, $q_0 = 0.80$ (**D**, CLM-026):
+  - Denominator: $q_0 + q_1 - 1 = 0.80 + 0.92 - 1 = 0.72$.
+  - Raw $0.88$: numerator $0.88 + 0.80 - 1 = 0.68$, corrected $0.68 / 0.72 = 0.944$.
+  - Raw $0.82$: numerator $0.62$, corrected $0.62 / 0.72 = 0.861$.
+  - Raw gap $0.88 - 0.82 = 0.06$ understates corrected gap $0.944 - 0.861 = 0.083$.
+  - A new accepted failure type can make stale correction read $0.919$ while truth is $0.860$; proxy is not truth.
+- Delayed labels: 150 complaints among 10,000 day-old outcomes with $F(1\text{d}) = 0.5$ estimate $150 / (10{,}000 \times 0.5) = 3\%$, not 1.5%.
+- PPV at 2% incident prior, sensitivity 0.9, FPR 0.1 (**D**, CLM-031):
+  - True alarms: $0.02 \times 0.9 = 0.018$.
+  - False alarms: $0.98 \times 0.1 = 0.098$.
+  - PPV: $0.018 / 0.116 = 0.155$; roughly 1 alarm in 6.5 is a real incident.
 
 **Knowledge Check:**
-1. What invariance makes correction valid? 2. Why are missing recent complaints not negatives? 3. Can drift detection identify harm?
+1. What invariance makes correction valid?
+2. Why are missing recent complaints not negatives?
+3. Can drift detection identify harm?
 
 **Guided Practice:**
 Create two weekly cohorts, inject a judge-accepted failure slice, and compare raw, corrected, and human-audited rates with evaluator/rubric versions.
@@ -285,7 +511,7 @@ Create two weekly cohorts, inject a judge-accepted failure slice, and compare ra
 **Feedback Contract:**
 - **Expected Evidence**: Confusion matrix, correction and interval inputs, cohort maturity, slice audit.
 - **Common Failure**: Calling judge or embedding distance ground truth.
-- **Diagnostic Hint**: Recompute `P(proxy|truth)` by slice and week.
+- **Diagnostic Hint**: Recompute $P(\text{proxy} \mid \text{truth})$ by slice and week.
 - **Concept to Revisit**: Conditional invariance and delayed censoring.
 
 **Learning Outcome:** Operate proxy-quality and delayed-label systems with calibration limits explicit.
@@ -300,30 +526,72 @@ Create two weekly cohorts, inject a judge-accepted failure slice, and compare ra
 How do we keep telemetry affordable and private while preserving enough evidence to mitigate and discriminate incidents?
 
 **Concepts & Definitions:**
-- Each unique metric-label combination is a series; unbounded IDs do not belong on metric labels (**O**, CLM-033). OpenTelemetry specifies filtering before a default 2,000-point cardinality limit and an overflow series, subject to SDK support (**O**, CLM-032).
-- Prompt/output content is sensitive and large, off by default; an external content hook may run regardless of trace sampling (**O**, CLM-008). Data minimization and collector filtering/redaction remain implementer duties (**O**, CLM-034).
-- Incident loop: symptom → competing hypotheses → missing evidence → discriminating measurement → ranked explanation → intervention → remeasurement. Stop bleeding and preserve evidence before prolonged root-cause work (**O**, CLM-036).
+- Each unique metric-label combination is a series; unbounded IDs do not belong on metric labels (**O**, CLM-033).
+- OpenTelemetry specifies filtering before a default 2,000-point cardinality limit and an overflow series, subject to SDK support (**O**, CLM-032).
+- Prompt/output content is sensitive and large, off by default; an external content hook may run regardless of trace sampling (**O**, CLM-008).
+- Data minimization and collector filtering/redaction remain implementer duties (**O**, CLM-034).
+- Incident loop: Stop bleeding and preserve evidence before prolonged root-cause work (**O**, CLM-036).
+
+  Incident loop: symptom → competing hypotheses → missing evidence → discriminating measurement → ranked explanation → intervention → remeasurement.
 - Detection is not localization; controlled synthetic research reports this gap but is abstract-level and not a production rate (**O**, CLM-038).
 
 **Mechanism Explanation:**
-Filter labels before aggregation, observe overflow, sample trace envelopes and content independently, and separate access/retention. During a page, verify telemetry completeness, apply safe mitigation, preserve ledgers/config revisions, then discriminate provider, deployment, sampling/export, censoring, and quality-proxy hypotheses. Roll back only when Module 17 state compatibility permits.
+Governance:
+- Filter labels before aggregation and observe overflow.
+- Sample trace envelopes and content independently.
+- Separate access/retention.
+
+During a page:
+
+```mermaid
+flowchart TD
+    D1["Verify telemetry completeness"] --> D2["Apply safe mitigation"]
+    D2 --> D3["Preserve ledgers / config revisions"]
+    D3 --> D4["Discriminate hypotheses:<br/>provider, deployment, sampling/export,<br/>censoring, quality proxy"]
+    D4 --> D5{"Module 17 state<br/>compatibility permits?"}
+    D5 -->|yes| D6["Roll back"]
+    D5 -->|no| D7["Other mitigation; no rollback"]
+```
 
 **Quantitative Model / Derivation:**
-Series upper bound is the product of retained cardinalities. Trace volume = requests × sample fraction × spans/request × bytes/span. Content uses its own capture probability.
+$$
+S_{\max} = \prod_j |L_j|, \qquad V_{\text{trace}} = R \cdot \rho \cdot n_{\text{span}} \cdot b_{\text{span}}
+$$
 
-*Why a product:* a metric stores one time series per distinct label combination. With 3 values of label A and 2 of label B there are at most `3×2=6` combinations; each added label multiplies the count. A tenant or request ID label multiplies series by the number of tenants or requests, which is why unbounded IDs belong in the ledger, not on metric labels.
+where:
+- $S_{\max}$: series upper bound (count); $|L_j|$: retained cardinality of label $j$ (count)
+- $V_{\text{trace}}$: trace volume (bytes per period); $R$: requests (per period); $\rho$: sample fraction (0–1); $n_{\text{span}}$: spans/request; $b_{\text{span}}$: bytes/span
+
+Content uses its own capture probability.
+
+*Why a product:*
+- A metric stores one time series per distinct label combination.
+- With 3 values of label A and 2 of label B there are at most $3 \times 2 = 6$ combinations; each added label multiplies the count.
+- A tenant or request ID label multiplies series by the number of tenants or requests, which is why unbounded IDs belong in the ledger, not on metric labels.
 
 **Worked Example (synthetic; D, CLM-035):**
-Labels `3 models×2 providers×5 operations×5 errors×6 regions×4 tiers=3,600` series/metric; adding 500 tenants yields 1.8M. At 1M requests/day, 12 spans×1.2 KB = 14.4 GB/day unsampled. Content 26 KB/request = 26 GB/day. Over 30 days with traces at 1% but content hook at 100%: traces 4.32 GB + content 780 GB = 784.32 GB. Sampling traces alone misses budget and privacy target.
+- Series per metric (3 models, 2 providers, 5 operations, 5 errors, 6 regions, 4 tiers): $3 \times 2 \times 5 \times 5 \times 6 \times 4 = 3{,}600$.
+- Adding 500 tenants: $3{,}600 \times 500 = 1{,}800{,}000$.
+- Traces at 1M requests/day, 12 spans × 1.2 KB:
+  - Unsampled: $10^6 \times 12 \times 1.2$ KB $= 14.4$ GB/day.
+  - 30 days at 1%: $14.4 \times 30 \times 0.01 = 4.32$ GB.
+- Content at 26 KB/request, hook at 100%:
+  - Per day: $10^6 \times 26$ KB $= 26$ GB.
+  - 30 days: $26 \times 30 = 780$ GB.
+- Total: $4.32 + 780 = 784.32$ GB. Content dominates because the hook ignores trace sampling; sampling traces alone misses budget and privacy target.
 
-Step by step: `3×2×5×5×6×4=3,600`; `3,600×500=1,800,000`. Traces: `1M×12×1.2 KB=14.4 GB/day`, `×30 days×0.01=4.32 GB`. Content: `1M×26 KB=26 GB/day`, `×30=780 GB` at 100% capture. Content dominates because the hook ignores trace sampling.
-
-Mitigation arithmetic: at 99% SLO and burn 30, page at 28.8 min has consumed 2%; a 6-minute rollback adds 0.42%, totaling 2.42%. Diagnosing 45 minutes first totals 5.54% (**D**, CLM-037). Limit: rollback may be unsafe or irrelevant.
-
-Step by step (budget fraction `=Bw/T`, `T=43,200 min`): at page `30×28.8/43,200=2.00%`; rollback `30×6/43,200≈0.42%`; diagnosis `30×45/43,200≈3.13%`. Mitigate first: `2.00+0.42=2.42%`; diagnose first: `2.00+3.13+0.42≈5.54%`.
+Mitigation arithmetic (**D**, CLM-037), using $f = Bw/T$ with $B = 30$ (99% SLO) and $T = 43{,}200$ min:
+- At page: $30 \times 28.8 / 43{,}200 = 2.00\%$.
+- Rollback (6 min): $30 \times 6 / 43{,}200 \approx 0.42\%$.
+- Diagnosis (45 min): $30 \times 45 / 43{,}200 \approx 3.13\%$.
+- Mitigate first: $2.00 + 0.42 = 2.42\%$.
+- Diagnose first: $2.00 + 3.13 + 0.42 \approx 5.54\%$.
+- Limit: rollback may be unsafe or irrelevant.
 
 **Knowledge Check:**
-1. Why does trace sampling not bound content capture? 2. What evidence distinguishes telemetry loss from traffic loss? 3. When should rollback not be first mitigation?
+1. Why does trace sampling not bound content capture?
+2. What evidence distinguishes telemetry loss from traffic loss?
+3. When should rollback not be first mitigation?
 
 **Guided Practice:**
 Given provider errors, exporter drops, a new evaluator rubric, and a deployment change, write predicted telemetry for each, a safe mitigation, and one discriminating query.
@@ -346,37 +614,130 @@ Given provider errors, exporter drops, a new evaluator rubric, and a deployment 
 Why can desired replicas rise while useful capacity stays flat, and which signal should drive the control loop?
 
 **Concepts & Definitions:**
-- **Control loop:** sample a signal, compare with a target, recommend capacity, actuate, and observe the delayed result. **Desired**, **created**, **Running**, **Ready**, and **serving useful traffic** are different states. Readiness must represent the declared engine contract, not merely a live process.
-- **Dead band/tolerance** ignores small target deviations; **stabilization** holds recommendations over time; **rate limits** bound replica changes. These address different sources of oscillation and delay.
-- **HPA** is Kubernetes' Horizontal Pod Autoscaler. Its metric calculator and the surrounding controller policies are separate stages. **KPA** is Knative's pod autoscaler; its stable/panic windows are not HPA settings.
-- **Time to capacity** spans a load change through useful added service, including sensing, decision, scheduling, and startup. This lesson owns the transient; [Lesson 4.7](../04-serving-scheduling-capacity/README.md#lesson-47--capacity-planning--bottleneck-discrimination) owns steady-state sizing and bottleneck discrimination.
+- **Control loop:** sample a signal, compare with a target, recommend capacity, actuate, and observe the delayed result.
+  - **Desired**, **created**, **Running**, **Ready**, and **serving useful traffic** are different states.
+  - Readiness must represent the declared engine contract, not merely a live process.
+- Three distinct controls address different sources of oscillation and delay:
+  - **Dead band/tolerance** ignores small target deviations.
+  - **Stabilization** holds recommendations over time.
+  - **Rate limits** bound replica changes.
+- **HPA** is Kubernetes' Horizontal Pod Autoscaler. Its metric calculator and the surrounding controller policies are separate stages.
+- **KPA** is Knative's pod autoscaler; its stable/panic windows are not HPA settings.
+- **Time to capacity** spans a load change through useful added service, including sensing, decision, scheduling, and startup.
+  - This lesson owns the transient; [Lesson 4.7](../04-serving-scheduling-capacity/README.md#lesson-47--capacity-planning--bottleneck-discrimination) owns steady-state sizing and bottleneck discrimination.
+
+```mermaid
+flowchart LR
+    SIG["Sample signal"] --> CMP["Compare with target<br/>(tolerance band)"]
+    CMP --> REC["Recommend capacity<br/>(stabilization, rate limits)"]
+    REC --> DES["Desired"]
+    DES --> CRE["Created"]
+    CRE --> RUN["Running"]
+    RUN --> RDY["Ready<br/>(engine contract)"]
+    RDY --> USE["Serving useful traffic"]
+    USE -.->|delayed observation| SIG
+```
 
 **Mechanism Explanation:**
-Observe offered arrivals, waiting work, queue age, loaded latency/goodput, and desired/current/ready replicas on the same timeline. Google GKE guidance explains why `DCGM_FI_DEV_GPU_UTIL` is a poor sole scaling signal: it measures duty cycle, not work accomplished during active time. GPU memory occupancy can remain high because serving systems preallocate memory; that does not establish current request load (**O**, CLM-047). Queue depth is closer to pending demand, but heterogeneous lengths mean equal request counts need not mean equal work. Calibrate the target against Module 04 load tests; no copied queue threshold guarantees an SLO.
+Observe offered arrivals, waiting work, queue age, loaded latency/goodput, and desired/current/ready replicas on the same timeline. Signal choice:
+- Google GKE guidance explains why `DCGM_FI_DEV_GPU_UTIL` is a poor sole scaling signal: it measures duty cycle, not work accomplished during active time.
+- GPU memory occupancy can remain high because serving systems preallocate memory; that does not establish current request load (**O**, CLM-047).
+- Queue depth is closer to pending demand, but heterogeneous lengths mean equal request counts need not mean equal work.
+- Calibrate the target against Module 04 load tests; no copied queue threshold guarantees an SLO.
 
-At the pinned Kubernetes **master snapshot**, `GetResourceReplicas`/`calcPlainMetricReplicas` group ignored, missing, and unready pods. Missing samples conservatively damp changes: on scale-up use zero for missing pods; resource-utilization scale-down uses at least 100% of requested resource. CPU readiness/initialization filtering applies only to CPU, not every custom metric. A revised ratio inside tolerance or reversing direction cancels the action (**O**, CLM-045). A loading server with no custom sample may be missing, but its actual exporter timing must be measured, not inferred from this code.
+At the pinned Kubernetes **master snapshot** (**O**, CLM-045):
+- `GetResourceReplicas`/`calcPlainMetricReplicas` group ignored, missing, and unready pods.
+- Missing samples conservatively damp changes: on scale-up use zero for missing pods; resource-utilization scale-down uses at least 100% of requested resource.
+- CPU readiness/initialization filtering applies only to CPU, not every custom metric.
+- A revised ratio inside tolerance or reversing direction cancels the action.
+- A loading server with no custom sample may be missing, but its actual exporter timing must be measured, not inferred from this code.
 
-At the pinned Knative snapshot, stable concurrency averages guide normal scaling; a shorter panic average can enter panic. In panic, the requested scale cannot decrease below the retained panic maximum; exit needs a stable-window calm period. Default config is stable window 60 s, panic window 10% of stable, panic threshold 200%, with separate scale-rate and scale-down-delay controls. Default unconstrained concurrency total is 100 and target fraction 0.7, yielding a target of 70, not an LLM-specific recommendation (**O**, CLM-046). Trace `ResolveMetricTarget`, window construction, and `(*autoscaler).Scale` together; defaults alone do not prove configured behavior.
+At the pinned Knative snapshot (**O**, CLM-046):
+- Stable concurrency averages guide normal scaling; a shorter panic average can enter panic.
+- In panic, the requested scale cannot decrease below the retained panic maximum; exit needs a stable-window calm period.
+- Default config: stable window 60 s, panic window 10% of stable, panic threshold 200%, with separate scale-rate and scale-down-delay controls.
+- Default unconstrained concurrency total is 100 and target fraction 0.7, yielding a target of 70, not an LLM-specific recommendation.
+- Trace `ResolveMetricTarget`, window construction, and `(*autoscaler).Scale` together; defaults alone do not prove configured behavior.
+
+
 
 **Quantitative Model / Derivation:**
 For complete pod metrics with ready count $N_r$, measured average $m$, positive target $m_*$ and ratio $r=m/m_*$, the pinned HPA calculator keeps current replicas inside the inclusive band
 $$1-\tau_d\le r\le1+\tau_u,$$
 and otherwise recommends
 $$N'=\lceil N_r r\rceil.$$
-The familiar docs expression $\lceil N_{current}m/m_*\rceil$ assumes the current population equals the measured ready population. Missing/unready samples and downstream min/max, stabilization, or rate policies change the result. Tolerance supports asymmetric values in code; the docs report default 0.1. For total external/object metric scale-from-zero, the inspected helper instead returns $\lceil m/m_*\rceil$ without multiplying by zero; this does not by itself configure API/feature eligibility (**O**, CLM-045).
 
-For KPA, desired stable and panic counts are initially $\lceil C_s/t\rceil$ and $\lceil C_p/t\rceil$, where $C_s,C_p$ are window-average aggregate concurrency and $t$ is target concurrency/pod. Rate clamps and panic retention follow. Window percentages yield $60\cdot0.10=6$ s at defaults, floored by the bucket size (**O**, CLM-046).
+where:
+- $N_r$: ready pods with metrics (count)
+- $m$: measured average metric per pod (metric unit, e.g. waiting requests)
+- $m_*$: positive target per pod (same unit as $m$)
+- $r$: usage ratio $m/m_*$ (dimensionless)
+- $\tau_d$, $\tau_u$: downward and upward tolerance (dimensionless; docs default 0.1)
+- $N'$: recommended replicas before controller policies (count)
 
-For a non-overlapping causal startup path, let elapsed detection, decision, and cold-start times be $T_d,T_a,T_c$ in seconds:
+Caveats (**O**, CLM-045):
+- The familiar docs expression $\lceil N_{current}m/m_*\rceil$ assumes the current population equals the measured ready population.
+- Missing/unready samples and downstream min/max, stabilization, or rate policies change the result.
+- Tolerance supports asymmetric values in code; the docs report default 0.1.
+- For total external/object metric scale-from-zero, the inspected helper instead returns $\lceil m/m_*\rceil$ without multiplying by zero; this does not by itself configure API/feature eligibility.
+
+For KPA (**O**, CLM-046):
+- Desired stable and panic counts are initially $\lceil C_s/t\rceil$ and $\lceil C_p/t\rceil$.
+  - $C_s$, $C_p$: stable- and panic-window average aggregate concurrency (requests in flight)
+  - $t$: target concurrency per pod (requests)
+- Rate clamps and panic retention follow.
+- Window percentages yield $60\cdot0.10=6$ s at defaults, floored by the bucket size.
+
+For a non-overlapping causal startup path:
 $$T_{cap}=T_d+T_a+T_c.$$
-This is an accounting decomposition, not a guarantee that detection waits a whole averaging window. Overlapping work requires a critical-path timeline, not double counting. With fixed excess offered rate $\Delta\lambda=\lambda-\mu_{current}>0$ req/s, an initially empty fluid queue, no drops/cancellations, and no added capacity before $T_{cap}$:
+
+where:
+- $T_{cap}$: time to capacity (s)
+- $T_d$, $T_a$, $T_c$: elapsed detection, decision, and cold-start times (s)
+
+This is an accounting decomposition, not a guarantee that detection waits a whole averaging window. Overlapping work requires a critical-path timeline, not double counting.
+
+With fixed excess offered rate $\Delta\lambda=\lambda-\mu_{current}>0$ req/s, an initially empty fluid queue, no drops/cancellations, and no added capacity before $T_{cap}$:
 $$Q(T_{cap})=\Delta\lambda T_{cap}.$$
-If new total service is $\mu_{new}>\lambda$, subsequent drain time is $Q/(\mu_{new}-\lambda)$. Adding just enough capacity to match arrivals does not drain the backlog. Neither equation guarantees per-request tails (**D**, CLM-048).
+
+where:
+- $Q(T_{cap})$: backlog at time to capacity (requests)
+- $\lambda$: offered arrival rate (req/s)
+- $\mu_{current}$: current total service rate (req/s)
+- $\Delta\lambda$: excess arrival rate (req/s)
+
+- If new total service is $\mu_{new}>\lambda$, subsequent drain time is $Q/(\mu_{new}-\lambda)$.
+- Adding just enough capacity to match arrivals does not drain the backlog.
+- Neither equation guarantees per-request tails (**D**, CLM-048).
+
+```mermaid
+flowchart LR
+    L["Load change"] -->|T_d| D["Detected"]
+    D -->|T_a| A["Decision / actuation"]
+    A -->|T_c| C["Capacity ready"]
+    C -->|"Q / (μ_new − λ)"| R["Backlog drained"]
+```
+
+- $T_d$, $T_a$, $T_c$: detection, decision, cold-start times (s); $Q$: backlog (requests); $\mu_{new}$: new service rate (req/s); $\lambda$: arrival rate (req/s).
+- Backlog grows at $\Delta\lambda$ from load change to capacity ready; drain starts only after.
 
 **Worked Example (synthetic inputs; Python-recomputed):**
-Four ready pods report average waiting depth 7, target 5. Ratio is 1.4 and recommendation is $\lceil4\cdot1.4\rceil=6$. At depth 5.4, ratio 1.08 stays inside a symmetric 10% band, so keep 4. Now suppose six current pods comprise four with value 7 and two missing/loading pods. The simplified zero-fill scale-up recomputation gives $28/6/5=0.9333$, reversing the initial scale-up direction: no additional increase. Six created pods are not six useful replicas.
+HPA ratio:
+- Four ready pods report average waiting depth 7, target 5.
+  - Ratio: $7/5 = 1.4$.
+  - Recommendation: $\lceil4\cdot1.4\rceil=6$.
+- At depth 5.4: ratio $1.08$ stays inside a symmetric 10% band, so keep 4.
+- Six current pods: four with value 7 and two missing/loading pods.
+  - Simplified zero-fill scale-up recomputation: $28/6/5=0.9333$.
+  - This reverses the initial scale-up direction: no additional increase.
+  - Six created pods are not six useful replicas.
 
-Assume measured detection 30 s, decision 15 s, startup 45 s: $T_{cap}=90$ s. Excess arrivals 2 req/s build 180 requests. After scale-up, spare capacity 3 req/s takes 60 s to drain them. A 90 s startup forecast is therefore not a 90 s recovery forecast. These are synthetic constant-rate assumptions, not HPA/Knative timing measurements.
+Time to capacity and backlog:
+- Measured detection 30 s, decision 15 s, startup 45 s: $T_{cap}=30+15+45=90$ s.
+- Excess arrivals 2 req/s build $2\times90=180$ requests.
+- After scale-up, spare capacity 3 req/s takes $180/3=60$ s to drain them.
+- A 90 s startup forecast is therefore not a 90 s recovery forecast.
+- These are synthetic constant-rate assumptions, not HPA/Knative timing measurements.
 
 **Knowledge Check:**
 1. Why is high GPU duty cycle insufficient to choose a replica target?
@@ -384,10 +745,14 @@ Assume measured detection 30 s, decision 15 s, startup 45 s: $T_{cap}=90$ s. Exc
 3. Why can a successful scale-up leave queue age high?
 
 **Guided Practice:**
-Replay the example with one missing sample instead of two and record original and adjusted ratios, direction, desired/current/ready counts. Then sketch a burst timeline with delayed metrics, slow readiness, and KPA panic retention. Choose one measurement that distinguishes a dead band from a startup bottleneck.
+1. Replay the example with one missing sample instead of two and record original and adjusted ratios, direction, desired/current/ready counts.
+2. Sketch a burst timeline with delayed metrics, slow readiness, and KPA panic retention.
+3. Choose one measurement that distinguishes a dead band from a startup bottleneck.
 
 **Feedback Contract:**
-- **Expected Evidence:** Five current pods, four values of 7 and one zero give adjusted ratio $28/5/5=1.12$ and recommendation $\lceil1.12\cdot5\rceil=6$ before controller limits. Submit metric freshness, configured tolerance, startup-state intervals, and offered-outcome SLI; retain timed-out work.
+- **Expected Evidence:**
+  - Five current pods, four values of 7 and one zero, give adjusted ratio $28/5/5=1.12$ and recommendation $\lceil1.12\cdot5\rceil=6$ before controller limits.
+  - Submit metric freshness, configured tolerance, startup-state intervals, and offered-outcome SLI; retain timed-out work.
 - **Common Failure:** Treating desired count as ready capacity, using CPU initialization rules for custom metrics, or calling an averaging window a fixed detection delay.
 - **Diagnostic Hint:** Mark first sample, recommendation, pod creation, engine-ready, and first useful completion separately.
 - **Concept to Revisit:** Measurement population; delayed actuation; transient queue conservation.
@@ -404,13 +769,44 @@ Replay the example with one missing sample instead of two and record original an
 Which startup phase should be optimized, when should capacity stay warm, and what isolation is lost by sharing a GPU?
 
 **Concepts & Definitions:**
-- **Cold start** rebuilds the resources needed to serve from the declared initial state. A warm node, cached image, local checkpoint, compile cache, live CUDA context, and retained weights are distinct cache states. Always name the starting state and endpoint: engine readiness and first token are not identical.
-- **Weight fetch** moves checkpoint bytes from storage; **device load** materializes weights on the GPU; **engine initialization** can include communication setup, compilation/cache loading, KV profiling, and graph capture. A faster loader need not shorten all engine initialization.
-- **Scale-to-zero** removes serving replicas; **keep-alive** retains them for idle interval $K$; **sleep** retains a process while releasing selected device allocations. They differ in billing, host memory, retained state, and wake work.
-- **MIG** partitions supported NVIDIA GPUs into GPU instances with hardware resource paths and documented QoS/fault isolation. **MPS** multiplexes client execution, with address-space protection but limited fault containment. **Time-slicing** advertises logical replicas sharing device time without memory or fault isolation. They are not interchangeable tenant security boundaries (**O**, CLM-053, CLM-054, CLM-055).
+- **Cold start** rebuilds the resources needed to serve from the declared initial state.
+  - A warm node, cached image, local checkpoint, compile cache, live CUDA context, and retained weights are distinct cache states.
+  - Always name the starting state and endpoint: engine readiness and first token are not identical.
+- Startup phases:
+  - **Weight fetch** moves checkpoint bytes from storage.
+  - **Device load** materializes weights on the GPU.
+  - **Engine initialization** can include communication setup, compilation/cache loading, KV profiling, and graph capture.
+  - A faster loader need not shorten all engine initialization.
+- Idle states differ in billing, host memory, retained state, and wake work:
+  - **Scale-to-zero** removes serving replicas.
+  - **Keep-alive** retains them for idle interval $K$.
+  - **Sleep** retains a process while releasing selected device allocations.
+- GPU sharing modes are not interchangeable tenant security boundaries (**O**, CLM-053, CLM-054, CLM-055):
+  - **MIG** partitions supported NVIDIA GPUs into GPU instances with hardware resource paths and documented QoS/fault isolation.
+  - **MPS** multiplexes client execution, with address-space protection but limited fault containment.
+  - **Time-slicing** advertises logical replicas sharing device time without memory or fault isolation.
 
 **Mechanism Explanation:**
-Instrument node provisioning, image pull/container creation, library import, CUDA context, checkpoint fetch, device load, engine init, ready transition, and first useful token. Attach model/runtime/GPU/configuration and cache state; retain failed/unfinished startups and requests in Lessons 23.2–23.3 accounting. Individual IDs belong in traces/ledgers, not metric labels. With overlap, report phase intervals and critical path rather than summing durations blindly.
+Instrument each phase:
+
+```mermaid
+flowchart LR
+    N["Node provisioning"] --> I["Image pull /<br/>container creation"]
+    I --> LI["Library import"]
+    LI --> CX["CUDA context"]
+    CX --> F["Checkpoint fetch"]
+    F --> DL["Device load"]
+    DL --> EI["Engine init"]
+    EI --> RD["Ready transition"]
+    RD --> FT["First useful token"]
+```
+
+- CUDA: GPU computing platform and context.
+- Phases may overlap; the chain shows instrumentation points, not a strict serial order.
+- Attach model/runtime/GPU/configuration and cache state.
+- Retain failed/unfinished startups and requests in Lessons 23.2–23.3 accounting.
+- Individual IDs belong in traces/ledgers, not metric labels.
+- With overlap, report phase intervals and critical path rather than summing durations blindly.
 
 The papers disagree about the dominant phase because they measure different systems:
 
@@ -423,31 +819,114 @@ The papers disagree about the dominant phase because they measure different syst
 
 **Measure each phase.** A network intervention is not justified by a graph-capture bottleneck, and a local checkpoint does not imply a warm engine. Node-provisioning latency has no verified primary measurement in the authorized dossier: measure it locally or leave it unknown.
 
-At pinned Knative code, scale-to-zero requires enabling it, a stable-window idle decision, the PA's active-age condition, and successful Activator-path/grace checks. Defaults include stable window 60 s, grace 30 s, retention 0, scale-down delay 0. These are separate gates, **not a guaranteed 90 s idle-to-zero timer**: prior PA age, existing Activator routing, probes and reconciliation change overlap and elapsed time. The activation failure path gives up after configured progress deadline plus a 30 s buffer; the default deadline was not verified (**O**, CLM-046).
+At pinned Knative code, scale-to-zero requires all of these gates (**O**, CLM-046):
 
-Pinned vLLM sleep documentation says level 1 offloads weights to CPU RAM and discards KV; level 2 discards parameters and KV and backs up other load-time allocations. `CuMemAllocator.sleep` backs up selected tagged allocations before unmapping; `wake_up` remaps and restores backed-up bytes. These are **main snapshot**, static observations, not executed timing results (**O**, CLM-057).
 
-The HTTP endpoints `POST /sleep`, `POST /wake_up`, and `GET /is_sleeping` require `VLLM_SERVER_DEV_MODE=1`. They are development-only controls and must not be exposed to users. Any experiment must isolate them behind an internal control plane with restricted access. Sleep is not permission to interrupt active requests; define admission stop, drain, state invalidation, and readiness before changing allocation state. Do not claim level 2 can restore discarded weights from a CPU backup that it never retained.
+
+- Defaults include stable window 60 s, grace 30 s, retention 0, scale-down delay 0.
+- These are separate gates, **not a guaranteed 90 s idle-to-zero timer**: prior PA age, existing Activator routing, probes and reconciliation change overlap and elapsed time.
+- The activation failure path gives up after configured progress deadline plus a 30 s buffer; the default deadline was not verified.
+- PA: PodAutoscaler resource.
+
+Pinned vLLM sleep (**main snapshot**, static observations, not executed timing results; **O**, CLM-057):
+- Documentation says level 1 offloads weights to CPU RAM and discards KV.
+- Level 2 discards parameters and KV and backs up other load-time allocations.
+- `CuMemAllocator.sleep` backs up selected tagged allocations before unmapping; `wake_up` remaps and restores backed-up bytes.
+
+Development endpoints:
+- The HTTP endpoints `POST /sleep`, `POST /wake_up`, and `GET /is_sleeping` require `VLLM_SERVER_DEV_MODE=1`.
+- They are development-only controls and must not be exposed to users. Any experiment must isolate them behind an internal control plane with restricted access.
+- Sleep is not permission to interrupt active requests; define admission stop, drain, state invalidation, and readiness before changing allocation state.
+- Do not claim level 2 can restore discarded weights from a CPU backup that it never retained.
+
+```mermaid
+stateDiagram-v2
+    Serving --> AdmissionStopped: stop admission
+    AdmissionStopped --> Drained: drain active requests
+    Drained --> Sleeping: invalidate state, POST /sleep (internal only)
+    Sleeping --> Waking: POST /wake_up (internal only)
+    Waking --> Ready: readiness check
+    Ready --> Serving
+```
 
 GPU-sharing choice must include failure and telemetry boundaries:
-- **MIG:** separate resource paths and documented QoS/fault isolation; verify supported GPU/profile and model plus KV fit before recommending a slice. No current profile sizes are asserted here (**O**, CLM-053).
-- **MPS:** isolated GPU address spaces do not imply an isolated service failure domain. On Volta+ a fatal GPU fault is reported to clients sharing affected GPUs, with limited containment; unsynchronized client termination can leave other clients/server undefined. Measure colocated latency and connect blast-radius planning to [Lesson 20.6](../20-distributed-inference/README.md#lesson-206--routing-across-replicas-stragglers-failure-and-recovery) (**O**, CLM-054).
-- **Time-slicing:** logical replica requests do not reserve proportional compute, nor provide memory/fault isolation. GPU Operator docs say DCGM Exporter cannot associate metrics with containers under time-slicing. Record the attribution blind spot rather than inventing per-tenant GPU SLIs (**O**, CLM-055).
+- **MIG** (**O**, CLM-053):
+  - Separate resource paths and documented QoS/fault isolation.
+  - Verify supported GPU/profile and model plus KV fit before recommending a slice.
+  - No current profile sizes are asserted here.
+- **MPS** (**O**, CLM-054):
+  - Isolated GPU address spaces do not imply an isolated service failure domain.
+  - On Volta+ a fatal GPU fault is reported to clients sharing affected GPUs, with limited containment.
+  - Unsynchronized client termination can leave other clients/server undefined.
+  - Measure colocated latency and connect blast-radius planning to [Lesson 20.6](../20-distributed-inference/README.md#lesson-206--routing-across-replicas-stragglers-failure-and-recovery).
+- **Time-slicing** (**O**, CLM-055):
+  - Logical replica requests do not reserve proportional compute, nor provide memory/fault isolation.
+  - GPU Operator docs say DCGM Exporter cannot associate metrics with containers under time-slicing.
+  - Record the attribution blind spot rather than inventing per-tenant GPU SLIs.
 
 **Quantitative Model / Derivation:**
-For sequential cold-start phases, $T_c=\sum_j T_j$; for overlap use the dependency graph's longest causal path. Payload-only floors are $T_{fetch}\ge S/B_{net}$ and $T_{h2d}\ge S/B_{h2d,aggregate}$, with bytes $S$ and measured effective bytes/s. Runtime construction and graph capture remain outside these payload bounds (**D**, CLM-056). Startup-to-ready may omit first-token work; do not add that work twice to Lesson 23.7's capacity timeline.
+Startup bounds (**D**, CLM-056):
+$$T_c=\sum_j T_j, \qquad T_{fetch}\ge \frac{S}{B_{net}}, \qquad T_{h2d}\ge \frac{S}{B_{h2d,agg}}$$
 
-Keep-warm economics uses [Lesson 22.2](../22-ai-economics/README.md#lesson-222--marginal-fixed-fully-loaded-and-build-versus-api-cost) for fully loaded costs and idle provisioned capacity, not new price quotations here. Let $c>0$ be idle warm cost per second, $G$ the idle gap in seconds, $K\ge0$ the keep-alive timeout, and $P$ the incremental cold-start penalty in the same cost units. $P$ includes loading resource charges plus explicitly valued SLO harm; avoid double counting useful request execution and separate nonmonetizable hard SLO constraints. Ignoring fixed costs common to both policies:
+where:
+- $T_c$: cold-start time (s); $T_j$: duration of sequential phase $j$ (s)
+- $S$: checkpoint payload (bytes)
+- $B_{net}$: measured effective network bandwidth (bytes/s)
+- $B_{h2d,agg}$: measured effective aggregate host-to-device bandwidth (bytes/s)
+- $T_{fetch}$, $T_{h2d}$: fetch and host-to-device copy time (s)
+
+- The sum holds for sequential phases only; for overlap use the dependency graph's longest causal path.
+- Runtime construction and graph capture remain outside these payload bounds.
+- Startup-to-ready may omit first-token work; do not add that work twice to Lesson 23.7's capacity timeline.
+
+Keep-warm economics uses [Lesson 22.2](../22-ai-economics/README.md#lesson-222--marginal-fixed-fully-loaded-and-build-versus-api-cost) for fully loaded costs and idle provisioned capacity, not new price quotations here. Ignoring fixed costs common to both policies:
 $$C(G,K)=c\min(G,K)+P\mathbf1[G>K].$$
+
+where:
+- $C(G,K)$: incremental cost of one idle gap (cost units)
+- $c>0$: idle warm cost per second (cost units/s)
+- $G$: idle gap (s)
+- $K\ge0$: keep-alive timeout (s)
+- $P$: incremental cold-start penalty (same cost units): loading resource charges plus explicitly valued SLO harm; avoid double counting useful request execution and separate nonmonetizable hard SLO constraints
+- $\mathbf1[G>K]$: 1 if the gap outlasts keep-alive (a cold start happens), else 0
+
 For **assumed exponential** gaps of mean $g>0$, $P(G>K)=e^{-K/g}$ and $E[\min(G,K)]=\int_0^K e^{-t/g}dt=g(1-e^{-K/g})$, so
 $$E[C]=cg(1-e^{-K/g})+Pe^{-K/g},\qquad
 \frac{dE[C]}{dK}=e^{-K/g}(c-P/g).$$
-If $P/g>c$, increasing $K$ lowers expected cost; if $P/g<c$, immediate zero minimizes this toy model. Equality makes all $K$ equivalent. This all-or-nothing optimum relies on memoryless gaps and constant penalty/cost. Empirical heavy-tailed gaps, cache tiers, changing penalty, and hard availability constraints require replay, not this optimum. Sleep adds residual host-memory/platform cost and a distinct wake penalty; do not equate released HBM with eliminated GPU billing (**D**, CLM-058). No competitive-ratio bound is asserted.
+
+where:
+- $c$: warm cost rate (cost units/s); $P$: cold-start penalty (cost units)
+- $K$: keep-alive timeout (s); $C$: gap cost (cost units)
+- $g$: mean idle gap (s)
+- $E[C]$: expected cost per gap (cost units)
+- $t$: integration variable (s)
+
+Reading the derivative (**D**, CLM-058):
+- If $P/g>c$, increasing $K$ lowers expected cost.
+- If $P/g<c$, immediate zero minimizes this toy model.
+- Equality makes all $K$ equivalent.
+- This all-or-nothing optimum relies on memoryless gaps and constant penalty/cost. Empirical heavy-tailed gaps, cache tiers, changing penalty, and hard availability constraints require replay, not this optimum.
+- Sleep adds residual host-memory/platform cost and a distinct wake penalty; do not equate released HBM with eliminated GPU billing.
+- No competitive-ratio bound is asserted.
 
 **Worked Example (Python-recomputed):**
-From HydraServe's **author-reported** phase inputs above, sum is $8.52+2.65+1.56+24.5+6.87+0.6=44.70$ s. Fetch share is $24.5/44.7=54.81\%$. A payload-only bound for 12.5 GB over 16 Gbps is $12.5\cdot8/16=6.25$ s; observed fetch implies $100/24.5=4.08$ Gbps. Contention is a candidate explanation, not proven by this bandwidth calculation alone. The 44.70 s first-token path is not a universal $T_c$.
+From HydraServe's **author-reported** phase inputs above:
+- Sum: $8.52+2.65+1.56+24.5+6.87+0.6=44.70$ s.
+- Fetch share: $24.5/44.7=54.81\%$.
+- Payload-only bound for 12.5 GB over 16 Gbps: $12.5\cdot8/16=6.25$ s.
+- Observed fetch implies $100/24.5=4.08$ Gbps.
+- Contention is a candidate explanation, not proven by this bandwidth calculation alone.
+- The 44.70 s first-token path is not a universal $T_c$.
 
-For a separate **synthetic economics fixture**, assume exponential mean gap $g=600$ s and cold-start resource cost equivalent to $44.7c$. With no assigned miss penalty, $P/g=0.0745c<c$; immediate zero costs $44.7c$, versus $600c$ keeping warm indefinitely. If SLO harm is valued at an additional $1800c$, then $P=1844.7c$ and $P/g=3.0745c>c$; keep warm wins. Here coefficients multiplying $c$ are seconds, not published dollar prices. A hard latency constraint can prohibit scale-to-zero regardless of this expected-cost comparison.
+For a separate **synthetic economics fixture**, assume exponential mean gap $g=600$ s and cold-start resource cost equivalent to $44.7c$:
+- No assigned miss penalty:
+  - $P/g=44.7c/600=0.0745c<c$.
+  - Immediate zero costs $44.7c$, versus $600c$ keeping warm indefinitely.
+- SLO harm valued at an additional $1800c$:
+  - $P=44.7c+1800c=1844.7c$.
+  - $P/g=3.0745c>c$; keep warm wins.
+- Coefficients multiplying $c$ are seconds, not published dollar prices.
+- A hard latency constraint can prohibit scale-to-zero regardless of this expected-cost comparison.
 
 **Knowledge Check:**
 1. Why do HydraServe and Foundry not establish a universal startup bottleneck?
@@ -456,7 +935,9 @@ For a separate **synthetic economics fixture**, assume exponential mean gap $g=6
 4. What assumption creates the all-or-nothing keep-alive result?
 
 **Guided Practice:**
-Build a startup span contract with cold/warm cache tiers, timeouts, and missing phases. Replace the synthetic gap distribution with an empirical trace; compare warm, sleep, and zero using symbolic Module 22 costs and a hard latency gate. For sharing, fill in memory isolation, fault domain, metric attribution, and model-fit evidence for MIG/MPS/time-slicing.
+Build a startup span contract with cold/warm cache tiers, timeouts, and missing phases.
+- Replace the synthetic gap distribution with an empirical trace; compare warm, sleep, and zero using symbolic Module 22 costs and a hard latency gate.
+- For sharing, fill in memory isolation, fault domain, metric attribution, and model-fit evidence for MIG/MPS/time-slicing.
 
 **Feedback Contract:**
 - **Expected Evidence:** Phase intervals and critical path; readiness versus first-token distinction; per-gap policy replay with resource and miss cost separated; isolation/attribution matrix; restricted development endpoint plan. Preserve timed-out startups in offered reliability.
@@ -481,10 +962,16 @@ Build a startup span contract with cold/warm cache tiers, timeouts, and missing 
 - Chapelle, delayed feedback: censored recent labels (**O**, CLM-030).
 
 **PLATFORM REFERENCES / WORKLOAD-DEPENDENT / FRONTIER**
-- [Kubernetes HPA docs](https://kubernetes.io/docs/concepts/workloads/autoscaling/horizontal-pod-autoscale/) (read 2026-11-10): control ratio and default tolerance; effective calculator behavior uses the code pin below (CLM-045). [GKE autoscaling guidance](https://cloud.google.com/kubernetes-engine/docs/best-practices/machine-learning/inference/autoscaling) (updated 2026-11-07, read 2026-11-10): GPU duty-cycle and preallocated-memory signal limits (CLM-047), vendor guidance not measured universal thresholds.
+- Autoscaling references:
+  - [Kubernetes HPA docs](https://kubernetes.io/docs/concepts/workloads/autoscaling/horizontal-pod-autoscale/) (read 2026-11-10): control ratio and default tolerance.
+    - Effective calculator behavior uses the code pin below (CLM-045).
+  - [GKE autoscaling guidance](https://cloud.google.com/kubernetes-engine/docs/best-practices/machine-learning/inference/autoscaling) (updated 2026-11-07, read 2026-11-10): GPU duty-cycle and preallocated-memory signal limits (CLM-047).
+    - Vendor guidance, not measured universal thresholds.
 - [HydraServe v2](https://arxiv.org/abs/2502.15524v2), Lou et al., 2025: §2.2, §8.1, Llama2-7B/A10 startup phases (CLM-049), WORKLOAD-DEPENDENT. [Foundry v1](https://arxiv.org/abs/2604.06664v1), Liu et al., 2026: §2, §6.1–6.2, graph-context materialization and H200 baseline conditions (CLM-050), FRONTIER preprint.
-- [BLITZSCALE v2](https://arxiv.org/abs/2412.17246v2), Zhang et al., 2025 revision: §1, §3, §6.3, optimized control/data-plane separation (CLM-051), FRONTIER. [ServerlessLLM v2](https://arxiv.org/abs/2401.14351v2), Fu et al., OSDI 2024: §2, §7.1–7.2, checkpoint loading and cache-conditioned baselines (CLM-052), REFERENCE. Author-reported, not reproduced; no garbled/parsed table values imported.
-- NVIDIA [MIG introduction](https://docs.nvidia.com/datacenter/tesla/mig-user-guide/introduction.html), [MPS when-to-use/limitations](https://docs.nvidia.com/deploy/mps/when-to-use-mps.html), and [GPU Operator time-slicing](https://docs.nvidia.com/datacenter/cloud-native/gpu-operator/latest/gpu-sharing.html), read 2026-11-10: isolation and metric attribution only (CLM-053–CLM-055). Supported profiles require separate verification.
+- [BLITZSCALE v2](https://arxiv.org/abs/2412.17246v2), Zhang et al., 2025 revision: §1, §3, §6.3, optimized control/data-plane separation (CLM-051), FRONTIER. [ServerlessLLM v2](https://arxiv.org/abs/2401.14351v2), Fu et al., OSDI 2024: §2, §7.1–7.2, checkpoint loading and cache-conditioned baselines (CLM-052), REFERENCE.
+  - Author-reported, not reproduced; no garbled/parsed table values imported.
+- NVIDIA [MIG introduction](https://docs.nvidia.com/datacenter/tesla/mig-user-guide/introduction.html), [MPS when-to-use/limitations](https://docs.nvidia.com/deploy/mps/when-to-use-mps.html), and [GPU Operator time-slicing](https://docs.nvidia.com/datacenter/cloud-native/gpu-operator/latest/gpu-sharing.html), read 2026-11-10: isolation and metric attribution only (CLM-053–CLM-055).
+  - Supported profiles require separate verification.
 
 **CURRENT DEFAULT (scoped)**
 - OpenTelemetry specification commit `32c0651edf148cfd67054274c5025ebb27773c38`: tracing sampler, processor, probability-sampling, and metric cardinality contracts (**O**, CLM-013, CLM-014, CLM-015, CLM-032).
@@ -511,9 +998,21 @@ Build a startup span contract with cold/warm cache tiers, timeouts, and missing 
 ---
 
 **PLATFORM SOURCE TRACE — static upstream snapshots, not release guarantees; dossier inspection 2026-11-10**
-- [kubernetes/kubernetes](https://github.com/kubernetes/kubernetes/blob/3197813cc57dfb94631f8f20bbb8fc5b5bb4e763/pkg/controller/podautoscaler/replica_calculator.go), master `3197813cc57dfb94631f8f20bbb8fc5b5bb4e763`: HPA metric entry → `GetResourceReplicas` / `calcPlainMetricReplicas` → pod grouping, ratio/tolerance, missing-metric recomputation; `getUsageRatioReplicaCount` provides the inspected external/object zero path (CLM-045). Controller defaulting and feature eligibility are not established by that helper.
-- [knative/serving](https://github.com/knative/serving/tree/c5e9503ca03323ba34a18715078148db31193634), `c5e9503ca03323ba34a18715078148db31193634`: `pkg/autoscaler/config/config.go::defaultConfig`; `pkg/reconciler/autoscaling/resources/{target.go,metric.go}::ResolveMetricTarget` and panic-window construction; `pkg/autoscaler/scaling/autoscaler.go::(*autoscaler).Scale`; `pkg/reconciler/autoscaling/kpa/scaler.go::handleScaleToZero`. Config → resolved targets/windows → recommendation/panic retention → Activator/grace gating (CLM-046).
-- [vllm-project/vllm](https://github.com/vllm-project/vllm/tree/feb4cb019f445b2b3cd2bd0ba0f258610100910e), main `feb4cb019f445b2b3cd2bd0ba0f258610100910e`: `docs/features/sleep_mode.md` documents levels and development endpoints; `vllm/device_allocator/cumem.py::CuMemAllocator.sleep/wake_up` backs up/remaps tagged allocations; `vllm/v1/metrics/loggers.py` exposes sleep-state, waiting/running and queue-time instruments (CLM-057). Internal state instrumentation is not permission to expose development endpoints.
+- [kubernetes/kubernetes](https://github.com/kubernetes/kubernetes/blob/3197813cc57dfb94631f8f20bbb8fc5b5bb4e763/pkg/controller/podautoscaler/replica_calculator.go), master `3197813cc57dfb94631f8f20bbb8fc5b5bb4e763` (CLM-045):
+  - HPA metric entry → `GetResourceReplicas` / `calcPlainMetricReplicas` → pod grouping, ratio/tolerance, missing-metric recomputation.
+  - `getUsageRatioReplicaCount` provides the inspected external/object zero path.
+  - Controller defaulting and feature eligibility are not established by that helper.
+- [knative/serving](https://github.com/knative/serving/tree/c5e9503ca03323ba34a18715078148db31193634), `c5e9503ca03323ba34a18715078148db31193634` (CLM-046):
+  - `pkg/autoscaler/config/config.go::defaultConfig`.
+  - `pkg/reconciler/autoscaling/resources/{target.go,metric.go}::ResolveMetricTarget` and panic-window construction.
+  - `pkg/autoscaler/scaling/autoscaler.go::(*autoscaler).Scale`.
+  - `pkg/reconciler/autoscaling/kpa/scaler.go::handleScaleToZero`.
+  - Config → resolved targets/windows → recommendation/panic retention → Activator/grace gating.
+- [vllm-project/vllm](https://github.com/vllm-project/vllm/tree/feb4cb019f445b2b3cd2bd0ba0f258610100910e), main `feb4cb019f445b2b3cd2bd0ba0f258610100910e` (CLM-057):
+  - `docs/features/sleep_mode.md` documents levels and development endpoints.
+  - `vllm/device_allocator/cumem.py::CuMemAllocator.sleep/wake_up` backs up/remaps tagged allocations.
+  - `vllm/v1/metrics/loggers.py` exposes sleep-state, waiting/running and queue-time instruments.
+  - Internal state instrumentation is not permission to expose development endpoints.
 - Generalization: HPA/KPA behavior is controller-specific; vLLM allocation details are runtime-specific. The reusable pattern is delayed actuation plus measured per-phase state transitions. No controller or GPU execution was performed for these observations.
 
 ### LAYER 2: ENGINEERING PRACTICE LAYER
@@ -521,7 +1020,6 @@ Build a startup span contract with cold/warm cache tiers, timeouts, and missing 
 ## 06 Engineering Labs
 
 All labs use `PREDICT → BUILD → MEASURE → BREAK → EXPLAIN → IMPROVE → FALSIFY → DEFEND`.
-
 ### LAB A — Signal Contract and Pinned Source Trace
 - **Objective**: Instrument a synthetic gateway→orchestrator→provider/tool path; emit logical/attempt evidence and a revisioned mapping layer; complete Section 09 trace.
 - **Hypothesis**: Revisioned mappings preserve queries across a simulated attribute rename; hard-coded queries break.
@@ -543,7 +1041,13 @@ All labs use `PREDICT → BUILD → MEASURE → BREAK → EXPLAIN → IMPROVE �
 - **Hypothesis**: Availability faults alert within 20% of derived time; quality regression and exporter loss require quality/completeness SLIs (**H**, CLM-040).
 - **Variables**: provider errors, timeouts, rejections, stalls, exporter loss, silent quality regression, traffic.
 - **Measurements**: alert time, budget at detection, precision/recall, reset time, completeness.
-- **Expected telemetry**: provider fault raises terminal `error`; timeout raises unfinished age then timeout; rejection changes offered/admitted gap; stall raises latency failures; exporter loss raises ingress/span gap and exporter drops without offered-outcome change; quality fault changes mature/corrected quality only.
+- **Expected telemetry**:
+  - Provider fault raises terminal `error`.
+  - Timeout raises unfinished age, then timeout.
+  - Rejection changes offered/admitted gap.
+  - Stall raises latency failures.
+  - Exporter loss raises ingress/span gap and exporter drops without offered-outcome change.
+  - Quality fault changes mature/corrected quality only.
 - **Alignment**: Lessons 23.3–23.4, 23.6. **Effort**: 3h.
 
 ### LAB D — Calibrated Quality with Delayed Labels
@@ -559,7 +1063,8 @@ All labs use `PREDICT → BUILD → MEASURE → BREAK → EXPLAIN → IMPROVE �
 - **Objective/Hypothesis:** predict whether reducing detection/startup delay lowers offered SLO misses more than changing replica target under a fixed synthetic burst. Predeclare a meaningful effect; reject the prediction if replay contradicts it.
 - **Variables:** target, tolerance, stable/panic windows, missing samples, readiness/startup delay, replica limits; preserve the same arrivals and service-curve assumptions from Lesson 4.7.
 - **Measure:** desired/current/ready/useful counts, sample age, time-to-capacity, queue age/backlog, offered misses/rejections/cancellations, idle replica-seconds. Compare predicted and observed queue conservation.
-- **Break/Explain/Improve/Falsify/Defend:** inject loading pods with missing metrics and a burst shorter than startup; discriminate sensor delay from actuator delay; test a proposed fix and a calm/no-burst counterexample. Account for admission outcomes rather than promising autoscaling eliminates overload.
+- **Break/Explain/Improve/Falsify/Defend:** inject loading pods with missing metrics and a burst shorter than startup; discriminate sensor delay from actuator delay; test a proposed fix and a calm/no-burst counterexample.
+  - Account for admission outcomes rather than promising autoscaling eliminates overload.
 - **Evidence/Alignment:** Lesson 23.7; runnable replay assertions, pinned calculator path, and recommendation versus useful-capacity timeline, assessed in D10. **Effort:** 3h; source reading shares the 2h source-trace budget, not another 3h task.
 
 ### LAB F — Startup Phases, Idle Policy, and Sharing Boundaries
@@ -567,7 +1072,8 @@ All labs use `PREDICT → BUILD → MEASURE → BREAK → EXPLAIN → IMPROVE �
 - **Objective/Hypothesis:** the best permitted warm/sleep/zero policy changes with measured startup/cache state and assigned miss cost; identify the flip condition before replay and reject the proposed policy if cost or a hard SLO gate fails.
 - **Variables:** gap trace, cache tier, startup phases, symbolic resource/miss costs, keep-alive, sharing choice; hold workload and SLO contract fixed.
 - **Measure:** phase intervals/critical path, ready and first-token clocks, cold-affected offered requests, timeouts/unfinished starts, idle cost and cold penalty separately, model/KV fit, isolation and telemetry blind spots.
-- **Break/Explain/Improve/Falsify/Defend:** swap a fetch-dominated trace for graph-dominated initialization; use long-tail gaps instead of exponential ones; add residual sleep costs and loss of container attribution under time-slicing. Reject unsafe tenant-isolation and public development-endpoint designs.
+- **Break/Explain/Improve/Falsify/Defend:** swap a fetch-dominated trace for graph-dominated initialization; use long-tail gaps instead of exponential ones; add residual sleep costs and loss of container attribution under time-slicing.
+  - Reject unsafe tenant-isolation and public development-endpoint designs.
 - **Evidence/Alignment:** Lesson 23.8; phase ledger, per-gap policy replay with assertions, MIG/MPS/time-slicing decision matrix, and guarded drain/wake/ready plan, assessed in D10. **Effort:** 3h, independent of guided practice; source reading shares existing budget.
 
 **Runnable model check (CPU; synthetic control/economic inputs, cited phase inputs):**
@@ -589,7 +1095,16 @@ assert 44.7 / 600 < 1 < 1844.7 / 600
 
 ### Incident 23.1 — Green Spans, Red Users
 
-**Synthetic symptoms:** At 10:05 a deployment changes retry and evaluator configuration. Offered requests remain 20k/min. Exported successful spans show 99.4%; offered good falls to 70%; exporter queue drops rise; cancellations triple; raw judge pass stays 91%; complaints are immature. 1% traces show provider timeouts, but tail sampling keeps errors. State-compatible rollback is available.
+**Synthetic symptoms:**
+- At 10:05 a deployment changes retry and evaluator configuration.
+- Offered requests remain 20k/min.
+- Exported successful spans show 99.4%; offered good falls to 70%.
+- Exporter queue drops rise; cancellations triple.
+- Raw judge pass stays 91%; complaints are immature.
+- 1% traces show provider timeouts, but tail sampling keeps errors.
+- State-compatible rollback is available.
+
+
 
 **Diagnostic Protocol:**
 1. **Mitigate and preserve**: verify compatibility, shift 50% traffic to prior deployment, freeze configs, preserve ingress/terminal/export/evaluator revisions.
@@ -610,7 +1125,13 @@ Expected runbook telemetry is defined in LAB C, making each synthetic fault test
 
 ### Transfer Fixture — Enterprise Assistant Reliability Contract
 
-Use registry exercise fixture (**CLM-043**, synthetic): 20M offered requests/30 days; 99.0% offered availability/latency SLO; judge calibration 230/250 accepted true-good and 117/150 rejected true-bad; raw judge pass 0.84; complaint delay 40%/75%/95% by 1/7/30 days; 9 spans/request at 1.5 KB; 30 KB content/request; 600 GB/30-day storage; proposed label cardinalities 4×2×4×8×5×6×1,200; premium tenant 30 req/h.
+Use registry exercise fixture (**CLM-043**, synthetic):
+- Traffic: 20M offered requests/30 days; premium tenant 30 req/h.
+- SLO: 99.0% offered availability/latency.
+- Judge calibration: 230/250 accepted true-good and 117/150 rejected true-bad; raw judge pass 0.84.
+- Complaint delay: 40%/75%/95% by 1/7/30 days.
+- Telemetry: 9 spans/request at 1.5 KB; 30 KB content/request; 600 GB/30-day storage.
+- Proposed label cardinalities: 4×2×4×8×5×6×1,200.
 
 **Numbered Deliverables:**
 1. Signal dictionary with boundaries, clocks, populations, terminal states, revision, and pinned source trace.
@@ -629,7 +1150,18 @@ Use registry exercise fixture (**CLM-043**, synthetic): 20M offered requests/30 
 
 **Required artifacts:** source trace; signal dictionary; request/terminal ledger; SLI and alert code; sampling simulator; calibration/delay workbook; governance budget; incident timeline; fault assertions.
 
-**Reference checks:** calibration `q1=230/250=.92`, `q0=117/150=.78`, denominator `.92+.78-1=.70`; corrected quality `(.84+.78-1)/.70=.8857`. Metric series with tenant = `4×2×4×8×5×6×1200=9,216,000`; without tenant = 7,680 (`4×2×4×8=256`, `×5=1,280`, `×6=7,680`, `×1,200=9,216,000`). Unsampled traces = `20M×9×1.5KB=270GB`; unsampled content = `20M×30KB=600GB`, already the full budget before trace/storage overhead. Any feasible plan must default content off or reduce it independently.
+**Reference checks:**
+- Calibration:
+  - $q_1 = 230 / 250 = 0.92$, $q_0 = 117 / 150 = 0.78$.
+  - Denominator: $0.92 + 0.78 - 1 = 0.70$.
+  - Corrected quality: $(0.84 + 0.78 - 1) / 0.70 = 0.8857$.
+- Metric series:
+  - Without tenant: $4 \times 2 \times 4 \times 8 = 256$, $\times 5 = 1{,}280$, $\times 6 = 7{,}680$.
+  - With tenant: $7{,}680 \times 1{,}200 = 9{,}216{,}000$.
+- Unsampled volume:
+  - Traces: $20\text{M} \times 9 \times 1.5$ KB $= 270$ GB.
+  - Content: $20\text{M} \times 30$ KB $= 600$ GB, already the full budget before trace/storage overhead.
+- Any feasible plan must default content off or reduce it independently.
 
 | Dimension | Insufficient | Competent | Strong |
 |---|---|---|---|
@@ -641,7 +1173,10 @@ Use registry exercise fixture (**CLM-043**, synthetic): 20M offered requests/30 
 | Incident | Guesses root cause | Mitigates, discriminates, remeasures | Handles interacting causes and failed rollback |
 | Source reasoning | Unpinned names | Exact revisions/files/status | Mapping layer plus static/executed limits |
 
-Platform extension evidence: D10 includes runnable queue/phase/cost assertions and source-versus-synthetic provenance. Insufficient substitutes replica counts for useful capacity or sharing for isolation; Competent measures startup/control phases and enforces SLO/isolation gates; Strong falsifies the proposed policy under changed cache, traffic, or fault-domain conditions.
+Platform extension evidence: D10 includes runnable queue/phase/cost assertions and source-versus-synthetic provenance.
+- Insufficient substitutes replica counts for useful capacity or sharing for isolation;
+- Competent measures startup/control phases and enforces SLO/isolation gates;
+- Strong falsifies the proposed policy under changed cache, traffic, or fault-domain conditions.
 
 ## 10 Capability Traceability Matrix
 
@@ -672,7 +1207,11 @@ A learner can exit when they can:
 
 7. Explain HPA/KPA control policies, distinguish recommendation from useful capacity, measure cold-start phases, and defend warm/sleep/zero and GPU-sharing choices with hard SLO and isolation gates (D10).
 
-**Final mental model:** Reliability evidence begins at offered ingress, not exported success. Traces explain individual causal paths; events record occurrences; metrics aggregate bounded populations; ledgers reconcile what telemetry can lose. Sampling saves cost but changes inference. Quality proxies accelerate response but never become ground truth. During incidents, preserve evidence and stop harm, then use measurements that separate hypotheses.
+**Final mental model:** Reliability evidence begins at offered ingress, not exported success.
+- Traces explain individual causal paths; events record occurrences; metrics aggregate bounded populations; ledgers reconcile what telemetry can lose.
+- Sampling saves cost but changes inference.
+- Quality proxies accelerate response but never become ground truth.
+- During incidents, preserve evidence and stop harm, then use measurements that separate hypotheses.
 
 ## 12 Competency Targets
 
