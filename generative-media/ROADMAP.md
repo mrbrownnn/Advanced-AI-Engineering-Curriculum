@@ -14,6 +14,7 @@ This track is designed to be completed during Month 4 of the program, alongside 
 
 ## Pacing
 
+- Effort: each module README budgets 7.5h (instruction, guided practice, two labs, assessment, source trace), so the track is 52.5h, ≈13 h/week over weeks 13–16, on top of core work
 - ~1–2 modules per week, alongside core track work
 - Focus on understanding architecture evolution (VAE → Diffusion → DiT → Flow Matching)
 - Emphasize serving costs, sampling steps, and memory footprint
