@@ -14,6 +14,7 @@ This track is designed to be completed during Month 2 of the program, alongside 
 
 ## Pacing
 
+- Effort: each module README budgets 7.5h (instruction, guided practice, two labs, assessment, source trace), so the track is 52.5h, ≈13 h/week over weeks 5–8, on top of core work
 - ~2 modules per week, alongside core track work
 - Emphasis on understanding architectures and serving implications
 - Not a deep training track — focus on engineering literacy

@@ -68,6 +68,8 @@
 | 5 | [World Models & Embodied AI](world-models-embodied-ai/) | Pairs with reasoning, planning, agents |
 | 6 | Integration through [Module 21](advanced-ai-engineering/21-multimodal-ai-systems/) and Capstone | Synthesis |
 
+> **Satellite workload.** Each satellite module budgets 7.5h, so the four tracks add ≈195h (VLM 52.5h, Speech 45h, Generative Media 52.5h, World Models 45h). These hours are **not** included in the ≈845–860h full-track total in [PATHS.md](PATHS.md). Pacing per track is in each track's `ROADMAP.md`.
+
 ---
 
 ## Capstone

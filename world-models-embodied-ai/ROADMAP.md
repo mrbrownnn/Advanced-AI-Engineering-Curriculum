@@ -13,6 +13,7 @@ This track is designed to be completed during Month 5 of the program, alongside 
 
 ## Pacing
 
+- Effort: each module README budgets 7.5h (instruction, guided practice, two labs, assessment, source trace), so the track is 45h, ≈9 h/week over weeks 17–21, on top of core work
 - ~1–2 modules per week, alongside core track work
 - Focus on architectural literacy: perception → world state → predict → plan → act
 - Emphasize differences between digital agent loops and physical embodiment

@@ -13,6 +13,7 @@ This track is designed to be completed during Month 3 of the program, alongside 
 
 ## Pacing
 
+- Effort: each module README budgets 7.5h (instruction, guided practice, two labs, assessment, source trace), so the track is 45h, ≈11 h/week over weeks 9–12, on top of core work
 - ~1–2 modules per week, alongside core track work
 - Focus on audio representation and voice agent systems engineering
 - Understand real-time latency constraints and streaming pipelines
